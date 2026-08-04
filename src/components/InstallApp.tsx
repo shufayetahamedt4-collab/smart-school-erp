@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Download, MonitorSmartphone, X, ArrowDownToLine, Sparkles } from "lucide-react";
 
 /**
@@ -83,11 +84,9 @@ export function InstallBanner() {
   const { installed, canPrompt, isIOS, promptInstall } = useInstallPrompt();
   const [dismissed, setDismissed] = useState(false);
   const [showIOSHelp, setShowIOSHelp] = useState(false);
-  const [pathname, setPathname] = useState("");
+  const pathname = usePathname();
 
-  useEffect(() => setPathname(window.location.pathname), []);
-
-  if (installed || dismissed || pathname.startsWith("/print")) return null;
+  if (installed || dismissed || pathname?.startsWith("/print")) return null;
 
   const installable = canPrompt || isIOS;
 
