@@ -19,7 +19,7 @@ env:
   # ⚠️ Replace with the real App Hosting URL after the first deploy
   # (e.g. https://smart-school-erp-XXXX.web.app), then with your custom domain.
   - variable: APP_URL
-    value: https://smart-school-erp.web.app
+    value: https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app
 
 runConfig:
   minInstances: 0
