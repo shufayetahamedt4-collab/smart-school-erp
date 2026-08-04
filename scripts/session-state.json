@@ -1,6 +1,6 @@
 {
-  "savedAt": "2026-08-04T01:05:56.698Z",
-  "step": "fixed save.mjs ordering (snapshot committed) + resume.mjs next-steps parser",
-  "gitHead": "c3b22ee",
-  "logLines": 58
+  "savedAt": "2026-08-04T01:06:41.162Z",
+  "step": "final polish: save leaves clean tree, resume parser stops at blockquotes",
+  "gitHead": "79e6b36",
+  "logLines": 59
 }

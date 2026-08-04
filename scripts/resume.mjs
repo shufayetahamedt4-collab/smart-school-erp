@@ -134,7 +134,11 @@ async function main() {
       // handle both "Next steps (in order):" and "**Next steps (in order):**"
       const m = sections[i].match(/Next steps \(in order\):\*{0,2}\s*\n?([\s\S]*?)(?=\n## |$)/);
       if (m) {
-        for (const l of m[1].trim().split("\n").filter(Boolean)) line("     " + l.trim());
+        for (const l of m[1].trim().split("\n").filter(Boolean)) {
+          const t = l.trim();
+          if (t === "---" || t.startsWith(">") || t.startsWith("**Post-review")) continue;
+          line("     " + t);
+        }
         found = true;
         break;
       }

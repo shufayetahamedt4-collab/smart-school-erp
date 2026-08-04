@@ -10,7 +10,7 @@
  *      (savedAt, step, git HEAD, log size) — the file resume.mjs reads.
  *   3. Auto-commits ALL current changes (including the log + snapshot) to git
  *      with a "progress: …" message, so an interrupted session loses nothing.
- *      (Nothing to commit → skips.)
+ *      (Nothing to commit → skips.) The working tree is left CLEAN.
  *
  * If the repo isn't initialized yet, git steps are skipped gracefully.
  */
@@ -29,32 +29,8 @@ const msg = process.argv.slice(2).join(" ").trim() || "progress checkpoint";
 // 1) checkpoint line
 checkpoint("SAVE", msg);
 
-// 2) machine-readable snapshot (written BEFORE the commit so it is committed too)
+// 2) git commit (best interruption protection)
 let gitHead = null;
-try {
-  gitHead = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
-    cwd: ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  }).trim();
-} catch {
-  gitHead = null;
-}
-
-let logLines = 0;
-try {
-  logLines = readFileSync(LOG, "utf8").split("\n").filter(Boolean).length;
-} catch {}
-
-const state = {
-  savedAt: new Date().toISOString(),
-  step: msg,
-  gitHead,
-  logLines,
-};
-writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-
-// 3) git commit (best interruption protection)
 let committed = false;
 try {
   const dirty = execFileSync("git", ["status", "--porcelain"], {
@@ -66,14 +42,36 @@ try {
     execFileSync("git", ["add", "-A"], { cwd: ROOT, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", `progress: ${msg}`], { cwd: ROOT, stdio: "ignore" });
     committed = true;
-    state.gitHead = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
-      cwd: ROOT,
-      encoding: "utf8",
-    }).trim();
   }
-  writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+  gitHead = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  }).trim();
 } catch (e) {
   console.log("  (git unavailable — commit skipped)");
+}
+
+// 3) machine-readable snapshot (folded into the same commit via amend)
+let logLines = 0;
+try {
+  logLines = readFileSync(LOG, "utf8").split("\n").filter(Boolean).length;
+} catch {}
+const state = {
+  savedAt: new Date().toISOString(),
+  step: msg,
+  gitHead,
+  logLines,
+};
+writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+
+try {
+  execFileSync("git", ["add", "--", path.relative(ROOT, STATE_FILE), path.relative(ROOT, LOG)], {
+    cwd: ROOT,
+    stdio: "ignore",
+  });
+  execFileSync("git", ["commit", "--amend", "--no-edit"], { cwd: ROOT, stdio: "ignore" });
+} catch {
+  // no git or nothing to amend — fine
 }
 
 console.log(`  🗂️  session-state.json → ${state.savedAt}`);
