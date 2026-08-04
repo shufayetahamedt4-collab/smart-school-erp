@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// Uploaded files are served publicly via Google Cloud Storage URLs.
+// Writes are done server-side with the Admin SDK (bypasses rules),
+// so direct client uploads are denied.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /uploads/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

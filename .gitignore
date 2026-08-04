@@ -1,0 +1,36 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# production
+/build
+
+# local env
+.env
+.env.local
+.env.production
+
+# 🔒 SECURITY: Firebase service-account keys must NEVER be committed
+service-account.json
+*-service-account*.json
+*.pem
+
+# firebase
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+storage-debug.log*
+*.cache
+
+# uploads (runtime files go to Firebase Storage now)
+/public/uploads/*
+!/public/uploads/.gitkeep
+
+# misc
+.DS_Store
+npm-debug.log*

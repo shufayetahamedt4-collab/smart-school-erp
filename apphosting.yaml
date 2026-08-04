@@ -1,0 +1,29 @@
+# Firebase App Hosting configuration.
+# Docs: https://firebase.google.com/docs/app-hosting
+
+env:
+  # Firebase Admin credentials (set via App Hosting secrets in the console,
+  # or reference an existing secret):
+  - variable: FIREBASE_PROJECT_ID
+    secret: FIREBASE_PROJECT_ID
+  - variable: FIREBASE_CLIENT_EMAIL
+    secret: FIREBASE_CLIENT_EMAIL
+  - variable: FIREBASE_PRIVATE_KEY
+    secret: FIREBASE_PRIVATE_KEY
+
+  # Auth
+  - variable: JWT_SECRET
+    secret: JWT_SECRET
+
+  # Public origin — used for QR links and storage download URLs.
+  # ⚠️ Replace with the real App Hosting URL after the first deploy
+  # (e.g. https://smart-school-erp-XXXX.web.app), then with your custom domain.
+  - variable: APP_URL
+    value: https://smart-school-erp.web.app
+
+runConfig:
+  minInstances: 0
+  maxInstances: 10
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512

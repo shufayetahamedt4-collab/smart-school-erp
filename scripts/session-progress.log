@@ -1,0 +1,56 @@
+[2026-08-03 06:44:12] seed — settings + super admin done
+[2026-08-03 06:44:15] seed — school + feeSettings done
+[2026-08-03 06:44:16] seed — school admin user done
+[2026-08-03 06:44:35] seed — classes + sections + subjects done
+[2026-08-03 06:44:51] seed — settings + super admin done
+[2026-08-03 06:44:51] seed — teachers + assignments done
+[2026-08-03 06:44:53] seed — school + feeSettings done
+[2026-08-03 06:44:55] seed — school admin user done
+[2026-08-03 06:45:12] seed — students + guardian accounts done
+[2026-08-03 06:45:14] seed — classes + sections + subjects done
+[2026-08-03 06:45:23] seed — fees done
+[2026-08-03 06:45:32] seed — teachers + assignments done
+[2026-08-03 06:45:54] seed — students + guardian accounts done
+[2026-08-03 06:46:06] seed — fees done
+[2026-08-03 06:46:57] seed — attendance done
+[2026-08-03 06:47:21] seed — remarks + homework done
+[2026-08-03 06:47:38] seed — exam + marks done
+[2026-08-03 06:47:40] seed — notices + routine done
+[2026-08-03 06:47:41] seed — messages done
+[2026-08-03 06:47:41] seed — SEED COMPLETE — all phases logged
+[2026-08-03 06:47:46] seed — attendance done
+[2026-08-03 06:48:11] seed — remarks + homework done
+[2026-08-03 06:48:30] seed — exam + marks done
+[2026-08-03 06:48:32] seed — notices + routine done
+[2026-08-03 06:48:33] seed — messages done
+[2026-08-03 06:48:33] seed — SEED COMPLETE — all phases logged
+[2026-08-03 06:50:26] SESSION — resumed after power outage: fixed .env private key (double-escaped), built checkpoint tooling, npm run setup SEED COMPLETE, check-seed all green. Next: deploy rules.
+[2026-08-03 06:53:44] BLOCKER — firebase deploy rules FAILED 403: CLI account himelfaysalahmed103@gmail.com has no access to project amar-e-school (not in projects:list). Fix: login with owner account or grant IAM. Seed/Admin SDK unaffected.
+[2026-08-03 07:04:04] ✅ RULES DEPLOYED — switched CLI to shufayetahamedt4@gmail.com; firestore:rules + storage rules released to amar-e-school. Next: git init + commit, then UI test.
+[2026-08-03 07:11:39] ✅ APP RUNNING — dev server on :3000, super admin login OK, /api/schools returns Sunrise Intl School (14 students/4 teachers) from Firestore. UI test PASSED (login + admin + data).
+[2026-08-03 16:49:55] seed — settings + super admin done
+[2026-08-03 16:49:58] seed — school + feeSettings done
+[2026-08-03 16:49:59] seed — school admin user done
+[2026-08-03 16:50:11] seed — classes + sections + subjects done
+[2026-08-03 16:50:22] seed — teachers + assignments done
+[2026-08-03 16:50:35] seed — students + guardian accounts done
+[2026-08-03 16:50:42] seed — fees done
+[2026-08-03 16:51:41] seed — attendance done
+[2026-08-03 16:51:56] seed — remarks + homework done
+[2026-08-03 16:52:08] seed — exam + marks done
+[2026-08-03 16:52:09] seed — notices + routine done
+[2026-08-03 16:52:10] seed — messages done
+[2026-08-03 16:52:10] seed — SEED COMPLETE — all phases logged
+[2026-08-04 00:25:19] seed — settings + super admin done
+[2026-08-04 00:25:22] seed — school + feeSettings done
+[2026-08-04 00:25:23] seed — school admin user done
+[2026-08-04 00:25:38] seed — classes + sections + subjects done
+[2026-08-04 00:25:57] seed — teachers + assignments done
+[2026-08-04 00:26:11] seed — students + guardian accounts done
+[2026-08-04 00:26:19] seed — fees done
+[2026-08-04 00:27:42] seed — attendance done
+[2026-08-04 00:28:07] seed — remarks + homework done
+[2026-08-04 00:28:20] seed — exam + marks done
+[2026-08-04 00:28:21] seed — notices + routine done
+[2026-08-04 00:28:22] seed — messages done
+[2026-08-04 00:28:22] seed — SEED COMPLETE — all phases logged

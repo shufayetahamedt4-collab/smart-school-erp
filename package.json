@@ -1,0 +1,40 @@
+{
+  "name": "smart-school-erp",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Smart School ERP & Parent Communication System (Multi-Tenant SaaS) — Firebase edition",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "seed": "node scripts/seed.mjs",
+    "setup": "node scripts/setup.mjs",
+    "firebase:login": "firebase login",
+    "firebase:deploy": "firebase deploy --only firestore:rules,storage"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "firebase-admin": "^13.3.0",
+    "html2canvas": "^1.4.1",
+    "jose": "^6.0.11",
+    "jspdf": "^2.5.2",
+    "lucide-react": "^0.468.0",
+    "next": "^15.3.4",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "recharts": "^2.15.4",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^22.15.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "firebase-tools": "^13.30.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.8.3"
+  }
+}
