@@ -8,7 +8,7 @@
  *  - Static assets (/icons, /manifest.json, /_next/static): stale-while-revalidate.
  *  - Cross-origin requests (Firebase Storage, etc.): untouched.
  */
-const CACHE_NAME = "smart-school-erp-v1";
+const CACHE_NAME = "amar-e-school-v1";
 const STATIC_PREFIXES = ["/_next/static/", "/icons/", "/manifest.json"];
 
 // Routes that can contain personal data — never cached by this SW.

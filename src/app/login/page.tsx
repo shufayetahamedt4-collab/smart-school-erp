@@ -59,7 +59,7 @@ function LoginInner() {
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-900/40">
             <GraduationCap size={20} />
           </div>
-          <span className="text-lg font-extrabold tracking-tight">Smart School ERP</span>
+          <span className="text-lg font-extrabold tracking-tight">Amar E School</span>
         </Link>
 
         <div className="relative">
@@ -81,7 +81,7 @@ function LoginInner() {
             ))}
           </ul>
         </div>
-        <p className="relative text-xs text-slate-500">© 2026 Smart School ERP · Demo environment</p>
+        <p className="relative text-xs text-slate-500">© 2026 Amar E School · Demo environment</p>
       </div>
 
       {/* right form */}
@@ -92,7 +92,7 @@ function LoginInner() {
               <GraduationCap size={22} />
             </div>
             <h1 className="text-2xl font-black tracking-tight text-slate-900">Welcome back</h1>
-            <p className="mt-1 text-sm text-slate-500">Sign in to your Smart School ERP console.</p>
+            <p className="mt-1 text-sm text-slate-500">Sign in to your Amar E School console.</p>
           </div>
 
           <form onSubmit={submit} className="space-y-4">

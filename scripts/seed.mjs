@@ -110,7 +110,7 @@ const clean = (obj) => {
 
 async function main() {
   // ------------------------------------------------------------------ settings
-  await setIfMissing("settings", settingDoc("site_name"), { key: "site_name", value: "Smart School ERP" });
+  await setIfMissing("settings", settingDoc("site_name"), { key: "site_name", value: "Amar E School" });
 
   // ------------------------------------------------------------- super admin
   const superAdminId = userDoc("admin@smartschool.com");

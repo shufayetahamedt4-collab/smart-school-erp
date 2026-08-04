@@ -52,7 +52,7 @@ export default function WelcomePage() {
               <GraduationCap size={19} />
             </div>
             <span className="text-base font-extrabold tracking-tight text-slate-900">
-              Smart School <span className="text-indigo-600">ERP</span>
+              Amar <span className="text-indigo-600">E School</span>
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -186,7 +186,7 @@ export default function WelcomePage() {
       </section>
 
       <footer className="border-t border-slate-200 bg-white py-8 text-center text-xs text-slate-400">
-        Smart School ERP &amp; Parent Communication System · Multi-Tenant SaaS · Installable web app (PWA)
+        Amar E School · Multi-Tenant SaaS · Installable web app (PWA)
       </footer>
     </div>
   );

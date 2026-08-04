@@ -97,7 +97,7 @@ export function InstallBanner() {
           <MonitorSmartphone size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-bold text-slate-800">Install Smart School ERP</div>
+          <div className="text-[13px] font-bold text-slate-800">Install Amar E School</div>
           <div className="truncate text-[11px] text-slate-500">One-tap access from your home screen</div>
         </div>
         {installable ? (
@@ -163,7 +163,7 @@ export function InstallSection() {
             Install the app. No app store required.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-slate-500">
-            Add Smart School ERP straight to your phone or computer home screen — teachers mark attendance and
+            Add Amar E School straight to your phone or computer home screen — teachers mark attendance and
             guardians get updates in one tap, even with a flaky connection.
           </p>
         </div>

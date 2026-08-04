@@ -3,14 +3,14 @@ import { InstallBanner } from "@/components/InstallApp";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Smart School ERP", template: "%s · Smart School ERP" },
+  title: { default: "Amar E School", template: "%s · Amar E School" },
   description:
-    "Smart School ERP & Parent Communication System — a multi-tenant SaaS platform for kindergartens, schools and coaching institutes.",
+    "Amar E School — a multi-tenant SaaS platform for kindergartens, schools and coaching institutes.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Smart School ERP",
+    title: "Amar E School",
   },
   icons: {
     icon: [

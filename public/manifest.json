@@ -1,7 +1,7 @@
 {
-  "name": "Smart School ERP",
-  "short_name": "Smart School",
-  "description": "Smart School ERP & Parent Communication System — manage your school and keep guardians in the loop.",
+  "name": "Amar E School",
+  "short_name": "Amar E School",
+  "description": "Amar E School — manage your school and keep guardians in the loop.",
   "id": "/",
   "start_url": "/login",
   "scope": "/",

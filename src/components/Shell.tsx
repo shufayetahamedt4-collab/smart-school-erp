@@ -189,7 +189,7 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
             {me?.school ? (
               <div className="truncate text-sm font-bold text-slate-800">{me.school.name}</div>
             ) : (
-              <div className="text-sm font-bold text-slate-800">Smart School ERP</div>
+              <div className="text-sm font-bold text-slate-800">Amar E School</div>
             )}
             <div className="hidden text-[11px] uppercase tracking-widest text-slate-400 sm:block">
               {role.replace("_", " ")}
@@ -219,7 +219,7 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
         <main className="flex-1 px-4 py-6 md:px-8">{children}</main>
 
         <footer className="no-print border-t border-slate-200 px-6 py-4 text-center text-xs text-slate-400">
-          Smart School ERP &amp; Parent Communication System · Multi-Tenant SaaS
+          Amar E School · Multi-Tenant SaaS
         </footer>
       </div>
     </div>
@@ -246,7 +246,7 @@ function SidebarContent({
           {role === "SUPER_ADMIN" ? <Crown size={20} /> : <GraduationCap size={20} />}
         </div>
         <div className="min-w-0">
-          <div className="truncate text-sm font-extrabold text-white">{role === "SUPER_ADMIN" ? "Platform Admin" : schoolName || "Smart School"}</div>
+          <div className="truncate text-sm font-extrabold text-white">{role === "SUPER_ADMIN" ? "Platform Admin" : schoolName || "Amar E School"}</div>
           <div className="text-[10px] uppercase tracking-widest text-slate-400">ERP Console</div>
         </div>
         <button className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 lg:hidden" onClick={onClose}>
