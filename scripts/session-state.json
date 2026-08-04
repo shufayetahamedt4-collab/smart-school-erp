@@ -1,6 +1,6 @@
 {
-  "savedAt": "2026-08-04T01:08:30.165Z",
-  "step": "hardened save.mjs: secret guard + clearer git errors",
-  "gitHead": "ffa9768",
-  "logLines": 60
+  "savedAt": "2026-08-04T01:08:31.153Z",
+  "step": "should be REFUSED",
+  "gitHead": "5b5bf9b",
+  "logLines": 61
 }
