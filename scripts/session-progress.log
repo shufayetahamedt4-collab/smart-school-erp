@@ -57,3 +57,4 @@
 [2026-08-04 01:05:02] SAVE — resume system added: save.mjs + resume.mjs + npm scripts + PROGRESS convention
 [2026-08-04 01:05:56] SAVE — fixed save.mjs ordering (snapshot committed) + resume.mjs next-steps parser
 [2026-08-04 01:06:40] SAVE — final polish: save leaves clean tree, resume parser stops at blockquotes
+[2026-08-04 01:08:29] SAVE — hardened save.mjs: secret guard + clearer git errors

@@ -36,7 +36,7 @@ function readEnv() {
 }
 
 function envValue(env, key) {
-  const m = env.match(new RegExp(`^${key}\\s*=\\s*(.*)$`, "m"));
+  const m = env.match(new RegExp(`^${key}(?=\\s*=).*?=\\s*(.*)$`, "m"));
   if (!m) return null;
   return m[1].trim().replace(/^["']|["']$/g, "").replace(/\\n/g, "\n");
 }
@@ -136,7 +136,8 @@ async function main() {
       if (m) {
         for (const l of m[1].trim().split("\n").filter(Boolean)) {
           const t = l.trim();
-          if (t === "---" || t.startsWith(">") || t.startsWith("**Post-review")) continue;
+          // skip dividers and blockquote notes — only show actionable steps
+          if (t === "---" || t.startsWith(">") || t === "" || /^\*\*/.test(t)) continue;
           line("     " + t);
         }
         found = true;

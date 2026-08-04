@@ -1,6 +1,6 @@
 {
-  "savedAt": "2026-08-04T01:06:41.162Z",
-  "step": "final polish: save leaves clean tree, resume parser stops at blockquotes",
-  "gitHead": "79e6b36",
-  "logLines": 59
+  "savedAt": "2026-08-04T01:08:30.165Z",
+  "step": "hardened save.mjs: secret guard + clearer git errors",
+  "gitHead": "ffa9768",
+  "logLines": 60
 }
