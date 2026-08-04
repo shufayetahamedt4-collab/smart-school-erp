@@ -1,6 +1,6 @@
 {
-  "savedAt": "2026-08-04T01:09:30.173Z",
-  "step": "PROGRESS: documented secret guard",
-  "gitHead": "7bfad53",
-  "logLines": 65
+  "savedAt": "2026-08-04T01:17:45.991Z",
+  "step": "added scripts/deploy-guide.md — full App Hosting deployment checklist",
+  "gitHead": "dff55e4",
+  "logLines": 66
 }
