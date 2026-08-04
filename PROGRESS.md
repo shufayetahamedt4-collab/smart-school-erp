@@ -183,3 +183,5 @@ The resume screen also sanity-checks `.env` (the historical #1 blocker was a dou
 - Git repo initialized on `main` with 2 commits; working tree clean.
 - Production build verified; `npm start` running on :3000.
 - Deployment to Firebase App Hosting is the ONLY remaining big step (needs owner's GitHub push + console secrets).
+
+> **Hardening (same session):** `save.mjs` now REFUSES to commit if any staged file looks like a secret (`service-account`, `.env*`, `*.pem`, `private_key`) — belt-and-braces on top of `.gitignore`. Tested: normal saves leave a clean tree; a `stripe-secret.env` attack file was refused with exit code 1. `npm run resume` also sanity-checks git identity and reports the exact git error if a commit fails.
