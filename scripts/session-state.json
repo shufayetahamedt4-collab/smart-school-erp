@@ -1,0 +1,6 @@
+{
+  "savedAt": "2026-08-04T01:05:56.698Z",
+  "step": "fixed save.mjs ordering (snapshot committed) + resume.mjs next-steps parser",
+  "gitHead": "c3b22ee",
+  "logLines": 58
+}

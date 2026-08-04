@@ -15,7 +15,7 @@
  * (Firestore read-only; reports seed phase status).
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -123,20 +123,24 @@ async function main() {
     line(jwt && jwt !== "change-me-to-a-long-random-string" ? "     JWT_SECRET: ✅ set" : "     JWT_SECRET: ⚠️ default/empty — set a long random value");
   }
 
-  // 6) next steps from PROGRESS.md
+  // 6) next steps from PROGRESS.md (latest section wins)
   line("");
-  line("  🎯 Next steps (last 'Next steps' section in PROGRESS.md):");
+  line("  🎯 Next steps (latest list in PROGRESS.md):");
+  let found = false;
   try {
     const p = readFileSync(path.join(ROOT, "PROGRESS.md"), "utf8");
     const sections = p.split(/\n## /);
     for (let i = sections.length - 1; i >= 0; i--) {
-      const m = sections[i].match(/Next steps \(in order\):\n([\s\S]*?)(?=\n## |$)/);
+      // handle both "Next steps (in order):" and "**Next steps (in order):**"
+      const m = sections[i].match(/Next steps \(in order\):\*{0,2}\s*\n?([\s\S]*?)(?=\n## |$)/);
       if (m) {
         for (const l of m[1].trim().split("\n").filter(Boolean)) line("     " + l.trim());
+        found = true;
         break;
       }
     }
   } catch {}
+  if (!found) line("     (no \"Next steps (in order):\" list found yet)");
   line("     Full context: open PROGRESS.md");
 
   if (withSeed) {
