@@ -156,3 +156,30 @@ So interruptions (power cuts etc.) never lose progress again:
 3. Later: connect custom domain (Domain → App Hosting in Firebase), set APP_URL to it; optional Phase 5 features (AI remarks, SMS/push/email, bKash/Nagad/card payments).
 
 > **Post-review hardening (same session):** SW no longer caches private role pages (/admin, /dashboard, /teacher, /parent, /print, /qr) — offline fallback for those is /offline.html only (privacy fix). `InstallBanner` uses `usePathname()` (no print-page flash). `next.config.mjs` adds `Cache-Control: no-cache` for `/sw.js` + `/manifest.json` so PWA updates propagate fast. Note: SW is only registered in production (`NODE_ENV !== "development"`) — the install button won't appear during `npm run dev`; test PWA with `npm run build && npm start`. Committed as 7ef93e6 + 2nd commit.
+
+---
+
+## 💾 SAVE / RESUME CONVENTION (from 2026-08-04)
+
+**Rule: after EVERY meaningful step, run `npm run save "<what just happened>"`.**
+
+It does three things in one command:
+1. Appends a timestamped checkpoint → `scripts/session-progress.log`
+2. Writes a machine-readable snapshot → `scripts/session-state.json` (what resume.mjs reads)
+3. Auto-commits ALL changes to git with `progress: <msg>` — so a power cut / crash loses **nothing**
+
+**Resuming after any interruption (power cut, crash, new machine):**
+```bash
+cd E:\SmartSchoolERP
+npm run resume          # one screen: last checkpoint, git state, server status, .env sanity, next steps
+npm run resume -- --seed  # optional: also checks Firestore seed state (read-only)
+# then read PROGRESS.md → do the next item on the list
+```
+
+The resume screen also sanity-checks `.env` (the historical #1 blocker was a double-escaped `FIREBASE_PRIVATE_KEY`).
+
+**Snapshot now (PWA + go-live prep done, this session):**
+- PWA fully implemented & browser-verified (manifest, SW with privacy fix, icons, install banner + section).
+- Git repo initialized on `main` with 2 commits; working tree clean.
+- Production build verified; `npm start` running on :3000.
+- Deployment to Firebase App Hosting is the ONLY remaining big step (needs owner's GitHub push + console secrets).

@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "seed": "node scripts/seed.mjs",
     "setup": "node scripts/setup.mjs",
+    "save": "node scripts/save.mjs",
+    "resume": "node scripts/resume.mjs",
     "firebase:login": "firebase login",
     "firebase:deploy": "firebase deploy --only firestore:rules,storage"
   },
