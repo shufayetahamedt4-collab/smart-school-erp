@@ -713,6 +713,60 @@ async function main() {
     checkpoint("seed", "PRD notifications demo done");
   }
 
+  // ------------------------------------------------------- PRD §12.1 Phase 2: plans + demo subscription
+  const planDefs = [
+    { key: "trial", name: "Trial", price: 0, cycle: "MONTHLY", maxStudents: 50, trialDays: 14, features: ["All core modules", "Up to 50 students"] },
+    { key: "basic", name: "Basic", price: 3000, cycle: "MONTHLY", maxStudents: 200, trialDays: null, features: ["All core modules", "Up to 200 students", "Push notifications"] },
+    { key: "premium", name: "Premium", price: 8000, cycle: "MONTHLY", maxStudents: null, trialDays: null, features: ["Everything in Basic", "Unlimited students", "White-label branding", "Priority support"] },
+  ];
+  const planIds = {};
+  for (const p of planDefs) {
+    const id = `plan_${p.key}`;
+    planIds[p.key] = id;
+    await setIfMissing("plans", id, {
+      name: p.name,
+      price: p.price,
+      cycle: p.cycle,
+      maxStudents: p.maxStudents,
+      trialDays: p.trialDays,
+      features: p.features,
+      createdAt: new Date(),
+    });
+  }
+  console.log("✓ Plans seeded (Trial / Basic / Premium)");
+
+  const subCount = await db.collection("subscriptions").where("schoolId", "==", schoolId).get();
+  if (subCount.empty) {
+    const periodEnd = day(30);
+    await db.collection("subscriptions").doc().set({
+      schoolId,
+      planId: planIds.premium,
+      status: "ACTIVE",
+      cycle: "MONTHLY",
+      startedAt: day(-30),
+      currentPeriodEnd: periodEnd,
+      createdAt: new Date(),
+    });
+    await db.collection("invoices").add({
+      schoolId,
+      planId: planIds.premium,
+      invoiceNo: `INV-${new Date().getFullYear()}-SEED0001`,
+      amount: 8000,
+      status: "PAID",
+      issueDate: day(-30),
+      dueDate: day(-23),
+      periodStart: day(-30),
+      periodEnd,
+      method: "BANK",
+      refNo: "SEED-SUB-0001",
+      paidAt: day(-25),
+      note: "Premium plan — monthly cycle",
+      createdAt: new Date(),
+    });
+    console.log("✓ Demo subscription + invoice seeded (Sunrise → Premium)");
+    checkpoint("seed", "PRD plans + subscription demo done");
+  }
+
   checkpoint("seed", "SEED COMPLETE — all phases logged");
   const studentsCount = (await db.collection("students").where("schoolId", "==", schoolId).get()).size;
   const teachersCount = (await db.collection("teachers").where("schoolId", "==", schoolId).get()).size;

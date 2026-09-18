@@ -18,12 +18,30 @@ interface SchoolRow {
   feeSetting?: { monthlyFee: number } | null;
 }
 
+interface SubLite {
+  id: string;
+  status: string;
+  cycle: string;
+  currentPeriodEnd: string | null;
+  plan?: { name: string; price: string | number } | null;
+  school?: { id: string } | null;
+}
+
 export default function AdminDashboard() {
   const [schools, setSchools] = useState<SchoolRow[]>([]);
+  const [subs, setSubs] = useState<SubLite[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api<SchoolRow[]>("/api/schools").then(setSchools).finally(() => setLoading(false));
+    Promise.all([
+      api<SchoolRow[]>("/api/schools"),
+      api<{ subscriptions: SubLite[] }>("/api/subscriptions").catch(() => ({ subscriptions: [] as SubLite[] })),
+    ])
+      .then(([s, sub]) => {
+        setSchools(s);
+        setSubs(sub.subscriptions || []);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <LoadingScreen label="Loading platform…" />;
@@ -31,7 +49,11 @@ export default function AdminDashboard() {
   const active = schools.filter((s) => s.status !== "SUSPENDED");
   const totalStudents = schools.reduce((a, s) => a + s._count.students, 0);
   const totalTeachers = schools.reduce((a, s) => a + s._count.teachers, 0);
-  const monthlyRevenue = active.reduce((a, s) => a + (Number(s.feeSetting?.monthlyFee || 0) * s._count.students), 0);
+  // Real MRR from platform subscriptions (PRD §12.1) — plan price normalized
+  // to a month. Falls back to 0 until plans are assigned.
+  const monthlyRevenue = subs
+    .filter((s) => s.status === "ACTIVE" || s.status === "TRIAL")
+    .reduce((a, s) => a + Number(s.plan?.price || 0) / (s.cycle === "YEARLY" ? 12 : 1), 0);
 
   return (
     <div>
@@ -41,7 +63,7 @@ export default function AdminDashboard() {
         <StatCard icon={Building2} label="Total Schools" value={schools.length} sub={`${active.length} active · ${schools.length - active.length} suspended`} tone="indigo" />
         <StatCard icon={GraduationCap} label="Students" value={totalStudents.toLocaleString()} sub="across all schools" tone="sky" />
         <StatCard icon={Users} label="Teachers" value={totalTeachers.toLocaleString()} sub="across all schools" tone="violet" />
-        <StatCard icon={Wallet} label="Est. MRR" value={fmtMoney(monthlyRevenue)} sub="based on monthly fees × students" tone="emerald" />
+        <StatCard icon={Wallet} label="Platform MRR" value={fmtMoney(monthlyRevenue)} sub="from school subscriptions" tone="emerald" />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">

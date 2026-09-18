@@ -69,6 +69,15 @@ const EXPECTED = {
   payments: 0,
   auditLogs: 0,
   submissions: 0,
+  // ---- PRD v1.2 demo collections (seeded when demo data present) ----
+  admissions: 0,
+  ledger: 0,
+  conversations: 0,
+  notifications: 0,
+  // ---- PRD §12.1 Phase 2: plans + subscription demo ----
+  plans: 3,
+  subscriptions: 0,
+  invoices: 0,
 };
 
 /** Seed phases in execution order, with the collection(s) that prove them. */
@@ -83,6 +92,8 @@ const PHASES = [
   { name: "8. remarks + homework", prove: ["remarks", "homeworks"] },
   { name: "9. exam + marks", prove: ["exams", "marks"] },
   { name: "10. notices + routine + messages", prove: ["notices", "routines", "messages"] },
+  { name: "11. PRD v1.2 demo (admissions + ledger + chat + notifications)", prove: ["admissions", "ledger"] },
+  { name: "12. plans + subscription demo (§12.1)", prove: ["plans"] },
 ];
 
 async function countAll() {
@@ -152,11 +163,17 @@ async function main() {
   if (incomplete.length === 0) {
     console.log("✅ Seed appears COMPLETE. Nothing to re-run (re-running is harmless anyway).");
   } else {
-    const first = incomplete[0];
-    console.log("⏸️  Seed INTERRUPTED. It stopped during phase \"" + first.name + "\".");
-    console.log("   → Fix: run  npm run setup  — it is idempotent and will fill in the missing parts.");
-    if (first.name !== "1. settings + super admin") {
-      console.log("   (Earlier phases are complete; the re-run will skip them and continue.)");
+    const demoOnly = incomplete.filter((p) => /^(11|12)\./.test(p.name));
+    if (demoOnly.length === incomplete.length && demoOnly.length > 0) {
+      console.log("✅ Core seed COMPLETE — only optional demo collections are missing (phases 11–12).");
+      console.log("   → Run  npm run seed  to add the PRD demo data (admissions/ledger/chat, plans/subscription).");
+    } else {
+      const first = incomplete[0];
+      console.log("⏸️  Seed INTERRUPTED. It stopped during phase \"" + first.name + "\".");
+      console.log("   → Fix: run  npm run setup  — it is idempotent and will fill in the missing parts.");
+      if (first.name !== "1. settings + super admin") {
+        console.log("   (Earlier phases are complete; the re-run will skip them and continue.)");
+      }
     }
   }
   console.log("");

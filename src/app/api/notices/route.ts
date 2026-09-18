@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
+import { writeGuard } from "@/lib/subscription";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -24,6 +25,8 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const schoolId = session.schoolId!;
+  const locked = await writeGuard(schoolId);
+  if (locked) return locked; // PRD §12.1 — subscription auto-lock
   const body = await req.json().catch(() => null);
   const title = String(body?.title || "").trim();
   const bodyText = String(body?.body || "").trim();

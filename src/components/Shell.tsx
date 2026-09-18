@@ -31,6 +31,8 @@ import {
   Inbox,
   ArrowUpRight,
   FolderOpen,
+  CreditCard,
+  BookUp,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/client";
@@ -55,6 +57,7 @@ export interface Me {
     logoUrl: string | null;
     plan: string;
     status: string;
+    themeColor?: string | null;
   } | null;
   student?: {
     id: string;
@@ -64,6 +67,15 @@ export interface Me {
     classRoom?: { name: string } | null;
     section?: { name: string } | null;
   } | null;
+}
+
+/** PRD §12.2 white-label: paint the UI with the school's brand color. */
+export function applyBrandColor(themeColor?: string | null) {
+  if (typeof document === "undefined" || !themeColor) return;
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(String(themeColor).trim());
+  if (!m) return;
+  const n = parseInt(m[1], 16);
+  document.documentElement.style.setProperty("--brand", `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`);
 }
 
 interface NavItem {
@@ -76,6 +88,7 @@ const NAVS: Record<string, NavItem[]> = {
   SUPER_ADMIN: [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/schools", label: "Schools", icon: School },
+    { href: "/admin/billing", label: "Billing & Plans", icon: CreditCard },
     { href: "/admin/settings", label: "Global Settings", icon: Settings },
   ],
   SCHOOL_ADMIN: [
@@ -95,6 +108,7 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/gallery", label: "Gallery", icon: Images },
     { href: "/dashboard/complaints", label: "Feedback Box", icon: Inbox },
     { href: "/dashboard/promotion", label: "Promotion & Alumni", icon: ArrowUpRight },
+    { href: "/dashboard/library", label: "Library & Books", icon: BookOpen },
     { href: "/dashboard/resources", label: "Materials", icon: FolderOpen },
     { href: "/dashboard/guardians", label: "Guardians", icon: ShieldCheck },
     { href: "/dashboard/id-cards", label: "ID Cards", icon: IdCard },
@@ -110,9 +124,17 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/teacher/marks", label: "Marks Entry", icon: FileText },
     { href: "/teacher/results", label: "Results", icon: BarChart3 },
     { href: "/teacher/resources", label: "My Materials", icon: FolderOpen },
+    { href: "/teacher/quizzes", label: "Quizzes", icon: ClipboardList },
     { href: "/teacher/leaves", label: "My Leaves", icon: CalendarX2 },
     { href: "/teacher/meetings", label: "PTM Slots", icon: CalendarCheck },
     { href: "/teacher/messages", label: "Messages", icon: MessageSquare },
+  ],
+  STUDENT: [
+    { href: "/student", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/student/homework", label: "Homework", icon: BookOpen },
+    { href: "/student/quizzes", label: "Quizzes", icon: ClipboardList },
+    { href: "/student/results", label: "My Results", icon: FileText },
+    { href: "/student/resources", label: "Digital Library", icon: FolderOpen },
   ],
   GUARDIAN: [
     { href: "/parent", label: "Dashboard", icon: LayoutDashboard },
@@ -121,6 +143,7 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/parent/remarks", label: "Teacher Remarks", icon: MessageSquare },
     { href: "/parent/results", label: "Exam Results", icon: FileText },
     { href: "/parent/fees", label: "Fees & Payments", icon: Wallet },
+    { href: "/parent/books", label: "My Books", icon: BookUp },
     { href: "/parent/resources", label: "Class Materials", icon: FolderOpen },
     { href: "/parent/gallery", label: "Gallery", icon: Images },
     { href: "/parent/meetings", label: "Book PTM", icon: CalendarCheck },
@@ -141,6 +164,7 @@ export function useMe() {
     try {
       const data = await api<Me>("/api/auth/me");
       setMe(data);
+      applyBrandColor(data?.school?.themeColor);
       setError(null);
     } catch (e: any) {
       if (e?.status === 401) {
@@ -229,7 +253,7 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
               <Link href="/qr" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 sm:flex">
                 <QrCode size={15} /> QR Login
               </Link>
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-bold text-white">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full brand-bg text-xs font-bold text-white">
                 {initials(user.name)}
               </div>
               <div className="hidden md:block">
@@ -269,7 +293,7 @@ function SidebarContent({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 px-5 py-5">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-lg font-black text-white shadow-lg shadow-indigo-900/40">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl brand-bg text-lg font-black text-white shadow-lg">
           {role === "SUPER_ADMIN" ? <Crown size={20} /> : <GraduationCap size={20} />}
         </div>
         <div className="min-w-0">
@@ -291,7 +315,7 @@ function SidebarContent({
               onClick={onClose}
               className={cn(
                 "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-semibold transition-all",
-                isActive ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/40" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                isActive ? "brand-bg text-white shadow-md" : "text-slate-300 hover:bg-slate-800 hover:text-white"
               )}
             >
               <item.icon size={17} className={isActive ? "" : "text-slate-400"} />

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
+import { writeGuard } from "@/lib/subscription";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
-  if (!session || !["SCHOOL_ADMIN", "TEACHER", "GUARDIAN"].includes(session.role)) {
+  if (!session || !["SCHOOL_ADMIN", "TEACHER", "GUARDIAN", "STUDENT"].includes(session.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const schoolId = session.schoolId!;
@@ -23,6 +24,17 @@ export async function GET(req: NextRequest) {
     const student = studentId
       ? await prisma.student.findUnique({ where: { id: studentId } })
       : await prisma.student.findFirst({ where: { guardianUserId: session.id } });
+    if (!student) return NextResponse.json({ data: [] });
+    where = { schoolId, classId: student.classId || undefined };
+    if (student.sectionId) where.sectionId = student.sectionId;
+    const subs = await prisma.homeworkSubmission.findMany({ where: { studentId: student.id } });
+    mySubmissionMap = Object.fromEntries(subs.map((s) => [s.homeworkId, s.status]));
+  }
+
+  if (session.role === "STUDENT") {
+    // PRD §7.2 — students see homework for their own class, with their own
+    // submission status (and submitted file link).
+    const student = await prisma.student.findFirst({ where: { userId: session.id } });
     if (!student) return NextResponse.json({ data: [] });
     where = { schoolId, classId: student.classId || undefined };
     if (student.sectionId) where.sectionId = student.sectionId;
@@ -58,6 +70,8 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session || session.role !== "TEACHER") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const schoolId = session.schoolId!;
+  const locked = await writeGuard(schoolId);
+  if (locked) return locked; // PRD §12.1 — subscription auto-lock
   const teacher = await prisma.teacher.findUnique({ where: { userId: session.id } });
   if (!teacher) return NextResponse.json({ error: "Teacher profile not found." }, { status: 400 });
 
