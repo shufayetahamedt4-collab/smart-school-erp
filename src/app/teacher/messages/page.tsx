@@ -1,13 +1,13 @@
 "use client";
 
 import { PageHeader } from "@/components/ui";
-import { MessagesPanel } from "@/components/MessagesPanel";
+import { ChatPanel } from "@/components/ChatPanel";
 
 export default function TeacherMessagesPage() {
   return (
     <div>
-      <PageHeader title="Messages" subtitle="Chat with guardians of your students" />
-      <MessagesPanel />
+      <PageHeader title="Messages" subtitle="Live chat with guardians (PRD §7.1 two-way chat)" />
+      <ChatPanel />
     </div>
   );
 }

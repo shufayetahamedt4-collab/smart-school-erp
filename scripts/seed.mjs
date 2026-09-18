@@ -594,6 +594,125 @@ async function main() {
   }
 
   checkpoint("seed", "messages done");
+
+  // ------------------------------------------------------- PRD v1.2 demo data (admissions, ledger, chat, notifications)
+  // Admission pipeline (§4): two enquiries + one seat-confirmed applicant.
+  const admCount = await db.collection("admissions").where("schoolId", "==", schoolId).get();
+  if (admCount.empty) {
+    await db.collection("admissions").add({
+      schoolId,
+      fullName: "Ayesha Rahman",
+      fullNameBn: "আয়েশা রহমান",
+      guardianName: "Mizanur Rahman",
+      guardianPhone: "+8801711000001",
+      guardianEmail: "ayesha.parent@demo.com",
+      previousSchoolName: "Little Stars KG",
+      previousClass: "Class 1",
+      status: "ENQUIRY",
+      source: "ONLINE_FORM",
+      createdAt: new Date(),
+    });
+    await db.collection("admissions").add({
+      schoolId,
+      fullName: "Tanvir Hasan",
+      guardianName: "Nusrat Hasan",
+      guardianPhone: "+8801711000002",
+      previousSchoolName: "Sunshine Academy",
+      previousClass: "Class 2",
+      status: "SEAT_CONFIRMED",
+      source: "WALK_IN",
+      classId: classRooms["Class 2"]?.id || null,
+      admissionNo: "ADM-26001",
+      admissionFee: 5000,
+      payableAmount: 5000,
+      createdAt: new Date(),
+    });
+    checkpoint("seed", "PRD admissions demo done");
+  }
+
+  // Ledger entries (§10.1) mirroring the seeded fees/payments, so the ledger
+  // page shows data on first run.
+  const ledgerCount = await db.collection("ledger").where("schoolId", "==", schoolId).get();
+  if (ledgerCount.empty) {
+    const feesSnap = await db.collection("fees").where("schoolId", "==", schoolId).limit(10).get();
+    for (const f of feesSnap.docs) {
+      const fee = f.data();
+      await db.collection("ledger").add({
+        schoolId,
+        kind: "FEE",
+        amount: Number(fee.amount) || 0,
+        status: "CONFIRMED",
+        studentId: fee.studentId || null,
+        feeId: f.id,
+        actorId: userDoc("principal@sunrise.edu"),
+        description: `Fee created: ${fee.title}`,
+        createdAt: new Date(),
+      });
+      if ((Number(fee.paidAmount) || 0) > 0) {
+        await db.collection("ledger").add({
+          schoolId,
+          kind: "PAYMENT",
+          amount: Number(fee.paidAmount),
+          method: "CASH",
+          status: "CONFIRMED",
+          studentId: fee.studentId || null,
+          feeId: f.id,
+          actorId: userDoc("principal@sunrise.edu"),
+          description: `Payment for ${fee.title}`,
+          refNo: `SEED-${f.id.slice(-6)}`,
+          createdAt: new Date(),
+        });
+      }
+    }
+    checkpoint("seed", "PRD ledger demo done");
+  }
+
+  // Two-way chat conversation (§7.1) between the demo teacher and guardian.
+  const convCount = await db.collection("conversations").where("schoolId", "==", schoolId).get();
+  if (convCount.empty) {
+    const g = await db.collection("users").where("role", "==", "GUARDIAN").where("schoolId", "==", schoolId).limit(1).get();
+    if (!g.empty) {
+      const teacherUserId = userDoc("teacher@sunrise.edu");
+      const guardianUserId = g.docs[0].id;
+      const partyKey = [teacherUserId, guardianUserId, "-"].join("__");
+      const convRef = db.collection("conversations").doc(`cv_${sha1(partyKey)}`);
+      await convRef.set({
+        schoolId,
+        partyKey,
+        teacherUserId,
+        guardianUserId,
+        studentId: null,
+        lastMessageAt: new Date(),
+        createdAt: new Date(),
+      });
+      await convRef.collection("noop").doc("noop").set({}); // keep id deterministic
+      await db.collection("conversationMessages").add({
+        conversationId: convRef.id,
+        senderId: teacherUserId,
+        body: "Welcome to live chat! Message me anytime about your child's progress.",
+        createdAt: new Date(),
+        readAt: null,
+      });
+      checkpoint("seed", "PRD chat demo done");
+    }
+  }
+
+  // A sample notification for the school admin (§13 notification center).
+  const notifCount = await db.collection("notifications").where("schoolId", "==", schoolId).get();
+  if (notifCount.empty) {
+    await db.collection("notifications").add({
+      schoolId,
+      userId: userDoc("principal@sunrise.edu"),
+      event: "ADMISSION_STATUS",
+      title: "New admission enquiry",
+      body: "Ayesha Rahman (guardian +8801711000001) submitted an online enquiry.",
+      link: "/dashboard/admissions",
+      readAt: null,
+      createdAt: new Date(),
+    });
+    checkpoint("seed", "PRD notifications demo done");
+  }
+
   checkpoint("seed", "SEED COMPLETE — all phases logged");
   const studentsCount = (await db.collection("students").where("schoolId", "==", schoolId).get()).size;
   const teachersCount = (await db.collection("teachers").where("schoolId", "==", schoolId).get()).size;

@@ -8,17 +8,22 @@ const secret = () => new TextEncoder().encode(process.env.JWT_SECRET || "smart-s
 
 const GUARDS: { prefix: string; roles: string[] }[] = [
   { prefix: "/admin", roles: ["SUPER_ADMIN"] },
-  { prefix: "/dashboard", roles: ["SCHOOL_ADMIN"] },
+  { prefix: "/dashboard", roles: ["SCHOOL_ADMIN", "ACCOUNTANT", "LIBRARIAN", "FRONT_DESK"] },
   { prefix: "/teacher", roles: ["TEACHER"] },
   { prefix: "/parent", roles: ["GUARDIAN"] },
-  { prefix: "/print", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "GUARDIAN"] },
+  { prefix: "/student", roles: ["STUDENT"] },
+  { prefix: "/print", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "ACCOUNTANT", "LIBRARIAN", "FRONT_DESK", "TEACHER", "GUARDIAN", "STUDENT"] },
 ];
 
 const HOME: Record<string, string> = {
   SUPER_ADMIN: "/admin",
   SCHOOL_ADMIN: "/dashboard",
+  ACCOUNTANT: "/dashboard/fees",
+  LIBRARIAN: "/dashboard/library",
+  FRONT_DESK: "/dashboard/admissions",
   TEACHER: "/teacher",
   GUARDIAN: "/parent",
+  STUDENT: "/student",
 };
 
 export async function middleware(req: NextRequest) {

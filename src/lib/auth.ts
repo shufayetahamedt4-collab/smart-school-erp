@@ -46,20 +46,7 @@ export async function getSessionOrThrow(): Promise<SessionUser> {
   return session;
 }
 
-export function homeForRole(role: Role | string): string {
-  switch (role) {
-    case "SUPER_ADMIN":
-      return "/admin";
-    case "SCHOOL_ADMIN":
-      return "/dashboard";
-    case "TEACHER":
-      return "/teacher";
-    case "GUARDIAN":
-      return "/parent";
-    default:
-      return "/login";
-  }
-}
+export { homeForRole } from "./permissions";
 
 export function guardRole(session: SessionUser | null, ...roles: Role[]): session is SessionUser {
   return !!session && roles.includes(session.role);

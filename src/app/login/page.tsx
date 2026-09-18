@@ -3,7 +3,7 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { GraduationCap, LogIn, Eye, EyeOff, AlertCircle, Check } from "lucide-react";
+import { GraduationCap, LogIn, Eye, EyeOff, AlertCircle, Check, ShieldCheck, KeyRound } from "lucide-react";
 import { api } from "@/lib/client";
 import { Spinner } from "@/components/ui";
 
@@ -30,20 +30,59 @@ function LoginInner() {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // 2FA challenge state (PRD §14.1)
+  const [challenge, setChallenge] = useState<{ challengeId: string; email: string | null } | null>(null);
+  const [totp, setTotp] = useState("");
+  // forgot-password flow (PRD §3.2)
+  const [mode, setMode] = useState<"login" | "forgot">("login");
+  const [forgotMsg, setForgotMsg] = useState("");
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const res = await api<{ redirect: string }>("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ identifier, password }),
-      });
+      if (challenge) {
+        const res = await api<{ redirect: string }>("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ purpose: "2fa", challengeId: challenge.challengeId, totp }),
+        });
+        const next = searchParams.get("next");
+        router.replace(next || res.redirect);
+        return;
+      }
+      const res = await api<{ redirect: string; twoFactorRequired?: boolean; challengeId?: string; email?: string }>(
+        "/api/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify({ identifier, password }),
+        }
+      );
+      if (res.twoFactorRequired && res.challengeId) {
+        setChallenge({ challengeId: res.challengeId, email: res.email || null });
+        return;
+      }
       const next = searchParams.get("next");
       router.replace(next || res.redirect);
     } catch (err: any) {
       setError(err?.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const res = await api<{ message: string }>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ purpose: "forgot", identifier }),
+      });
+      setForgotMsg(res.message || "Check your email for the reset code.");
+    } catch (err: any) {
+      setError(err?.message || "Could not send reset code");
     } finally {
       setLoading(false);
     }
@@ -95,6 +134,72 @@ function LoginInner() {
             <p className="mt-1 text-sm text-slate-500">Sign in to your Amar E School console.</p>
           </div>
 
+          {challenge ? (
+            /* ---------------- 2FA verification step ---------------- */
+            <form onSubmit={submit} className="space-y-4">
+              <div className="flex items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3">
+                <ShieldCheck size={20} className="shrink-0 text-indigo-600" />
+                <div className="text-xs text-slate-600">
+                  <p className="text-sm font-bold text-slate-800">Two-factor verification</p>
+                  <p>Enter the 6-digit code from your authenticator app{challenge.email ? ` for ${challenge.email}` : ""}. A backup code also works.</p>
+                </div>
+              </div>
+              {error && (
+                <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" /> {error}
+                </div>
+              )}
+              <div>
+                <label htmlFor="totp" className="label">Verification code</label>
+                <input
+                  id="totp"
+                  name="totp"
+                  className="input tracking-[0.4em] text-center text-lg font-bold"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="000000"
+                  maxLength={10}
+                  value={totp}
+                  onChange={(e) => setTotp(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" disabled={loading} className="btn btn-primary w-full !py-3">
+                {loading ? <Spinner className="h-4 w-4 border-white/40 border-t-white" /> : <ShieldCheck size={16} />}
+                {loading ? "Verifying…" : "Verify & sign in"}
+              </button>
+              <button type="button" onClick={() => { setChallenge(null); setTotp(""); setError(""); }} className="btn btn-ghost w-full">
+                ← Back to login
+              </button>
+            </form>
+          ) : mode === "forgot" ? (
+            /* ---------------- forgot password step ---------------- */
+            <form onSubmit={submitForgot} className="space-y-4">
+              <div className="flex items-center gap-3 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3">
+                <KeyRound size={20} className="shrink-0 text-sky-600" />
+                <p className="text-xs text-slate-600">Enter your account email — we'll send a one-time reset code.</p>
+              </div>
+              {forgotMsg && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-700">{forgotMsg}</div>
+              )}
+              {error && (
+                <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" /> {error}
+                </div>
+              )}
+              <div>
+                <label htmlFor="fEmail" className="label">Email</label>
+                <input id="fEmail" className="input" type="email" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required />
+              </div>
+              <button type="submit" disabled={loading} className="btn btn-primary w-full !py-3">
+                {loading ? <Spinner className="h-4 w-4 border-white/40 border-t-white" /> : <KeyRound size={16} />}
+                Send reset code
+              </button>
+              <button type="button" onClick={() => { setMode("login"); setForgotMsg(""); setError(""); }} className="btn btn-ghost w-full">
+                ← Back to login
+              </button>
+            </form>
+          ) : (
           <form onSubmit={submit} className="space-y-4">
             {error && (
               <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
@@ -137,7 +242,16 @@ function LoginInner() {
               {loading ? <Spinner className="h-4 w-4 border-white/40 border-t-white" /> : <LogIn size={16} />}
               {loading ? "Signing in…" : "Sign in"}
             </button>
+            <div className="flex items-center justify-between text-xs">
+              <button type="button" onClick={() => { setMode("forgot"); setError(""); }} className="font-semibold text-indigo-600 hover:underline">
+                Forgot password?
+              </button>
+              <Link href="/qr" className="font-semibold text-slate-500 hover:underline">
+                QR login
+              </Link>
+            </div>
           </form>
+          )}
 
           <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-4">
             <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Demo accounts — click to fill</p>

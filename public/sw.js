@@ -12,7 +12,42 @@ const CACHE_NAME = "amar-e-school-v1";
 const STATIC_PREFIXES = ["/_next/static/", "/icons/", "/manifest.json"];
 
 // Routes that can contain personal data — never cached by this SW.
-const PRIVATE_PREFIXES = ["/admin", "/dashboard", "/teacher", "/parent", "/print", "/qr"];
+const PRIVATE_PREFIXES = ["/admin", "/dashboard", "/teacher", "/parent", "/student", "/print", "/qr"];
+
+// PRD §7.1/§13 — FCM web push: show the notification when a push arrives.
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { notification: { title: "Amar E School", body: event.data ? event.data.text() : "" } };
+  }
+  const n = payload.notification || {};
+  event.waitUntil(
+    self.registration.showNotification(n.title || "Amar E School", {
+      body: n.body || "",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      data: { link: (payload.webpush && payload.webpush.fcmOptions && payload.webpush.fcmOptions.link) || "/" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const link = (event.notification.data && event.notification.data.link) || "/";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if (client.url.includes(self.location.origin)) {
+          client.navigate(link);
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(link);
+    })
+  );
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

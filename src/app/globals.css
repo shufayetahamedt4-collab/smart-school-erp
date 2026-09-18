@@ -6,6 +6,57 @@
 
 :root {
   color-scheme: light;
+
+  /* ---- PRD §14.2 design tokens: role accent colors ---- */
+  --accent-admin: 79 70 229; /* blue/indigo */
+  --accent-teacher: 5 150 105; /* green/emerald */
+  --accent-guardian: 234 88 12; /* orange */
+  --accent: var(--accent-admin);
+  --accent-soft: 238 242 255;
+}
+
+/* Dark mode (PRD §14.2) — toggled by ThemeToggle via html[data-theme] */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --accent-soft: 30 41 59;
+}
+html[data-theme="dark"] body {
+  background-color: #0b1220;
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .card {
+  background: #101a2e;
+  border-color: #1e293b;
+}
+html[data-theme="dark"] .input {
+  background: #0d1626;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .btn-secondary {
+  background: #101a2e;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+html[data-theme="dark"] .btn-secondary:hover:not(:disabled) {
+  background: #16213a;
+}
+html[data-theme="dark"] .btn-ghost {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .btn-ghost:hover:not(:disabled) {
+  background: #1e293b;
+}
+html[data-theme="dark"] .th,
+html[data-theme="dark"] .label {
+  color: #94a3b8;
+}
+html[data-theme="dark"] .td {
+  color: #cbd5e1;
+  border-bottom-color: #1e293b;
+}
+html[data-theme="dark"] .tr-hover:hover {
+  background: #16213a;
 }
 
 html,
@@ -162,6 +213,47 @@ body {
 }
 .fade-up {
   animation: fadeUp 0.3s ease both;
+}
+
+/* ---- PRD §14.2 loading skeletons + micro-interactions ---- */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  border-radius: 0.75rem;
+  background: linear-gradient(90deg, rgb(226 232 240 / 0.55) 25%, rgb(203 213 225 / 0.9) 37%, rgb(226 232 240 / 0.55) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+html[data-theme="dark"] .skeleton {
+  background: linear-gradient(90deg, rgb(30 41 59 / 0.6) 25%, rgb(51 65 85 / 0.9) 37%, rgb(30 41 59 / 0.6) 63%);
+  background-size: 400% 100%;
+}
+.skeleton-text {
+  height: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.skeleton-card {
+  height: 7rem;
+}
+
+/* role accent helpers (Admin=blue, Teacher=green, Guardian=orange) */
+.accent-bg {
+  background: rgb(var(--accent) / 1);
+}
+.accent-text {
+  color: rgb(var(--accent) / 1);
+}
+.accent-soft-bg {
+  background: rgb(var(--accent) / 0.08);
+}
+html[data-theme="dark"] .accent-soft-bg {
+  background: rgb(var(--accent) / 0.18);
 }
 
 @media print {

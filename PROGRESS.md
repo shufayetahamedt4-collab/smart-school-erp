@@ -5,38 +5,58 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** `E:\SmartSchoolERP`
-**Last updated:** 2026-08-03
+**Last updated:** 2026-09-18
 
 ---
 
-## ✅ Current Status
+## 🔁 Session — 2026-09-18 (PRD v1.2 implementation — Phases 0–4)
 
-**Firebase migration COMPLETE and VERIFIED.** The app no longer uses Prisma/PostgreSQL — it runs entirely on **Cloud Firestore + Cloud Storage**, and is ready for public deployment via **Firebase App Hosting**.
+**Input:** `Smart_School_ERP_Requirements_v1.2_ENGLISH.docx` (17 sections). Working tree was first restored to `origin/main` (previous uncommitted work backed up to `../_uncommitted-backup/`, including the Product Scanner). Then the full PRD plan (approved by owner) was implemented.
 
-### What was done this session (Firebase migration)
+### Done this session (all typecheck + build green)
 
-1. **New data layer** — `src/lib/db.ts` is now a **Prisma-compatible API backed by Firestore** (`findMany`, `findUnique`, `findFirst`, `count`, `create`, `createMany`, `update`, `updateMany`, `upsert`, `delete`, `deleteMany`, `$transaction`, `include`/`select`/`orderBy`/`take`). All 30 API routes + 2 print pages + auth keep their original business logic — only the storage engine changed.
-2. **Firebase init** — `src/lib/firebase.ts` (Admin SDK; supports `FIREBASE_PROJECT_ID`/`FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY` env vars **or** `GOOGLE_APPLICATION_CREDENTIALS` service-account JSON).
-3. **Auth unchanged** — JWT (jose) sessions in the `ss_token` cookie, role guards in `src/middleware.ts`, `audit()` now writes to the `auditLogs` Firestore collection.
-4. **Uploads → Cloud Storage** — `POST /api/uploads` now writes student photos / attachments to Firebase Storage instead of local disk (App Hosting filesystems are ephemeral).
-5. **Seed rewritten** — `scripts/seed.mjs` seeds Firestore with the same demo data (1 school, 5 classes × 2 sections, 7 subjects, 4 teachers, 14 students, exam+marks, 8 days attendance, notices, routine, messages, 56 fees). Deterministic IDs → **idempotent**.
-6. **Removed Postgres** — deleted `prisma/`, `.pgdata/`, `scripts/db.mjs`; package.json now uses `firebase-admin` and dropped `@prisma/client`, `prisma`, `@embedded-postgres/*`. Password hashing stays on `bcryptjs` (pure JS — no native build step on App Hosting).
-7. **Config files added** — `firestore.rules`, `storage.rules`, `firebase.json`, `.firebaserc`, `apphosting.yaml`, updated `.env` / `.env.example` / `.gitignore`.
-8. **Review-hardening fixes** (from code review): `idFor` now only trusts string `where.id` (avoids garbage ids for `{ id: { in } }`), nested `update` for `oneInverse` relations resolves the child via `where(via, ==, parentId)` instead of silently no-oping, and `setup.mjs`'s `.env` parser now handles multi-line double-quoted values (e.g. a raw PEM key).
-9. **Verified green:**
-   - ✅ `npm run typecheck` → **0 errors**
-   - ✅ `npm run build` → **success** (all routes compiled, middleware included)
-   - ✅ `setup.mjs` `.env` parser smoke-tested (single-line, quoted, and multi-line PEM values)
-   - ⚠️ Known limitation: `$transaction` callback form runs ops sequentially without rollback (Firestore Admin SDK can't match Prisma's DB transactions); the array form uses an atomic `WriteBatch`. No current route depends on rollback semantics.
+**Phase 0 — Foundation**
+1. **Roles (§2):** `Role` now includes `STUDENT`, `ACCOUNTANT`, `LIBRARIAN`, `FRONT_DESK`. Middleware guards `/student`; sub-roles enter `/dashboard` (permission-controlled views, per PRD note under §2).
+2. **Permission matrix (§2.1/§14.1):** `src/lib/permissions.ts` — module × role → actions, `can()` + `requirePermission()`; enforced in all new API routes (legacy routes keep their checks).
+3. **2FA (§14.1):** `src/lib/twoFactor.ts` — dependency-free TOTP (RFC 6238) + single-use backup codes. Login route now returns a `twoFactorRequired` challenge for SUPER_ADMIN/SCHOOL_ADMIN; login page has the verify step. Enrollment via `POST /api/auth/2fa {action:start|confirm|disable}`. Gradual enforcement: not yet enrolled ⇒ no challenge (grace window).
+4. **Future-proof schema (§16.2):** 35 new collections registered in `src/lib/db.ts` (`COLS`, `RELS`, `idFor/idForCreate`, `prisma` facade): admissions, admissionDocuments, discounts, academicSessions, branches, leaveRequests, meetingSlots/Bookings, complaints, gallery, healthRecords, feeTemplates(+Items), installments, **ledger**, paymentIntents, expenseEntries, vendors, payroll, notifications, devices, conversations(+Messages), smsLogs, bookCatalog/Issues/Stock, plans, subscriptions, invoices, resources, quizzes(+questions/attempts), virtualClasses, timetableSlots, substitutions, calendarEvents, twoFactor. Students gain `nameBn`, `birthCertificateNo`, `permanentAddress/currentAddress`, `status` (ACTIVE|ALUMNI|TRANSFERRED), `familyId`, `sessionId`, `branchId`.
+5. **Design system (§14.2):** tokens + role accents (Admin=blue, Teacher=green, Guardian=orange), dark mode (`ThemeToggle`, `html[data-theme]`), `.skeleton` classes, notification bell in Shell.
+6. **Login portal (§3.2):** forgot-password email-OTP flow (`purpose:"forgot"`, code logged in dev), QR login link, 2FA step. `sendOtpEmail`/SMS provider live in `src/lib/notify.ts` (mock adapters until credentials).
+7. **Marketing/onboarding (§3.1/§3.3):** deferred to next session (welcome page exists); onboarding wizard not yet built.
 
-### Remaining before going live
+**Phase 1 — USP**
+1. **Admission module (§4):** public form `/apply` (no login) → `admissions` pipeline; `src/lib/admission.ts` (strict transitions, class auto-suggest, sibling auto-suggest); `/dashboard/admissions` UI (pipeline actions, doc upload via /api/uploads, discount propose/approve, seat confirm, enroll+pay). Enrollment creates student + guardian account + family link + admission & monthly fees and confirms payment via ledger. Discount approval = Accountant/Front Desk propose → Admin approve (§4.2).
+2. **Central ledger + payments (§10):** `src/lib/ledger.ts` — `postToLedger()` (FEE/PAYMENT/DISCOUNT/LATE_FEE/EXPENSE), `confirmPayment()` (fee+payment+ledger atomic, guardian notification), `applyLateFees()` (idempotent), student/school queries. `src/lib/payments.ts` — `PaymentProvider` abstraction: CASH instant, BANK reconciliation (`PATCH /api/payments`), BKASH/NAGAD/ROCKET/CARD intents + idempotent signed webhook `/api/payments/webhook/[provider]` (mock-complete route disabled once `PAYMENT_WEBHOOK_SECRET` set). Guardian **View+Pay** in `/parent/fees` (installments shown). `/dashboard/ledger` analytics (inflow, discounts, late fees, by-method). Fee templates API `/api/fee-templates` (per-class line items §10.3). Reminders runner `/api/fees/reminders` (push+SMS, §10.4).
+3. **Communication (§13/§7.1):** notification center (bell, `/api/notifications`, `notifyUsers()` fed by fee/chat/admission/complaint/PTM events); FCM web push (device registration `/api/notifications/devices`, `pushToUsers()` via firebase-admin messaging, SW `push`/`notificationclick` handlers); SMS fallback (`SmsProvider` + `smsLogs`); **two-way chat** `/api/chat` + `ChatPanel` replacing messages pages (teacher↔guardian, per-student context, unread counts, polling); PTM scheduling (`/api/meetings`, staff publish / guardian book); complaints box (`/api/complaints` with status tracking); gallery (`/api/gallery`).
+4. **Student records (§5):** sibling linking (`familyId`, `/api/parent/siblings` child list); promotion (§5.2 preview→confirm, exclude failures, `/api/students/promote`); alumni archive (§5.3, never delete, `/api/students/alumni`); TC/character certificate generator data API (`/api/certificates`) — printable page pending.
 
-- [x] **Firebase project created** — `amar-e-school` (in `.firebaserc`); service account downloaded; `.env` wired. (done 2026-08-03)
-- [x] **Deploy rules**: `firebase deploy --only firestore:rules,storage` — done (2026-08-03), rules live on `amar-e-school`.
-- [x] **Seed run & verified** against `amar-e-school` — all collections at expected counts, all 10 phases done. Verify anytime: `node scripts/check-seed.mjs`. (done 2026-08-03)
-- [ ] **Click-through UI test** on real Firestore (attendance, marks entry, PDF/Excel exports, ID-card & report-card printing, QR login).
-- [ ] **Git init + commit**, then deploy via **Firebase App Hosting** (connect GitHub repo, set env vars, deploy).  ← NEXT
-- [ ] Later / optional: Phase 5 features (AI remarks & summaries, SMS/push/email, bKash/Nagad/card payments); OpenAPI docs; "remember me".
+**Phase 2 (partial):** student panel `/student` (+`/api/student/me`, layout, Shell nav); resources library (§6.2): `/api/resources` (mandatory class/subject tagging, auto-filter for guardian/student, views/downloads analytics, versioning via supersede), teacher upload page, admin + guardian pages; leave management (§9.2) full workflow; multi-branch/CSV/billing/white-label UI **not yet** (schema ready).
+
+**Phase 3 (partial):** timetable slots + substitution suggestions (`/api/timetable-slots` — consumes approved teacher leaves, per plan leave comes first); academic-session/branch/virtual-class/question-bank collections exist. GPS, video integration, AI remarks, i18n, calendar UI **not yet**.
+
+**Phase 4:** health records collection exists (restricted by design); beacon ingestion **not yet**.
+
+**Seed:** `scripts/seed.mjs` extended (idempotent): demo admissions pipeline, ledger entries mirroring seeded fees, a chat conversation, a sample notification — 4 new checkpoints before SEED COMPLETE.
+
+**Rules:** `firestore.rules` comment updated — deny-all unchanged (Admin-SDK-only writes); no client-accessible collections added.
+
+### Verified
+- ✅ `npm run typecheck` — 0 errors
+- ✅ `npm run build` — success (all routes incl. /student, /apply, /dashboard/admissions|ledger|leaves|meetings|gallery|complaints|promotion|resources, /parent/*, /teacher/*)
+- ✅ `node --check scripts/seed.mjs`
+- ⚠️ Seed not re-run against live Firestore this session (owner may run `npm run setup`)
+
+### Next steps (in order)
+1. Run `npm run setup` (re-seed; idempotent) + `node scripts/check-seed.mjs`.
+2. Click-through test: login (2FA enroll an admin via Settings), admission enquiry→enroll, guardian pay (sandbox bKash), chat, notification bell, promotion.
+3. Build remaining Phase 2/3 UI: onboarding wizard (§3.3), subscription billing (§12.1), white-label (§12.2), CSV import/export (§12.4), certificate print page, quizzes, timetable builder UI, i18n toggle.
+4. Provide credentials when ready: FCM (push), BD SMS, bKash/Nagad/Rocket/Card sandbox, then set `PAYMENT_WEBHOOK_SECRET`.
+
+### Notes for future sessions
+- 2FA enrollment is **gradual**: existing admin logins unaffected until they enroll (deliberate grace per plan).
+- Payment gateway adapters run in **mock mode** until `PAYMENT_WEBHOOK_SECRET` + merchant env vars are set; the mock-complete route refuses to run once the secret exists.
+- All new routes enforce the §2.1 matrix via `can()`; never trust client-sent `schoolId`.
+- The old `MessagesPanel` component is still used by `/dashboard/messages`; chat lives in `ChatPanel`.
 
 ---
 
@@ -53,23 +73,6 @@ QR login: `/qr/<token>` + PIN or guardian phone (token on student detail page).
 
 ---
 
-## 🖥️ How to Start the App
-
-```bash
-cd E:\SmartSchoolERP
-# 1. make sure .env has Firebase credentials (see README)
-# 2. optional: re-seed Firestore demo data
-npm run setup
-# 3. run
-npm run dev          # dev server  → http://localhost:3000
-# or production:
-npm run build && npm run start
-```
-
-Open **http://localhost:3000** → redirects to login (or dashboard if a session exists).
-
----
-
 ## 🧪 Validation Commands
 
 ```bash
@@ -78,110 +81,3 @@ npm run build        # production build
 npm run setup        # idempotent Firestore seed
 npm run seed         # same as setup (alias)
 ```
-
----
-
-## 🧩 Architecture Notes (for quick orientation)
-
-- **Stack:** Next.js 15 App Router + TypeScript + Firebase Admin SDK (Firestore + Cloud Storage) + Tailwind 4 + Recharts + qrcode + jspdf/html2canvas + xlsx.
-- **Roles:** SUPER_ADMIN → `/admin` · SCHOOL_ADMIN → `/dashboard` · TEACHER → `/teacher` · GUARDIAN → `/parent`.
-- **Auth:** JWT (jose) in httpOnly cookie `ss_token`; role guards in `src/middleware.ts`. (Kept — not Firebase Auth.)
-- **Data layer:** `src/lib/db.ts` = Prisma-shaped API over Firestore. Collections: `schools`, `users`, `teachers`, `students`, `classes`, `sections`, `subjects`, `assignments`, `routines`, `attendance`, `remarks`, `homeworks`, `submissions`, `exams`, `marks`, `notices`, `feeSettings`, `fees`, `payments`, `messages`, `auditLogs`, `settings`. Tenant isolation via `schoolId` on every record.
-- **IDs:** deterministic where a natural key exists (user → `u_<sha1(email)>`, attendance → `a_<studentId>_<date>`, marks → `m_<examId>_<studentId>_<subjectId>`, feeSettings → `fs_<schoolId>`), random `r_<hex>` elsewhere → seeds/upserts are idempotent.
-- **Query strategy:** one equality filter pushed to Firestore, the rest filtered in memory → no composite indexes needed.
-- **Uploads:** Cloud Storage bucket `gs://<project>.appspot.com`, folder `uploads/` — public read via `downloadUrl`, writes via Admin SDK.
-- **Key dirs:** `src/app/api/*` (REST), `src/app/*/` (role consoles), `src/lib/` (auth, firebase, db, grades, qr, http, utils), `scripts/` (seed.mjs, setup.mjs).
-
----
-
-## 🔁 This Session (2026-08-03)
-
-- Full Prisma → Firestore migration as described above.
-- Typecheck & production build green after the migration.
-- Deploy path chosen: **Firebase App Hosting** (backend defined in `apphosting.yaml`; supports Next.js SSR out of the box).
-- Next session: create the Firebase project + service account, wire `.env`, deploy rules, seed, click-through test, then App Hosting deploy.
-
----
-
-## ⏱️ Moment-to-moment checkpoints (NEW convention — from 2026-08-03)
-
-So interruptions (power cuts etc.) never lose progress again:
-
-- **`scripts/progress.mjs`** — `checkpoint(step, detail)` appends a timestamped line to **`scripts/session-progress.log`**.
-- **`scripts/seed.mjs`** now calls `checkpoint()` after **every phase** (13 checkpoints), so an interrupted seed leaves an exact trail.
-- **`scripts/check-seed.mjs`** — the "where did we leave off?" tool: reads Firestore and reports per-collection counts + phase status. Run `node scripts/check-seed.mjs` after any interruption, before re-running the seed.
-- **`scripts/load-env.mjs`** — shared `.env` loader (single-line + multi-line quoted values incl. PEM keys).
-
-**Rule for future sessions:** after every meaningful step, either the tooling above logs it, or append one line to `PROGRESS.md`. When resuming, run `node scripts/check-seed.mjs` (for seed/data state) and read the last lines of `scripts/session-progress.log`.
-
----
-
-## 🔁 Session resume — 2026-08-03 (post power-outage)
-
-**Where we left off:** the previous session finished the Firebase migration, created project `amar-e-school`, downloaded the service account, and ran the seed — the Firestore data was already complete. The blocker at the moment of the power cut was a **corrupted `.env` private key** (double-escaped `\n` → `\\n` after running `wire-env.mjs` twice), which made every Admin SDK call fail with `Failed to parse private key`.
-
-**What this session did:**
-1. Diagnosed the key corruption byte-by-byte and **regenerated `.env`** from `service-account.json` (run `node scripts/wire-env.mjs` once — do NOT run it twice).
-2. Built the checkpoint tooling above; added 13 phase checkpoints to `seed.mjs`.
-3. Ran `npm run setup` → **SEED COMPLETE**, all checkpoints logged (see `scripts/session-progress.log`).
-4. Ran `node scripts/check-seed.mjs` → all 22 collections match expected counts (homeworks 4 and routines 20 are *by design* — ICT/Social Studies/Religion have no teacher in the seed).
-
-**Next steps (in order):**
-1. Deploy rules: `firebase deploy --only firestore:rules,storage` (CLI is logged in as himelfaysalahmed103@gmail.com).
-2. `git init` + first commit (project not yet a git repo) — needed for Firebase App Hosting.
-3. Click-through UI test on real Firestore: `npm run dev` → http://localhost:3000 (login with the demo accounts below).
-4. Connect the GitHub repo to Firebase App Hosting (`apphosting.yaml` already present) and deploy.
-
-> ⚠️ **Never run `node scripts/wire-env.mjs` twice** — it re-escapes an already-escaped key. If `.env` credentials break, re-download the service account or re-wire once and verify with `node scripts/check-seed.mjs`.
-
----
-
-## 🔁 Session — 2026-08-04 (PWA + go-live prep)
-
-**Goal (from owner):** run the SaaS on my own domain; schools can **download/install the app** from the site; every user's data is collected centrally and managed by Super Admin (owner). Chosen path: installable **PWA** + Firebase App Hosting free URL first, custom domain later. School onboarding stays **super-admin-managed** (panel already has New School flow).
-
-**Done this session:**
-1. **PWA icons** — `scripts/generate-icons.mjs` (sharp) → `public/icons/icon-192.png`, `icon-512.png`, `maskable-512.png`, `apple-touch-icon.png`.
-2. **Manifest** — `public/manifest.json` (standalone display, theme #4f46e5, maskable icon). Wired via `metadata.manifest` + `appleWebApp` + icons in `src/app/layout.tsx`; `viewport` export adds theme-color + viewport-fit.
-3. **Service worker** — `public/sw.js`: network-first navigations with last-page/offline fallback, stale-while-revalidate for static assets, never intercepts `/api/*`. `public/offline.html` fallback page. Registered in `src/components/InstallApp.tsx` (prod only).
-4. **Install UI** — `src/components/InstallApp.tsx`: `useInstallPrompt()` hook (beforeinstallprompt + iOS detection + standalone detection), `InstallBanner` floating prompt on every page (dismissible, hidden on /print), `InstallSection` on the welcome page ("Install the app — no app store required").
-5. **Landing flow** — `/` now sends anonymous visitors to `/welcome` (marketing + install CTA) instead of straight to /login.
-6. **Deploy prep** — `apphosting.yaml` APP_URL placeholder set (update after first deploy); `.gitignore` hardened: added `service-account.json`, `*-service-account*.json`, `*.tsbuildinfo`, `.firebase/` (security: private key must never be committed).
-7. Verified: `npm run typecheck` 0 errors, `npm run build` success, PWA assets reachable.
-8. **Git repo initialized + first commit** (this is required to connect Firebase App Hosting).
-
-**Next steps (in order):**
-1. Push repo to GitHub (owner account), then in Firebase console → App Hosting → create backend from the repo, set secrets (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY, JWT_SECRET), set APP_URL to the generated `*.web.app` URL, deploy.
-2. Click-through UI test on the deployed URL (login with demo accounts), verify PWA install prompt on Android/Chrome.
-3. Later: connect custom domain (Domain → App Hosting in Firebase), set APP_URL to it; optional Phase 5 features (AI remarks, SMS/push/email, bKash/Nagad/card payments).
-
-> **Post-review hardening (same session):** SW no longer caches private role pages (/admin, /dashboard, /teacher, /parent, /print, /qr) — offline fallback for those is /offline.html only (privacy fix). `InstallBanner` uses `usePathname()` (no print-page flash). `next.config.mjs` adds `Cache-Control: no-cache` for `/sw.js` + `/manifest.json` so PWA updates propagate fast. Note: SW is only registered in production (`NODE_ENV !== "development"`) — the install button won't appear during `npm run dev`; test PWA with `npm run build && npm start`. Committed as 7ef93e6 + 2nd commit.
-
----
-
-## 💾 SAVE / RESUME CONVENTION (from 2026-08-04)
-
-**Rule: after EVERY meaningful step, run `npm run save "<what just happened>"`.**
-
-It does three things in one command:
-1. Appends a timestamped checkpoint → `scripts/session-progress.log`
-2. Writes a machine-readable snapshot → `scripts/session-state.json` (what resume.mjs reads)
-3. Auto-commits ALL changes to git with `progress: <msg>` — so a power cut / crash loses **nothing**
-
-**Resuming after any interruption (power cut, crash, new machine):**
-```bash
-cd E:\SmartSchoolERP
-npm run resume          # one screen: last checkpoint, git state, server status, .env sanity, next steps
-npm run resume -- --seed  # optional: also checks Firestore seed state (read-only)
-# then read PROGRESS.md → do the next item on the list
-```
-
-The resume screen also sanity-checks `.env` (the historical #1 blocker was a double-escaped `FIREBASE_PRIVATE_KEY`).
-
-**Snapshot now (PWA + go-live prep done, this session):**
-- PWA fully implemented & browser-verified (manifest, SW with privacy fix, icons, install banner + section).
-- Git repo initialized on `main` with 2 commits; working tree clean.
-- Production build verified; `npm start` running on :3000.
-- Deployment to Firebase App Hosting is the ONLY remaining big step (needs owner's GitHub push + console secrets).
-
-> **Hardening (same session):** `save.mjs` now REFUSES to commit if any staged file looks like a secret (`service-account`, `.env*`, `*.pem`, `private_key`) — belt-and-braces on top of `.gitignore`. Tested: normal saves leave a clean tree; a `stripe-secret.env` attack file was refused with exit code 1. `npm run resume` also sanity-checks git identity and reports the exact git error if a commit fails.

@@ -6,7 +6,43 @@ import { Timestamp, type WriteBatch } from "firebase-admin/firestore";
 // Public types (replaces @prisma/client imports)
 // ---------------------------------------------------------------------------
 
-export type Role = "SUPER_ADMIN" | "SCHOOL_ADMIN" | "TEACHER" | "GUARDIAN";
+export type Role =
+  | "SUPER_ADMIN"
+  | "SCHOOL_ADMIN"
+  | "TEACHER"
+  | "GUARDIAN"
+  | "STUDENT"
+  | "ACCOUNTANT"
+  | "LIBRARIAN"
+  | "FRONT_DESK";
+
+// ---- PRD v1.2 shared enums (future-proof schema) --------------------------
+
+export type StudentStatus = "ACTIVE" | "ALUMNI" | "TRANSFERRED";
+export type AdmissionStatus =
+  | "ENQUIRY"
+  | "APPLIED"
+  | "DOCS_PENDING"
+  | "TEST_SCHEDULED"
+  | "SEAT_CONFIRMED"
+  | "ENROLLED"
+  | "REJECTED";
+export type DiscountType = "PERCENT" | "FIXED";
+export type DiscountStatus = "PROPOSED" | "APPROVED" | "REJECTED";
+export type DiscountReason =
+  | "SIBLING"
+  | "MERIT"
+  | "STAFF_CHILD"
+  | "FINANCIAL_HARDSHIP"
+  | "OTHER";
+export type PaymentMethod = "CASH" | "BANK" | "BKASH" | "NAGAD" | "ROCKET" | "CARD";
+export type LedgerStatus = "PENDING" | "CONFIRMED" | "FAILED";
+export type LedgerKind = "FEE" | "PAYMENT" | "DISCOUNT" | "LATE_FEE" | "EXPENSE";
+export type FeeLineType = "TUITION" | "ADMISSION" | "EXAM" | "TRANSPORT" | "HOSTEL" | "LIBRARY_FINE" | "LATE_FEE" | "OTHER";
+export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED";
+export type ResourceKind = "PDF" | "EBOOK" | "COMIC" | "VIDEO" | "SLIDES" | "WORKSHEET" | "LINK";
+export type ChatChannel = "PUSH" | "SMS" | "WHATSAPP";
+export type ComplaintStatus = "OPEN" | "IN_REVIEW" | "RESOLVED" | "DISMISSED";
 export type SchoolStatus = "ACTIVE" | "SUSPENDED" | "TRIAL";
 export type AttendanceStatus = "PRESENT" | "ABSENT" | "LATE" | "LEAVE";
 export type RemarkRating = "EXCELLENT" | "GOOD" | "AVERAGE" | "NEEDS_IMPROVEMENT";
@@ -45,6 +81,46 @@ const COLS: Record<string, string> = {
   message: "messages",
   auditLog: "auditLogs",
   setting: "settings",
+  // ---- PRD v1.2 new collections (Phase 0 schema, used by later phases) ----
+  admission: "admissions",
+  admissionDocument: "admissionDocuments",
+  discount: "discounts",
+  academicSession: "academicSessions",
+  branch: "branches",
+  leaveRequest: "leaveRequests",
+  meetingSlot: "meetingSlots",
+  meetingBooking: "meetingBookings",
+  complaint: "complaints",
+  galleryItem: "gallery",
+  healthRecord: "healthRecords",
+  feeTemplate: "feeTemplates",
+  feeTemplateItem: "feeTemplateItems",
+  installment: "installments",
+  ledgerEntry: "ledger",
+  paymentIntent: "paymentIntents",
+  expenseEntry: "expenseEntries",
+  vendor: "vendors",
+  payrollRecord: "payroll",
+  notification: "notifications",
+  device: "devices",
+  conversation: "conversations",
+  conversationMessage: "conversationMessages",
+  smsLog: "smsLogs",
+  bookCatalog: "bookCatalog",
+  bookIssue: "bookIssues",
+  bookStock: "bookStock",
+  plan: "plans",
+  subscription: "subscriptions",
+  invoice: "invoices",
+  resource: "resources",
+  quiz: "quizzes",
+  question: "questions",
+  quizAttempt: "quizAttempts",
+  virtualClass: "virtualClasses",
+  timetableSlot: "timetableSlots",
+  substitution: "substitutions",
+  calendarEvent: "calendarEvents",
+  twoFactor: "twoFactor",
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
@@ -78,6 +154,21 @@ function idFor(model: string, where: Record<string, any>): string | undefined {
   }
   if (model === "feeSetting" && where.schoolId) return `fs_${String(where.schoolId)}`;
   if (model === "setting" && where.key) return `set_${String(where.key)}`;
+  if (model === "twoFactor" && where.userId) return `2fa_${String(where.userId)}`;
+  if (model === "device" && where.token) return `dev_${sha1(String(where.token))}`;
+  if (model === "conversation" && where.partyKey) return `cv_${String(where.partyKey)}`;
+  if (model === "installment" && where.feeId_seq) {
+    const c = where.feeId_seq;
+    if (c.feeId && c.seq !== undefined) return `in_${c.feeId}_${c.seq}`;
+  }
+  if (model === "quizAttempt" && where.quizId_studentId) {
+    const c = where.quizId_studentId;
+    if (c.quizId && c.studentId) return `qa_${c.quizId}_${c.studentId}`;
+  }
+  if (model === "meetingBooking" && where.slotId_guardianUserId) {
+    const c = where.slotId_guardianUserId;
+    if (c.slotId && c.guardianUserId) return `mb_${c.slotId}_${c.guardianUserId}`;
+  }
   return undefined;
 }
 
@@ -92,6 +183,12 @@ function idForCreate(model: string, data: Record<string, any>): string | undefin
   if (model === "homeworkSubmission" && data.homeworkId && data.studentId) return `sub_${data.homeworkId}_${data.studentId}`;
   if (model === "feeSetting" && data.schoolId) return `fs_${String(data.schoolId)}`;
   if (model === "setting" && data.key) return `set_${String(data.key)}`;
+  if (model === "twoFactor" && data.userId) return `2fa_${String(data.userId)}`;
+  if (model === "device" && data.token) return `dev_${sha1(String(data.token))}`;
+  if (model === "conversation" && data.partyKey) return `cv_${String(data.partyKey)}`;
+  if (model === "installment" && data.feeId && data.seq !== undefined) return `in_${data.feeId}_${data.seq}`;
+  if (model === "quizAttempt" && data.quizId && data.studentId) return `qa_${data.quizId}_${data.studentId}`;
+  if (model === "meetingBooking" && data.slotId && data.guardianUserId) return `mb_${data.slotId}_${data.guardianUserId}`;
   return undefined;
 }
 
@@ -127,6 +224,32 @@ const RELS: Record<string, Record<string, Rel>> = {
     fees: { to: "fee", via: "schoolId", kind: "many" },
     payments: { to: "payment", via: "schoolId", kind: "many" },
     auditLogs: { to: "auditLog", via: "schoolId", kind: "many" },
+    // ---- PRD v1.2 additions ----
+    admissions: { to: "admission", via: "schoolId", kind: "many" },
+    branches: { to: "branch", via: "schoolId", kind: "many" },
+    sessions: { to: "academicSession", via: "schoolId", kind: "many" },
+    feeTemplates: { to: "feeTemplate", via: "schoolId", kind: "many" },
+    ledger: { to: "ledgerEntry", via: "schoolId", kind: "many" },
+    notifications: { to: "notification", via: "schoolId", kind: "many" },
+    conversations: { to: "conversation", via: "schoolId", kind: "many" },
+    resources: { to: "resource", via: "schoolId", kind: "many" },
+    bookCatalogs: { to: "bookCatalog", via: "schoolId", kind: "many" },
+    bookStocks: { to: "bookStock", via: "schoolId", kind: "many" },
+    bookIssues: { to: "bookIssue", via: "schoolId", kind: "many" },
+    complaints: { to: "complaint", via: "schoolId", kind: "many" },
+    meetingSlots: { to: "meetingSlot", via: "schoolId", kind: "many" },
+    leaveRequests: { to: "leaveRequest", via: "schoolId", kind: "many" },
+    galleryItems: { to: "galleryItem", via: "schoolId", kind: "many" },
+    smsLogs: { to: "smsLog", via: "schoolId", kind: "many" },
+    devices: { to: "device", via: "schoolId", kind: "many" },
+    quizzes: { to: "quiz", via: "schoolId", kind: "many" },
+    virtualClasses: { to: "virtualClass", via: "schoolId", kind: "many" },
+    timetableSlots: { to: "timetableSlot", via: "schoolId", kind: "many" },
+    calendarEvents: { to: "calendarEvent", via: "schoolId", kind: "many" },
+    expenseEntries: { to: "expenseEntry", via: "schoolId", kind: "many" },
+    vendors: { to: "vendor", via: "schoolId", kind: "many" },
+    subscription: { to: "subscription", via: "schoolId", kind: "oneInverse" },
+    invoices: { to: "invoice", via: "schoolId", kind: "many" },
   },
   user: {
     school: { to: "school", fk: "schoolId", kind: "one" },
@@ -157,6 +280,15 @@ const RELS: Record<string, Record<string, Rel>> = {
     fees: { to: "fee", via: "studentId", kind: "many" },
     payments: { to: "payment", via: "studentId", kind: "many" },
     messages: { to: "message", via: "studentId", kind: "many" },
+    // ---- PRD v1.2 additions ----
+    admissions: { to: "admission", via: "convertedStudentId", kind: "many" },
+    leaveRequests: { to: "leaveRequest", via: "studentId", kind: "many" },
+    bookIssues: { to: "bookIssue", via: "studentId", kind: "many" },
+    quizAttempts: { to: "quizAttempt", via: "studentId", kind: "many" },
+    healthRecord: { to: "healthRecord", via: "studentId", kind: "oneInverse" },
+    ledgerEntries: { to: "ledgerEntry", via: "studentId", kind: "many" },
+    installments: { to: "installment", via: "studentId", kind: "many" },
+    notifications: { to: "notification", via: "studentId", kind: "many" },
   },
   classRoom: {
     school: { to: "school", fk: "schoolId", kind: "one" },
@@ -252,6 +384,169 @@ const RELS: Record<string, Record<string, Rel>> = {
     school: { to: "school", fk: "schoolId", kind: "one" },
     user: { to: "user", fk: "userId", kind: "one" },
   },
+  // ---- PRD v1.2 new model relations ----
+  admission: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    classRoom: { to: "classRoom", fk: "classId", kind: "one" },
+    section: { to: "section", fk: "sectionId", kind: "one" },
+    academicSession: { to: "academicSession", fk: "sessionId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    documents: { to: "admissionDocument", via: "admissionId", kind: "many" },
+    discounts: { to: "discount", via: "admissionId", kind: "many" },
+    convertedStudent: { to: "student", fk: "convertedStudentId", kind: "one" },
+  },
+  admissionDocument: {
+    admission: { to: "admission", fk: "admissionId", kind: "one" },
+  },
+  discount: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    admission: { to: "admission", fk: "admissionId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+    proposedBy: { to: "user", fk: "proposedById", kind: "one" },
+    approvedBy: { to: "user", fk: "approvedById", kind: "one" },
+  },
+  academicSession: { school: { to: "school", fk: "schoolId", kind: "one" } },
+  branch: { school: { to: "school", fk: "schoolId", kind: "one" } },
+  leaveRequest: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+    teacher: { to: "teacher", fk: "teacherId", kind: "one" },
+    approver: { to: "user", fk: "approvedById", kind: "one" },
+  },
+  meetingSlot: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    teacher: { to: "teacher", fk: "teacherId", kind: "one" },
+    bookings: { to: "meetingBooking", via: "slotId", kind: "many" },
+  },
+  meetingBooking: {
+    slot: { to: "meetingSlot", fk: "slotId", kind: "one" },
+    guardian: { to: "user", fk: "guardianUserId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+  },
+  complaint: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    guardian: { to: "user", fk: "guardianUserId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+  },
+  galleryItem: { school: { to: "school", fk: "schoolId", kind: "one" } },
+  healthRecord: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+  },
+  feeTemplate: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    classRoom: { to: "classRoom", fk: "classId", kind: "one" },
+    items: { to: "feeTemplateItem", via: "templateId", kind: "many" },
+  },
+  feeTemplateItem: { template: { to: "feeTemplate", fk: "templateId", kind: "one" } },
+  installment: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    fee: { to: "fee", fk: "feeId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+  },
+  ledgerEntry: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+    fee: { to: "fee", fk: "feeId", kind: "one" },
+    actor: { to: "user", fk: "actorId", kind: "one" },
+  },
+  paymentIntent: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+    fee: { to: "fee", fk: "feeId", kind: "one" },
+  },
+  expenseEntry: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    vendor: { to: "vendor", fk: "vendorId", kind: "one" },
+  },
+  vendor: { school: { to: "school", fk: "schoolId", kind: "one" } },
+  payrollRecord: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    teacher: { to: "teacher", fk: "teacherId", kind: "one" },
+  },
+  notification: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    user: { to: "user", fk: "userId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+  },
+  device: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    user: { to: "user", fk: "userId", kind: "one" },
+  },
+  conversation: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    teacherUser: { to: "user", fk: "teacherUserId", kind: "one" },
+    guardianUser: { to: "user", fk: "guardianUserId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+    messages: { to: "conversationMessage", via: "conversationId", kind: "many" },
+  },
+  conversationMessage: {
+    conversation: { to: "conversation", fk: "conversationId", kind: "one" },
+    sender: { to: "user", fk: "senderId", kind: "one" },
+  },
+  smsLog: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+  },
+  bookCatalog: { school: { to: "school", fk: "schoolId", kind: "one" } },
+  bookStock: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    book: { to: "bookCatalog", fk: "bookId", kind: "one" },
+  },
+  bookIssue: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    book: { to: "bookCatalog", fk: "bookId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+  },
+  plan: {},
+  subscription: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    plan: { to: "plan", fk: "planId", kind: "one" },
+  },
+  invoice: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+  },
+  resource: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    classRoom: { to: "classRoom", fk: "classId", kind: "one" },
+    section: { to: "section", fk: "sectionId", kind: "one" },
+    subject: { to: "subject", fk: "subjectId", kind: "one" },
+    teacher: { to: "teacher", fk: "teacherId", kind: "one" },
+  },
+  quiz: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    classRoom: { to: "classRoom", fk: "classId", kind: "one" },
+    subject: { to: "subject", fk: "subjectId", kind: "one" },
+    questions: { to: "question", via: "quizId", kind: "many" },
+    attempts: { to: "quizAttempt", via: "quizId", kind: "many" },
+  },
+  question: { quiz: { to: "quiz", fk: "quizId", kind: "one" } },
+  quizAttempt: {
+    quiz: { to: "quiz", fk: "quizId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+  },
+  virtualClass: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    classRoom: { to: "classRoom", fk: "classId", kind: "one" },
+    section: { to: "section", fk: "sectionId", kind: "one" },
+    subject: { to: "subject", fk: "subjectId", kind: "one" },
+    teacher: { to: "teacher", fk: "teacherId", kind: "one" },
+  },
+  timetableSlot: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    classRoom: { to: "classRoom", fk: "classId", kind: "one" },
+    section: { to: "section", fk: "sectionId", kind: "one" },
+    subject: { to: "subject", fk: "subjectId", kind: "one" },
+    teacher: { to: "teacher", fk: "teacherId", kind: "one" },
+  },
+  substitution: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    slot: { to: "timetableSlot", fk: "slotId", kind: "one" },
+    originalTeacher: { to: "teacher", fk: "originalTeacherId", kind: "one" },
+    substituteTeacher: { to: "teacher", fk: "substituteTeacherId", kind: "one" },
+  },
+  calendarEvent: { school: { to: "school", fk: "schoolId", kind: "one" } },
+  twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
 };
 
@@ -857,5 +1152,45 @@ export const prisma = {
   message: model("message"),
   auditLog: model("auditLog"),
   setting: model("setting"),
+  // ---- PRD v1.2 new models ----
+  admission: model("admission"),
+  admissionDocument: model("admissionDocument"),
+  discount: model("discount"),
+  academicSession: model("academicSession"),
+  branch: model("branch"),
+  leaveRequest: model("leaveRequest"),
+  meetingSlot: model("meetingSlot"),
+  meetingBooking: model("meetingBooking"),
+  complaint: model("complaint"),
+  galleryItem: model("galleryItem"),
+  healthRecord: model("healthRecord"),
+  feeTemplate: model("feeTemplate"),
+  feeTemplateItem: model("feeTemplateItem"),
+  installment: model("installment"),
+  ledgerEntry: model("ledgerEntry"),
+  paymentIntent: model("paymentIntent"),
+  expenseEntry: model("expenseEntry"),
+  vendor: model("vendor"),
+  payrollRecord: model("payrollRecord"),
+  notification: model("notification"),
+  device: model("device"),
+  conversation: model("conversation"),
+  conversationMessage: model("conversationMessage"),
+  smsLog: model("smsLog"),
+  bookCatalog: model("bookCatalog"),
+  bookIssue: model("bookIssue"),
+  bookStock: model("bookStock"),
+  plan: model("plan"),
+  subscription: model("subscription"),
+  invoice: model("invoice"),
+  resource: model("resource"),
+  quiz: model("quiz"),
+  question: model("question"),
+  quizAttempt: model("quizAttempt"),
+  virtualClass: model("virtualClass"),
+  timetableSlot: model("timetableSlot"),
+  substitution: model("substitution"),
+  calendarEvent: model("calendarEvent"),
+  twoFactor: model("twoFactor"),
   $transaction: transaction,
 };

@@ -24,11 +24,20 @@ import {
   QrCode,
   ShieldCheck,
   Crown,
+  Scale,
+  CalendarX2,
+  CalendarCheck,
+  Images,
+  Inbox,
+  ArrowUpRight,
+  FolderOpen,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/client";
 import { cn, initials, classOf } from "@/lib/utils";
 import { Spinner } from "./ui";
+import { NotificationBell } from "./NotificationBell";
+import { ThemeToggle } from "./ThemeToggle";
 
 export interface Me {
   user: {
@@ -71,6 +80,7 @@ const NAVS: Record<string, NavItem[]> = {
   ],
   SCHOOL_ADMIN: [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/students", label: "Students", icon: GraduationCap },
     { href: "/dashboard/teachers", label: "Teachers", icon: Users },
     { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
@@ -79,6 +89,13 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
+    { href: "/dashboard/ledger", label: "Ledger", icon: Scale },
+    { href: "/dashboard/leaves", label: "Leave Requests", icon: CalendarX2 },
+    { href: "/dashboard/meetings", label: "PTM Slots", icon: CalendarCheck },
+    { href: "/dashboard/gallery", label: "Gallery", icon: Images },
+    { href: "/dashboard/complaints", label: "Feedback Box", icon: Inbox },
+    { href: "/dashboard/promotion", label: "Promotion & Alumni", icon: ArrowUpRight },
+    { href: "/dashboard/resources", label: "Materials", icon: FolderOpen },
     { href: "/dashboard/guardians", label: "Guardians", icon: ShieldCheck },
     { href: "/dashboard/id-cards", label: "ID Cards", icon: IdCard },
     { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
@@ -92,6 +109,9 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/teacher/homework", label: "Homework", icon: BookOpen },
     { href: "/teacher/marks", label: "Marks Entry", icon: FileText },
     { href: "/teacher/results", label: "Results", icon: BarChart3 },
+    { href: "/teacher/resources", label: "My Materials", icon: FolderOpen },
+    { href: "/teacher/leaves", label: "My Leaves", icon: CalendarX2 },
+    { href: "/teacher/meetings", label: "PTM Slots", icon: CalendarCheck },
     { href: "/teacher/messages", label: "Messages", icon: MessageSquare },
   ],
   GUARDIAN: [
@@ -100,7 +120,12 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/parent/homework", label: "Homework", icon: BookOpen },
     { href: "/parent/remarks", label: "Teacher Remarks", icon: MessageSquare },
     { href: "/parent/results", label: "Exam Results", icon: FileText },
-    { href: "/parent/fees", label: "Fees", icon: Wallet },
+    { href: "/parent/fees", label: "Fees & Payments", icon: Wallet },
+    { href: "/parent/resources", label: "Class Materials", icon: FolderOpen },
+    { href: "/parent/gallery", label: "Gallery", icon: Images },
+    { href: "/parent/meetings", label: "Book PTM", icon: CalendarCheck },
+    { href: "/parent/leave", label: "Apply Leave", icon: CalendarX2 },
+    { href: "/parent/feedback", label: "Complaints", icon: Inbox },
     { href: "/parent/notices", label: "Notices", icon: Megaphone },
     { href: "/parent/messages", label: "Messages", icon: MessageSquare },
   ],
@@ -199,6 +224,8 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
 
           {user && (
             <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <NotificationBell />
               <Link href="/qr" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 sm:flex">
                 <QrCode size={15} /> QR Login
               </Link>
