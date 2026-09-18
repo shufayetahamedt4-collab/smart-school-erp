@@ -104,12 +104,29 @@ export class PermissionError extends Error {
   }
 }
 
-/** Does this role hold `action` on `module`? SUPER_ADMIN passes everything. */
+/**
+ * Actions imply weaker actions: `full` covers entry/pay/upload and every read;
+ * `entry` covers uploads and reads; a plain `view` covers the narrower
+ * viewOwn* scopes. Checking implication keeps the matrix declarative — roles
+ * don't need to list `view` alongside `full` everywhere.
+ */
+const IMPLIED: Partial<Record<Action, Action[]>> = {
+  full: ["entry", "pay", "upload", "billing", "view", "viewOwn", "viewOwnChild", "viewOwnClass"],
+  entry: ["upload", "view", "viewOwn", "viewOwnChild", "viewOwnClass"],
+  billing: ["view"],
+  pay: ["view", "viewOwn", "viewOwnChild"],
+  upload: ["view"],
+  view: ["viewOwn", "viewOwnChild", "viewOwnClass"],
+};
+
+/** Does this role hold `action` (or an action implying it) on `module`? SUPER_ADMIN passes everything. */
 export function can(role: Role | string | undefined | null, module: ModuleKey, action: Action): boolean {
   if (!role) return false;
   if (role === "SUPER_ADMIN") return true;
   const actions = MATRIX[module]?.[role as Role];
-  return !!actions?.includes(action);
+  if (!actions) return false;
+  if (actions.includes(action)) return true;
+  return actions.some((a) => IMPLIED[a]?.includes(action));
 }
 
 export function requirePermission(

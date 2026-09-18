@@ -78,6 +78,8 @@ export async function POST(req: NextRequest) {
         durationMin: Number(body?.durationMin || 15),
         mode: body?.mode || "IN_PERSON",
         meetingLink: body?.meetingLink || null,
+        active: true,
+        capacity: Number(body?.capacity || 1),
       },
     });
     await audit("PTM_SLOT_CREATE", "meetingSlot", slot.id);
@@ -91,7 +93,7 @@ export async function POST(req: NextRequest) {
 
   const slot = await prisma.meetingSlot.findUnique({ where: { id: slotId }, include: { bookings: true } });
   if (!slot || slot.schoolId !== schoolId) return NextResponse.json({ error: "Slot not found" }, { status: 404 });
-  if (slot.bookings.length >= Number(slot.capacity)) {
+  if (slot.bookings.length >= Number(slot.capacity ?? 1)) {
     return NextResponse.json({ error: "This slot is fully booked." }, { status: 400 });
   }
 
