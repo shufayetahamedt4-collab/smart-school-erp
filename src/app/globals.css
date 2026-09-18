@@ -13,6 +13,12 @@
   --accent-guardian: 234 88 12; /* orange */
   --accent: var(--accent-admin);
   --accent-soft: 238 242 255;
+
+  /* ---- PRD §12.2 white-label: school brand accent (runtime-set) ----
+     Defaults to the platform indigo; Shell overrides it with the
+     school's themeColor (rgb triplet) so every school-scoped control
+     picks up the school's brand color. */
+  --brand: 79 70 229;
 }
 
 /* Dark mode (PRD §14.2) — toggled by ThemeToggle via html[data-theme] */
@@ -96,12 +102,12 @@ body {
     cursor: not-allowed;
   }
   .btn-primary {
-    background: var(--color-indigo-600);
+    background: rgb(var(--brand));
     color: #fff;
     box-shadow: 0 1px 2px rgb(79 70 229 / 0.3);
   }
   .btn-primary:hover:not(:disabled) {
-    background: var(--color-indigo-700);
+    filter: brightness(0.9);
   }
   .btn-secondary {
     background: #fff;
@@ -145,8 +151,8 @@ body {
   }
   .input:focus {
     outline: none;
-    border-color: var(--color-indigo-500);
-    box-shadow: 0 0 0 3px rgb(99 102 241 / 0.15);
+    border-color: rgb(var(--brand));
+    box-shadow: 0 0 0 3px rgb(var(--brand) / 0.15);
   }
   .label {
     display: block;
@@ -254,6 +260,14 @@ html[data-theme="dark"] .skeleton {
 }
 html[data-theme="dark"] .accent-soft-bg {
   background: rgb(var(--accent) / 0.18);
+}
+
+/* white-label brand helpers (PRD §12.2) */
+.brand-bg {
+  background: rgb(var(--brand) / 1);
+}
+.brand-soft-bg {
+  background: rgb(var(--brand) / 0.1);
 }
 
 @media print {

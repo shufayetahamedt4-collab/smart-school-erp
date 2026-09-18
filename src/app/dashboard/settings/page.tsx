@@ -1,11 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, Check, Upload, School, Wallet } from "lucide-react";
+import { Save, Check, Upload, School, Wallet, Palette } from "lucide-react";
 import { api } from "@/lib/client";
 import { Card, CardHeader, Field, TextInput, Textarea, PageHeader, LoadingScreen, ErrorNote } from "@/components/ui";
 import { useMe } from "@/components/Shell";
 import { upload } from "@/lib/client";
+
+/** White-label palette (PRD §12.2) — school brand color. */
+const BRAND_PRESETS = [
+  "#4f46e5", // indigo (default)
+  "#0d9488", // teal
+  "#059669", // emerald
+  "#2563eb", // blue
+  "#7c3aed", // violet
+  "#db2777", // pink
+  "#ea580c", // orange
+  "#b91c1c", // red
+];
 
 export default function SchoolSettingsPage() {
   const { me } = useMe();
@@ -21,6 +33,7 @@ export default function SchoolSettingsPage() {
       setForm({
         name: d.name, tagline: d.tagline, address: d.address, phone: d.phone, email: d.email, website: d.website,
         monthlyFee: String(d.feeSetting?.monthlyFee || ""), admissionFee: String(d.feeSetting?.admissionFee || ""),
+        themeColor: d.themeColor || "#4f46e5",
       })
     );
   }, [me]);
@@ -85,6 +98,33 @@ export default function SchoolSettingsPage() {
             <Field label="Email"><TextInput value={form.email || ""} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
           </div>
           <Field label="Website"><TextInput value={form.website || ""} onChange={(e) => setForm({ ...form, website: e.target.value })} /></Field>
+        </div>
+      </Card>
+
+      <Card className="mt-5">
+        <CardHeader title="Brand color" subtitle="White-label theming — colors buttons, active menus and highlights (PRD §12.2)" />
+        <div className="space-y-4 p-5">
+          <div className="flex items-center gap-3">
+            <Palette size={18} className="text-slate-400" />
+            {BRAND_PRESETS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                title={c}
+                onClick={() => setForm({ ...form, themeColor: c })}
+                className={`h-8 w-8 rounded-full border-2 transition ${form.themeColor === c ? "border-slate-800 scale-110" : "border-transparent"}`}
+                style={{ background: c }}
+              />
+            ))}
+            <input
+              type="color"
+              value={form.themeColor || "#4f46e5"}
+              onChange={(e) => setForm({ ...form, themeColor: e.target.value })}
+              className="h-8 w-10 cursor-pointer rounded border border-slate-200 bg-white"
+            />
+            <TextInput value={form.themeColor || ""} onChange={(e) => setForm({ ...form, themeColor: e.target.value })} className="!w-28" />
+          </div>
+          <p className="text-xs text-slate-400">Custom domains/subdomains are configured at the hosting level — see scripts/deploy-guide.md.</p>
         </div>
       </Card>
 

@@ -20,7 +20,7 @@ export async function GET() {
   const school = user.schoolId
     ? await prisma.school.findUnique({
         where: { id: user.schoolId },
-        select: { id: true, name: true, slug: true, logoUrl: true, plan: true, status: true, tagline: true },
+        select: { id: true, name: true, slug: true, logoUrl: true, plan: true, status: true, tagline: true, themeColor: true },
       })
     : null;
 
