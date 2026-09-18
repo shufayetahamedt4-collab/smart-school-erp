@@ -134,26 +134,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ data: discount }, { status: 201 });
     }
 
-    // Approve / reject (admin) — final approval per §4.2
-    if (req.method === "PATCH") {
-      if (!can(session.role, "admission", "full")) {
-        return NextResponse.json({ error: "Only Admin/Principal can approve discounts." }, { status: 403 });
-      }
-      const decision = body?.decision === "APPROVED" ? "APPROVED" : "REJECTED";
-      const discount = await prisma.discount.update({
-        where: { id: String(body?.discountId || "") },
-        data: { status: decision, approvedById: session.id, approvedAt: new Date() },
-      });
-      // Recompute payable on approval: fee − discount
-      if (decision === "APPROVED") {
-        const admissionFresh = await prisma.admission.findUnique({ where: { id: admissionId } });
-        const gross = Number(admissionFresh?.admissionFee || 0);
-        const payable = Math.max(0, gross - Number(discount.amount));
-        await prisma.admission.update({ where: { id: admissionId }, data: { payableAmount: payable } });
-      }
-      await audit(`DISCOUNT_${decision}`, "discount", discount.id, { admissionId });
-      return NextResponse.json({ data: discount });
-    }
+    // (approve/reject handled by the top-level PATCH export — see below)
   }
 
   // ---------------------------------------------------------------- pipeline transition / edit
@@ -231,6 +212,35 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const action = new URL(req.url).searchParams.get("action");
+
+  // Approve / reject a proposed discount (admin) — §4.2 approval workflow
+  if (action === "discount") {
+    if (!can(session.role, "admission", "full")) {
+      return NextResponse.json({ error: "Only Admin/Principal can approve discounts." }, { status: 403 });
+    }
+    const body = await req.json().catch(() => null);
+    const admissionId = String(body?.admissionId || "");
+    const admission = await prisma.admission.findUnique({ where: { id: admissionId } });
+    if (!admission || admission.schoolId !== session.schoolId) {
+      return NextResponse.json({ error: "Admission not found" }, { status: 404 });
+    }
+    const decision = body?.decision === "APPROVED" ? "APPROVED" : "REJECTED";
+    const discount = await prisma.discount.update({
+      where: { id: String(body?.discountId || "") },
+      data: { status: decision, approvedById: session.id, approvedAt: new Date() },
+    });
+    // Recompute payable on approval: fee − discount
+    if (decision === "APPROVED") {
+      const gross = Number(admission.admissionFee || 0);
+      const payable = Math.max(0, gross - Number(discount.amount));
+      await prisma.admission.update({ where: { id: admissionId }, data: { payableAmount: payable } });
+    }
+    await audit(`DISCOUNT_${decision}`, "discount", discount.id, { admissionId });
+    return NextResponse.json({ data: discount });
+  }
+
   if (!can(session.role, "admission", "full") && !can(session.role, "admission", "entry")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

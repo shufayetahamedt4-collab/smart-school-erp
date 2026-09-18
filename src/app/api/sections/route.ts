@@ -2,6 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 
+export async function GET(req: NextRequest) {
+  const session = await getSession();
+  if (!session || !["SCHOOL_ADMIN", "TEACHER", "SUPER_ADMIN", "FRONT_DESK"].includes(session.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const schoolId = session.role === "SUPER_ADMIN" ? req.nextUrl.searchParams.get("schoolId") || undefined : session.schoolId!;
+  if (!schoolId) return NextResponse.json({ error: "No school context" }, { status: 400 });
+
+  const sections = await prisma.section.findMany({
+    where: { schoolId },
+    include: { class: true, _count: { select: { students: true } } },
+    orderBy: [{ class: { order: "asc" } }, { name: "asc" }],
+  });
+  return NextResponse.json({ data: sections });
+}
+
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });

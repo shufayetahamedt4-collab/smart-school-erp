@@ -986,9 +986,13 @@ async function create(model: string, data: Record<string, any>, batch?: WriteBat
       delete d[k];
     }
   }
-  const id = idForCreate(model, d) || rand();
+  // Honor an explicit id supplied by the caller (e.g. paymentIntents use
+  // their own pi_… ids so intents can be looked up by id later).
+  const explicitId = typeof d.id === "string" && d.id.trim() ? d.id : undefined;
+  const id = idForCreate(model, d) || explicitId || rand();
   const ref = col(model).doc(id);
   const payload = clean(d);
+  if (explicitId) delete payload.id; // never store id as a data field
   if (batch) {
     batch.set(ref, payload);
   } else {
@@ -1000,7 +1004,7 @@ async function create(model: string, data: Record<string, any>, batch?: WriteBat
     else if (rel.fk) child[rel.fk] = id;
     await create(rel.to, child, batch);
   }
-  return { id, ...d };
+  return { ...d, id };
 }
 
 async function createMany(model: string, rows: Record<string, any>[], batch?: WriteBatch): Promise<any> {

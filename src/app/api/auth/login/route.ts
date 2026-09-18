@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { signSession, SESSION_COOKIE } from "@/lib/auth";
 import { homeForRole } from "@/lib/auth";
-import { needsTwoFactor, verifyChallenge } from "@/lib/twoFactor";
+import { needsTwoFactor, verifyChallenge, twoFactorStatus } from "@/lib/twoFactor";
 import { sendOtpEmail } from "@/lib/notify";
 
 export async function POST(req: NextRequest) {
@@ -67,7 +67,9 @@ export async function POST(req: NextRequest) {
   }
 
   // ---------------------------------------------------------------- 2FA gate (PRD §14.1)
-  if (needsTwoFactor(user.role)) {
+  // Gradual enrollment: only challenge when the user has actually enabled 2FA.
+  const tf = await twoFactorStatus(user.id).catch(() => ({ enrolled: false, enabled: false }));
+  if (needsTwoFactor(user.role) && tf.enabled) {
     const challengeId = `c_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
     await prisma.setting.upsert({
       where: { key: `2fa_challenge_${challengeId}` },
