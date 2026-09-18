@@ -119,6 +119,9 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </Card>
 
+          {/* PRD §7.2 — student self-service login (school decides who gets access) */}
+          <StudentLoginCard student={s} onChanged={load} />
+
           {/* attendance card */}
           <Card>
             <CardHeader title="Attendance" subtitle="Last 30 records" action={<Badge tone={attRate >= 80 ? "green" : "amber"}>{attRate}%</Badge>} />
@@ -238,5 +241,70 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
         </div>
       </Modal>
     </div>
+  );
+}
+
+/** PRD §7.2 — create/deactivate the student's own portal login (module-level so its form state survives parent re-renders). */
+function StudentLoginCard({ student, onChanged }: { student: any; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const create = async () => {
+    setBusy(true); setErr("");
+    try {
+      await api(`/api/students/${student.id}`, { method: "POST", body: JSON.stringify({ email, password }) });
+      setOpen(false);
+      onChanged();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const toggle = async () => {
+    setBusy(true); setErr("");
+    try {
+      await api(`/api/students/${student.id}`, { method: "PATCH", body: JSON.stringify({ portalAccess: !student.user?.active }) });
+      onChanged();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <Card>
+      <CardHeader title="Student portal login" subtitle="PRD §7.2 — self-service access (optional, per student)" />
+      <div className="space-y-3 p-5">
+        {student.userId ? (
+          <>
+            <div className="rounded-xl bg-emerald-50 p-3 text-xs">
+              <div className="font-bold text-emerald-700">Login active</div>
+              <div className="text-emerald-600">{student.user?.email}</div>
+              <div className={`mt-1 font-bold ${student.user?.active ? "text-emerald-600" : "text-rose-600"}`}>
+                {student.user?.active ? "Access enabled" : "Access disabled (login blocked)"}
+              </div>
+            </div>
+            <button className="btn btn-secondary btn-sm w-full" onClick={toggle} disabled={busy}>
+              {student.user?.active ? "Disable portal access" : "Enable portal access"}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-slate-400">No login yet. Create one to let this student view their own attendance, results, homework and quizzes.</p>
+            {!open ? (
+              <button className="btn btn-primary btn-sm w-full" onClick={() => setOpen(true)}>Create student login</button>
+            ) : (
+              <div className="space-y-2">
+                <Field label="Student email"><TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="student@email.com" /></Field>
+                <Field label="Password"><TextInput value={password} onChange={(e) => setPassword(e.target.value)} placeholder="min 6 characters" /></Field>
+                {err && <ErrorNote message={err} />}
+                <div className="flex gap-2">
+                  <button className="btn btn-secondary btn-sm flex-1" onClick={() => setOpen(false)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm flex-1" onClick={create} disabled={busy || !email || password.length < 6}>Create</button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Card>
   );
 }

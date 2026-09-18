@@ -88,9 +88,51 @@ export async function POST(req: NextRequest) {
     const method = (body?.method || "CASH") as "CASH" | "BANK" | "BKASH" | "NAGAD" | "ROCKET" | "CARD";
     try {
       const result = await payAdmissionFeeAndEnroll(admissionId, { method, refNo: body?.refNo, actorId: session.id });
-      await audit("ADMISSION_ENROLL", "admission", admissionId, { studentId: result.student.id });
+
+      // PRD §8.1 — Book/Uniform receipt checklist at admission time: issued
+      // items become bookIssue records (stock decremented) and the checklist
+      // is archived on the admission record.
+      const checklist: { bookId: string }[] = Array.isArray(body?.checklist) ? body.checklist.filter((c: any) => c?.bookId) : [];
+      const issuedItems: string[] = [];
+      for (const item of checklist) {
+        const book = await prisma.bookCatalog.findUnique({ where: { id: String(item.bookId) } });
+        if (!book || book.schoolId !== schoolId) continue;
+        const stock = await prisma.bookStock.findFirst({ where: { bookId: book.id } });
+        const issuedCount = await prisma.bookIssue.count({ where: { bookId: book.id, status: "ISSUED" } });
+        if (!stock || (Number(stock.total) || 0) - issuedCount <= 0) continue; // skip out-of-stock silently
+        await prisma.bookIssue.create({
+          data: {
+            schoolId,
+            bookId: book.id,
+            studentId: result.student.id,
+            issuedById: session.id,
+            issuedAt: new Date(),
+            status: "ISSUED",
+            fineAmount: 0,
+            note: "ADMISSION",
+          },
+        });
+        issuedItems.push(book.title);
+      }
+      if (issuedItems.length || body?.uniformSize || body?.idCardIssued !== undefined) {
+        await prisma.admission.update({
+          where: { id: admissionId },
+          data: {
+            checklist: issuedItems,
+            uniformSize: body?.uniformSize ? String(body.uniformSize) : null,
+            idCardIssued: body?.idCardIssued === true,
+          },
+        });
+      }
+
+      await audit("ADMISSION_ENROLL", "admission", admissionId, { studentId: result.student.id, issuedItems });
       return NextResponse.json({
-        data: { studentId: result.student.id, admissionNo: result.student.admissionNo, qrToken: result.student.qrToken },
+        data: {
+          studentId: result.student.id,
+          admissionNo: result.student.admissionNo,
+          qrToken: result.student.qrToken,
+          issuedItems,
+        },
       });
     } catch (e: any) {
       return NextResponse.json({ error: e?.message || "Enrollment failed" }, { status: 400 });

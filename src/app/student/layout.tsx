@@ -1,5 +1,14 @@
 import { Shell } from "@/components/Shell";
+import { SubscriptionProvider, SubscriptionBanner, SubscriptionLock } from "@/components/Subscription";
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
-  return <Shell role="STUDENT">{children}</Shell>;
+  return (
+    <SubscriptionProvider>
+      <Shell role="STUDENT">
+        <SubscriptionBanner />
+        <SubscriptionLock />
+        {children}
+      </Shell>
+    </SubscriptionProvider>
+  );
 }

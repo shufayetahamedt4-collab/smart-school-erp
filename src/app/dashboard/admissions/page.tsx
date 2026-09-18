@@ -57,6 +57,10 @@ export default function AdmissionsPage() {
   const [discountForm, setDiscountForm] = useState<any>({ type: "PERCENT", value: "", reason: "SIBLING" });
   const [payForm, setPayForm] = useState<any>({ method: "CASH" });
   const [siblings, setSiblings] = useState<any[]>([]);
+  const [books, setBooks] = useState<any[]>([]);
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+  const [uniformSize, setUniformSize] = useState("");
+  const [idCardIssued, setIdCardIssued] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (filters?: { status?: string; q?: string }) => {
@@ -75,6 +79,7 @@ export default function AdmissionsPage() {
     load();
     api<any[]>("/api/classes").then(setClasses).catch(() => null);
     api<any[]>("/api/sections").then(setSections).catch(() => null);
+    api<any[]>("/api/books").then(setBooks).catch(() => null); // §8.1 checklist options
   }, [load]);
 
   const refresh = () => load({ status: statusFilter || undefined, q: q || undefined });
@@ -186,11 +191,20 @@ export default function AdmissionsPage() {
     setBusy(true);
     setError("");
     try {
-      const result = await api<{ admissionNo: string; studentId: string }>("/api/admissions?action=enroll", {
+      const result = await api<{ admissionNo: string; studentId: string; issuedItems?: string[] }>("/api/admissions?action=enroll", {
         method: "POST",
-        body: JSON.stringify({ admissionId: active.id, ...payForm }),
+        body: JSON.stringify({
+          admissionId: active.id,
+          ...payForm,
+          checklist: Object.entries(checklist).filter(([, on]) => on).map(([bookId]) => ({ bookId })),
+          uniformSize: uniformSize || undefined,
+          idCardIssued,
+        }),
       });
-      alert(`Enrolled! Student admission number: ${result.admissionNo}`);
+      alert(
+        `Enrolled! Admission no: ${result.admissionNo}` +
+          (result.issuedItems?.length ? `\nIssued: ${result.issuedItems.join(", ")}` : "")
+      );
       await load({ status: statusFilter || undefined, q: q || undefined });
       setActive(null);
     } catch (e: any) {
@@ -378,7 +392,36 @@ export default function AdmissionsPage() {
                       <Select className="!w-36" value={payForm.method} onChange={(e) => setPayForm({ ...payForm, method: e.target.value })}>
                         <option value="CASH">Cash</option><option value="BANK">Bank</option><option value="BKASH">bKash</option><option value="NAGAD">Nagad</option>
                       </Select>
-                      <button className="btn btn-primary btn-sm" onClick={enroll} disabled={busy}>
+
+                      {/* §8.1 — Book/Uniform receipt checklist at admission */}
+                      <div className="mt-3">
+                        <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-emerald-700">Received items checklist (§8.1)</p>
+                        {books.length ? (
+                          <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                            {books.map((b) => (
+                              <label key={b.id} className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600">
+                                <input
+                                  type="checkbox"
+                                  checked={!!checklist[b.id]}
+                                  onChange={(e) => setChecklist({ ...checklist, [b.id]: e.target.checked })}
+                                />
+                                <span className="min-w-0 flex-1 truncate">{b.title}</span>
+                                <span className="text-[10px] text-slate-400">{b.available} left</span>
+                              </label>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400">No catalog items — add books/uniforms in Library & Books.</p>
+                        )}
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <TextInput className="!w-32" placeholder="Uniform size" value={uniformSize} onChange={(e) => setUniformSize(e.target.value)} />
+                          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                            <input type="checkbox" checked={idCardIssued} onChange={(e) => setIdCardIssued(e.target.checked)} /> ID card issued
+                          </label>
+                        </div>
+                      </div>
+
+                      <button className="btn btn-primary btn-sm mt-3" onClick={enroll} disabled={busy}>
                         <GraduationCap size={13} /> Pay {fmtMoney(active.payableAmount || active.admissionFee || 0)} & enroll
                       </button>
                     </div>
