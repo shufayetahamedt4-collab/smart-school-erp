@@ -73,6 +73,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const session = await getSession();
   if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
+  const locked = await writeGuard(session.schoolId);
+  if (locked) return locked;
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
@@ -107,6 +109,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const session = await getSession();
   if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
+  const locked = await writeGuard(session.schoolId);
+  if (locked) return locked;
   await audit("STUDENT_DELETE", "student", id);
   await prisma.student.delete({ where: { id } });
   return NextResponse.json({ data: { ok: true } });

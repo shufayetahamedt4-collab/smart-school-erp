@@ -18,30 +18,48 @@ export async function GET(req: NextRequest) {
   const classId = searchParams.get("classId") || undefined;
   const sectionId = searchParams.get("sectionId") || undefined;
 
-  const students = await prisma.student.findMany({
-    where: {
-      schoolId,
-      ...(classId ? { classId } : {}),
-      ...(sectionId ? { sectionId } : {}),
-      ...(q
-        ? {
-            OR: [
-              { name: { contains: q, mode: "insensitive" } },
-              { admissionNo: { contains: q, mode: "insensitive" } },
-              { guardianPhone: { contains: q } },
-            ],
-          }
-        : {}),
-    },
-    include: {
-      classRoom: { select: { id: true, name: true, order: true } },
-      section: { select: { id: true, name: true } },
-      guardianUser: { select: { id: true, name: true, email: true } },
-      fees: { select: { id: true, status: true, amount: true, paidAmount: true, feeType: true, title: true } },
-    },
-    orderBy: [{ classRoom: { order: "asc" } }, { roll: "asc" }],
-  });
-  return NextResponse.json({ data: students });
+  const where = {
+    schoolId,
+    ...(classId ? { classId } : {}),
+    ...(sectionId ? { sectionId } : {}),
+    ...(q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" } },
+            { admissionNo: { contains: q, mode: "insensitive" } },
+            { guardianPhone: { contains: q } },
+          ],
+        }
+      : {}),
+  };
+
+  // Fetch related list data in bulk. The Firestore adapter cannot join these
+  // relations, so an include here would issue several reads per student.
+  const [students, classes, sections, fees] = await Promise.all([
+    prisma.student.findMany({ where }),
+    prisma.classRoom.findMany({ where: { schoolId }, select: { id: true, name: true, order: true } }),
+    prisma.section.findMany({ where: { schoolId }, select: { id: true, name: true, classId: true } }),
+    prisma.fee.findMany({ where: { schoolId }, select: { id: true, studentId: true, status: true, amount: true, paidAmount: true, feeType: true, title: true } }),
+  ]);
+
+  const classById = new Map(classes.map((item: any) => [item.id, item]));
+  const sectionById = new Map(sections.map((item: any) => [item.id, item]));
+  const feesByStudent = new Map<string, any[]>();
+  for (const fee of fees) {
+    const studentFees = feesByStudent.get(fee.studentId) || [];
+    studentFees.push(fee);
+    feesByStudent.set(fee.studentId, studentFees);
+  }
+
+  const result = students
+    .map((student: any) => ({
+      ...student,
+      classRoom: student.classId ? classById.get(student.classId) || null : null,
+      section: student.sectionId ? sectionById.get(student.sectionId) || null : null,
+      fees: feesByStudent.get(student.id) || [],
+    }))
+    .sort((a: any, b: any) => (Number(a.classRoom?.order || 0) - Number(b.classRoom?.order || 0)) || (Number(a.roll || 0) - Number(b.roll || 0)));
+  return NextResponse.json({ data: result });
 }
 
 export async function POST(req: NextRequest) {

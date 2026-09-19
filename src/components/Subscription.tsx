@@ -11,7 +11,7 @@ import { Lock, Clock, ShieldAlert } from "lucide-react";
  */
 
 interface SubState {
-  status: "TRIAL" | "ACTIVE" | "PAST_DUE" | "LOCKED" | "CANCELLED" | "NONE";
+  status: "TRIAL" | "ACTIVE" | "GRACE" | "PAST_DUE" | "LOCKED" | "CANCELLED" | "NONE";
   canWrite: boolean;
   planName: string | null;
   daysLeft: number | null;
@@ -43,14 +43,14 @@ export function SubscriptionBanner() {
   if (!state || state.status === "NONE" || state.status === "ACTIVE") return null;
   if (state.status === "LOCKED") return null; // locked UI handled by <SubscriptionLock />
 
-  const tone =
-    state.status === "PAST_DUE"
-      ? "border-rose-200 bg-rose-50 text-rose-700"
-      : "border-amber-200 bg-amber-50 text-amber-700";
+  const isGrace = state.status === "GRACE" || state.status === "PAST_DUE";
+  const tone = isGrace
+    ? "border-rose-200 bg-rose-50 text-rose-700"
+    : "border-amber-200 bg-amber-50 text-amber-700";
 
-  const icon = state.status === "PAST_DUE" ? <ShieldAlert size={15} /> : <Clock size={15} />;
+  const icon = isGrace ? <ShieldAlert size={15} /> : <Clock size={15} />;
   const text =
-    state.status === "PAST_DUE"
+    isGrace
       ? "Subscription period ended — the school is in the grace period. Renew to continue making changes."
       : state.status === "TRIAL"
         ? `Trial (${state.planName || "Trial"} plan) — ${state.daysLeft ?? "?"} day(s) left.`

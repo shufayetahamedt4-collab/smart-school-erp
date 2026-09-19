@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
+import { writeGuard } from "@/lib/subscription";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -25,6 +26,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const session = await getSession();
   if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
+  const locked = await writeGuard(session.schoolId);
+  if (locked) return locked;
   const body = await req.json().catch(() => null);
 
   const teacher = await prisma.teacher.findUnique({ where: { id }, include: { user: true } });
@@ -46,6 +49,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const session = await getSession();
   if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
+  const locked = await writeGuard(session.schoolId);
+  if (locked) return locked;
   const teacher = await prisma.teacher.findUnique({ where: { id } });
   if (!teacher) return NextResponse.json({ error: "Teacher not found" }, { status: 404 });
   await audit("TEACHER_DELETE", "teacher", id);

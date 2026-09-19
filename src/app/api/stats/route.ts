@@ -14,14 +14,14 @@ export async function GET(req: NextRequest) {
     const sid = session.role === "SUPER_ADMIN" ? req.nextUrl.searchParams.get("schoolId") || undefined : schoolId;
     if (!sid) return NextResponse.json({ error: "No school context" }, { status: 400 });
 
-    const [students, teachers, classes, exams, notices, fees, attendanceToday, marksCount] = await Promise.all([
+    const [students, teachers, classes, exams, notices, fees, attendanceRows, marksCount] = await Promise.all([
       prisma.student.count({ where: { schoolId: sid, active: true } }),
       prisma.teacher.count({ where: { schoolId: sid } }),
       prisma.classRoom.count({ where: { schoolId: sid } }),
       prisma.exam.count({ where: { schoolId: sid } }),
       prisma.notice.count({ where: { schoolId: sid } }),
       prisma.fee.findMany({ where: { schoolId: sid }, select: { amount: true, paidAmount: true, status: true } }),
-      prisma.attendance.findMany({ where: { schoolId: sid, date: today }, select: { status: true } }),
+      prisma.attendance.findMany({ where: { schoolId: sid }, select: { status: true, date: true } }),
       prisma.examMark.count({ where: { exam: { schoolId: sid } } }),
     ]);
 
@@ -30,19 +30,26 @@ export async function GET(req: NextRequest) {
     const dueFees = fees.filter((f) => f.status !== "PAID").reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
 
     // attendance trend (last 7 days including today)
-    const trendDays = [];
-    for (let i = 6; i >= 0; i--) {
+    const attendanceByDate = new Map<string, { status: string }[]>();
+    for (const row of attendanceRows) {
+      const key = new Date(row.date).toISOString().slice(0, 10);
+      const rows = attendanceByDate.get(key) || [];
+      rows.push(row);
+      attendanceByDate.set(key, rows);
+    }
+    const trendDays = Array.from({ length: 7 }, (_, index) => 6 - index).map((daysAgo) => {
       const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      const rows = await prisma.attendance.findMany({ where: { schoolId: sid, date: d }, select: { status: true } });
-      trendDays.push({
+      d.setDate(d.getDate() - daysAgo);
+      const rows = attendanceByDate.get(d.toISOString().slice(0, 10)) || [];
+      return {
         date: d.toISOString().slice(0, 10),
         label: d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }),
         present: rows.filter((r) => r.status === "PRESENT" || r.status === "LATE").length,
         absent: rows.filter((r) => r.status === "ABSENT" || r.status === "LEAVE").length,
         total: rows.length,
-      });
-    }
+      };
+    });
+    const attendanceToday = attendanceByDate.get(today.toISOString().slice(0, 10)) || [];
 
     return NextResponse.json({
       data: {

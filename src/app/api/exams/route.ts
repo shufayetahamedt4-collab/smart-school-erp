@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
+import { writeGuard } from "@/lib/subscription";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -25,6 +26,8 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const schoolId = session.schoolId!;
+  const locked = await writeGuard(schoolId);
+  if (locked) return locked;
   const body = await req.json().catch(() => null);
   const { name, classId, sectionId, year, startDate, endDate } = body || {};
   if (!name || !classId) return NextResponse.json({ error: "Exam name and class are required." }, { status: 400 });

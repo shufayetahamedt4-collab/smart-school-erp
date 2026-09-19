@@ -236,19 +236,42 @@ export async function GET(req: NextRequest) {
     ];
   }
 
-  const admissions = await prisma.admission.findMany({
-    where,
-    include: {
-      classRoom: { select: { id: true, name: true } },
-      section: { select: { id: true, name: true } },
-      documents: { select: { id: true, kind: true, url: true, uploadedAt: true } },
-      discounts: true,
-      convertedStudent: { select: { id: true, name: true, admissionNo: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
-  return NextResponse.json({ data: admissions });
+  const admissions = await prisma.admission.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 });
+  const admissionIds = new Set(admissions.map((admission: any) => admission.id));
+  const convertedStudentIds = new Set(admissions.map((admission: any) => admission.convertedStudentId).filter(Boolean));
+  const [classes, sections, documents, discounts, students] = await Promise.all([
+    prisma.classRoom.findMany({ where: { schoolId }, select: { id: true, name: true } }),
+    prisma.section.findMany({ where: { schoolId }, select: { id: true, name: true } }),
+    prisma.admissionDocument.findMany({ select: { id: true, admissionId: true, kind: true, url: true, uploadedAt: true } }),
+    prisma.discount.findMany({ where: { schoolId } }),
+    convertedStudentIds.size ? prisma.student.findMany({ where: { schoolId }, select: { id: true, name: true, admissionNo: true } }) : Promise.resolve([]),
+  ]);
+  const classById = new Map(classes.map((item: any) => [item.id, item]));
+  const sectionById = new Map(sections.map((item: any) => [item.id, item]));
+  const studentById = new Map(students.map((item: any) => [item.id, item]));
+  const documentsByAdmission = new Map<string, any[]>();
+  const discountsByAdmission = new Map<string, any[]>();
+  for (const document of documents) {
+    if (!admissionIds.has(document.admissionId)) continue;
+    const items = documentsByAdmission.get(document.admissionId) || [];
+    items.push(document);
+    documentsByAdmission.set(document.admissionId, items);
+  }
+  for (const discount of discounts) {
+    if (!admissionIds.has(discount.admissionId)) continue;
+    const items = discountsByAdmission.get(discount.admissionId) || [];
+    items.push(discount);
+    discountsByAdmission.set(discount.admissionId, items);
+  }
+  const result = admissions.map((admission: any) => ({
+    ...admission,
+    classRoom: admission.classId ? classById.get(admission.classId) || null : null,
+    section: admission.sectionId ? sectionById.get(admission.sectionId) || null : null,
+    documents: documentsByAdmission.get(admission.id) || [],
+    discounts: discountsByAdmission.get(admission.id) || [],
+    convertedStudent: admission.convertedStudentId ? studentById.get(admission.convertedStudentId) || null : null,
+  }));
+  return NextResponse.json({ data: result });
 }
 
 export async function PATCH(req: NextRequest) {

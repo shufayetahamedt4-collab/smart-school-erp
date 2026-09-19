@@ -60,16 +60,31 @@ export async function PATCH(req: NextRequest) {
   if (body?.invoiceId) {
     const invoice = await prisma.invoice.findUnique({ where: { id: String(body.invoiceId) } });
     if (!invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+
+    const status = String(body?.status || "PAID").toUpperCase();
+    const validStatus = ["PAID", "UNPAID", "PENDING", "OVERDUE"];
+    if (!validStatus.includes(status)) {
+      return NextResponse.json({ error: "Invalid invoice status." }, { status: 400 });
+    }
+
     const updated = await prisma.invoice.update({
       where: { id: invoice.id },
       data: {
-        status: "PAID",
-        paidAt: new Date(),
-        method: String(body.method || "BANK"),
-        refNo: body.refNo ? String(body.refNo) : null,
+        status,
+        paidAt: status === "PAID" ? new Date() : null,
+        method: body.method ? String(body.method) : invoice.method || "BANK",
+        refNo: body.refNo ? String(body.refNo) : invoice.refNo || null,
       },
     });
-    await audit("INVOICE_MARK_PAID", "invoice", invoice.id, { method: updated.method });
+
+    if (status === "PAID") {
+      await prisma.subscription.updateMany({
+        where: { schoolId: invoice.schoolId },
+        data: { status: "ACTIVE" },
+      });
+    }
+
+    await audit("INVOICE_MARK_PAID", "invoice", invoice.id, { method: updated.method, status });
     return NextResponse.json({ data: updated });
   }
 

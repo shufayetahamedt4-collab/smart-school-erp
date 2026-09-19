@@ -34,11 +34,20 @@ export function NotificationBell() {
     }
   }, []);
 
+  const loadCount = useCallback(async () => {
+    try {
+      const data = await api<{ unread: number }>('/api/notifications?countOnly=1');
+      setUnread(data.unread);
+    } catch {
+      /* silent — bell is non-critical */
+    }
+  }, []);
+
   useEffect(() => {
-    load();
-    const t = setInterval(load, 30000); // light polling; FCM push arrives out-of-band
+    loadCount();
+    const t = setInterval(loadCount, 30000); // light polling; FCM push arrives out-of-band
     return () => clearInterval(t);
-  }, [load]);
+  }, [loadCount]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -57,7 +66,11 @@ export function NotificationBell() {
   return (
     <div className="relative" ref={boxRef}>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          const nextOpen = !open;
+          setOpen(nextOpen);
+          if (nextOpen) load();
+        }}
         className="relative rounded-lg p-2 text-slate-500 transition hover:bg-slate-100"
         title="Notifications"
         aria-label="Notifications"

@@ -26,10 +26,13 @@ export default function TeachersPage() {
   const [form, setForm] = useState({ name: "", email: "", designation: "", qualification: "", phone: "", password: "Teacher@123" });
   const [assignForm, setAssignForm] = useState({ classId: "", sectionId: "", subjectId: "" });
 
-  const load = () =>
-    Promise.all([api<Teacher[]>("/api/teachers"), api<ClassRow[]>("/api/classes"), api<SubjectRow[]>("/api/subjects")])
-      .then(([t, c, s]) => { setTeachers(t); setClasses(c); setSubjects(s); })
+  const load = () => {
+    api<Teacher[]>("/api/teachers")
+      .then(setTeachers)
       .finally(() => setLoading(false));
+    api<ClassRow[]>("/api/classes").then(setClasses).catch(() => null);
+    api<SubjectRow[]>("/api/subjects").then(setSubjects).catch(() => null);
+  };
 
   useEffect(() => { load(); }, []);
 

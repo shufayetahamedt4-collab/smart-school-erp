@@ -68,12 +68,16 @@ export function statusTone(status: string): keyof typeof badgeTones {
     case "ABSENT":
     case "UNPAID":
     case "SUSPENDED":
+    case "LOCKED":
+    case "EXPIRED":
     case "NEEDS_IMPROVEMENT":
     case "OVERDUE":
       return "red";
     case "LATE":
     case "PARTIAL":
     case "TRIAL":
+    case "GRACE":
+    case "PAST_DUE":
     case "AVERAGE":
     case "PENDING":
       return "amber";

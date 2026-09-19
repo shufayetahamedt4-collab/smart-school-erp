@@ -67,3 +67,37 @@
 [2026-08-04 01:25:25] SAVE — deploy step 1: remote added (shufayetahamedt4-collab/smart-school-erp); push blocked on wrong cached GitHub account faysalahmedhimel04-gif — user pushing from own terminal
 [2026-08-04 01:32:52] SAVE — DEPLOY MILESTONE: code pushed to github.com/shufayetahamedt4-collab/smart-school-erp (main @ 65249d2), secrets verified absent. Next: create App Hosting backend in console, set 4 secrets, deploy, fix APP_URL
 [2026-08-04 01:39:35] SAVE — PUSH COMPLETE: local c2b6f74 now on origin/main (0 ahead/behind). Ready for App Hosting backend creation.
+[2026-09-18 09:12:23] seed — settings + super admin done
+[2026-09-18 09:12:24] seed — school + feeSettings done
+[2026-09-18 09:12:25] seed — school admin user done
+[2026-09-18 09:12:38] seed — classes + sections + subjects done
+[2026-09-18 09:12:50] seed — teachers + assignments done
+[2026-09-18 09:13:05] seed — students + guardian accounts done
+[2026-09-18 09:13:13] seed — fees done
+[2026-09-18 09:15:22] seed — attendance done
+[2026-09-18 09:15:55] seed — remarks + homework done
+[2026-09-18 09:16:08] seed — exam + marks done
+[2026-09-18 09:16:09] seed — notices + routine done
+[2026-09-18 09:16:10] seed — messages done
+[2026-09-18 09:16:11] seed — PRD admissions demo done
+[2026-09-18 09:16:21] seed — PRD ledger demo done
+[2026-09-18 09:16:24] seed — PRD chat demo done
+[2026-09-18 09:16:25] seed — PRD notifications demo done
+[2026-09-18 09:16:25] seed — SEED COMPLETE — all phases logged
+2026-09-18 18:39
+SESSION PAUSED — PRD v1.2 pushed (be71192). Paused on: firebase:deploy blocked by Firebase CLI login (browser Allow step pending; cmd login window open). Resume: complete browser login → npm run firebase:deploy → verify rules.
+[2026-09-18 18:12:42] seed — settings + super admin done
+[2026-09-18 18:12:44] seed — school + feeSettings done
+[2026-09-18 18:12:44] seed — school admin user done
+[2026-09-18 18:12:59] seed — classes + sections + subjects done
+[2026-09-18 18:13:15] seed — teachers + assignments done
+[2026-09-18 18:13:30] seed — students + guardian accounts done
+[2026-09-18 18:13:39] seed — fees done
+[2026-09-18 18:15:06] seed — attendance done
+[2026-09-18 18:15:32] seed — remarks + homework done
+[2026-09-18 18:15:46] seed — exam + marks done
+[2026-09-18 18:15:47] seed — notices + routine done
+[2026-09-18 18:15:48] seed — messages done
+[2026-09-18 18:15:56] seed — PRD plans + subscription demo done
+[2026-09-18 18:15:56] seed — SEED COMPLETE — all phases logged
+[2026-09-19 05:33:15] SAVE — SESSION PAUSED — Phase 2 done (8e8346a,8cea3ca,1aba4bb); follow-up QA refinements (GRACE lifecycle, plan-wired school creation, N+1 fixes, permission hardening) verified tsc-green and checkpoint-committed; preview re-registered; pending: firebase:deploy (browser Allow), push, Phase 3

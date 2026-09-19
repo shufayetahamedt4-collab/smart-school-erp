@@ -34,3 +34,8 @@ storage-debug.log*
 # misc
 .DS_Store
 npm-debug.log*
+
+# freebuff thread-local artifacts
+.freebuff/
+dev-server.log
+dev-server.pid

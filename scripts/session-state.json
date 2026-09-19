@@ -1,6 +1,13 @@
 {
-  "savedAt": "2026-08-04T01:39:36.216Z",
-  "step": "PUSH COMPLETE: local c2b6f74 now on origin/main (0 ahead/behind). Ready for App Hosting backend creation.",
-  "gitHead": "f185cb0",
-  "logLines": 69
+  "savedAt": "2026-09-19T00:00:00.000Z",
+  "step": "SESSION PAUSED — Phase 2 complete (commits 8e8346a billing, 8cea3ca branding, 1aba4bb library+student). Follow-up QA session's uncommitted refinements (subscription GRACE lifecycle, plan-wired school creation, N+1 query fixes, permission hardening across ~25 files) verified green (tsc) and checkpoint-committed as the SAVE below. Pending: firebase:deploy (needs interactive browser Allow — see resume.loginHelper), push to origin (user does pushes), Phase 3 planning (timetable, transport, virtual classroom, AI remarks, analytics, BN/EN toggle).",
+  "gitHead": "3b51e22",
+  "logLines": 89,
+  "resume": {
+    "deploy": "Verify login: node -e (check 'user' in firebase-tools.json) — if true run `npm run firebase:deploy` (deploys firestore.rules + storage.rules; rules change is comments-only, deny-all posture unchanged), then verify.",
+    "loginHelper": "If session file still has no user: `npm run firebase:login` (opens browser; user clicks Allow). Do NOT run firebase login via cmd.exe /c from the agent shell — non-interactive stdin aborts it.",
+    "server": "Preview: detached `npm run dev` via PowerShell Start-Process recipe in .freebuff/run.md (Next obeys the shell's PORT env var — ALWAYS read the real port from the log's '- Local:' line; do not trust 3000). Re-register the Freebuff preview on the discovered port.",
+    "demoState": "Firestore demo data: Sunrise International School (plan subscription demo), admission ADM-138092 Ayesha Rahman enrolled (ledger PAYMENT 4500 CASH + DISCOUNT 500), guardian1 partial bKash payment RCP-2534877220, chat thread guardian1-Farhana Akter, PTM slot 25 Sept booked. Phase 2 seeded plans Trial/Basic/Premium via scripts/seed.mjs.",
+    "backlog": "Push Phase 2 + checkpoint commits to origin (user does pushes); live QA of billing lock/quiz/library flows; audit all routes for permission-implication coverage; README dev-note: never run npm run build while the dev server is live (corrupts .next → [object Event] overlay + 500s)."
+  }
 }

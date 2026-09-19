@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { gpaOf, positions } from "@/lib/grades";
+import { writeGuard } from "@/lib/subscription";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -56,6 +57,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const session = await getSession();
   if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
+  const locked = await writeGuard(session.schoolId);
+  if (locked) return locked;
   const body = await req.json().catch(() => null);
   const exam = await prisma.exam.findUnique({ where: { id } });
   if (!exam || exam.schoolId !== session.schoolId) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -80,6 +83,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const session = await getSession();
   if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
+  const locked = await writeGuard(session.schoolId);
+  if (locked) return locked;
   const exam = await prisma.exam.findUnique({ where: { id } });
   if (!exam || exam.schoolId !== session.schoolId) return NextResponse.json({ error: "Not found" }, { status: 404 });
   await prisma.$transaction([

@@ -12,23 +12,39 @@ export async function GET(req: NextRequest) {
   const schoolId = session.role === "SUPER_ADMIN" ? req.nextUrl.searchParams.get("schoolId") || undefined : session.schoolId!;
   if (!schoolId) return NextResponse.json({ error: "No school context" }, { status: 400 });
 
-  const teachers = await prisma.teacher.findMany({
-    where: { schoolId },
-    include: {
-      user: { select: { id: true, name: true, email: true, phone: true, photoUrl: true, active: true } },
-      assignments: {
-        select: {
-          id: true,
-          classRoom: { select: { name: true } },
-          section: { select: { name: true } },
-          subject: { select: { name: true } },
-        },
-      },
-      _count: { select: { homeworks: true } },
-    },
-    orderBy: { joinDate: "desc" },
-  });
-  return NextResponse.json({ data: teachers });
+  const [teachers, users, assignments, classes, sections, subjects] = await Promise.all([
+    prisma.teacher.findMany({ where: { schoolId } }),
+    prisma.user.findMany({ where: { schoolId }, select: { id: true, name: true, email: true, phone: true, photoUrl: true, active: true } }),
+    prisma.classAssignment.findMany({ where: { schoolId }, select: { id: true, teacherId: true, classId: true, sectionId: true, subjectId: true } }),
+    prisma.classRoom.findMany({ where: { schoolId }, select: { id: true, name: true } }),
+    prisma.section.findMany({ where: { schoolId }, select: { id: true, name: true } }),
+    prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } }),
+  ]);
+
+  const userById = new Map(users.map((item: any) => [item.id, item]));
+  const classById = new Map(classes.map((item: any) => [item.id, item]));
+  const sectionById = new Map(sections.map((item: any) => [item.id, item]));
+  const subjectById = new Map(subjects.map((item: any) => [item.id, item]));
+  const assignmentsByTeacher = new Map<string, any[]>();
+  for (const assignment of assignments) {
+    const teacherAssignments = assignmentsByTeacher.get(assignment.teacherId) || [];
+    teacherAssignments.push({
+      id: assignment.id,
+      classRoom: classById.get(assignment.classId) || null,
+      section: assignment.sectionId ? sectionById.get(assignment.sectionId) || null : null,
+      subject: subjectById.get(assignment.subjectId) || null,
+    });
+    assignmentsByTeacher.set(assignment.teacherId, teacherAssignments);
+  }
+
+  const result = teachers
+    .map((teacher: any) => ({
+      ...teacher,
+      user: userById.get(teacher.userId) || null,
+      assignments: assignmentsByTeacher.get(teacher.id) || [],
+    }))
+    .sort((a: any, b: any) => new Date(b.joinDate || 0).getTime() - new Date(a.joinDate || 0).getTime());
+  return NextResponse.json({ data: result });
 }
 
 export async function POST(req: NextRequest) {

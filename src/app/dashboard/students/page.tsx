@@ -27,7 +27,8 @@ export default function StudentsPage() {
   const load = (query: string) => api<Student[]>(`/api/students${query}`).then(setStudents).finally(() => setLoading(false));
 
   useEffect(() => {
-    Promise.all([api<ClassRow[]>("/api/classes"), load("")]).then(([c]) => setClasses(c)).finally(() => setLoading(false));
+    load("");
+    api<ClassRow[]>("/api/classes").then(setClasses).catch(() => null);
   }, []);
 
   const applyFilters = () => {

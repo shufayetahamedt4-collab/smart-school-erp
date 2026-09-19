@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { slugify } from "@/lib/utils";
+import { writeGuard } from "@/lib/subscription";
 
 /**
  * School detail API.
@@ -55,6 +56,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+
+  const writeBlocked = await writeGuard(session.schoolId ?? id);
+  if (writeBlocked) return writeBlocked;
 
   const data: any = {};
   // Self-service editable fields (school admin): profile + branding only.

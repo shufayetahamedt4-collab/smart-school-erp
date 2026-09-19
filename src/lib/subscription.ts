@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { prisma } from "./db";
 import { notifyUsers } from "./notify";
 
@@ -5,7 +6,7 @@ import { notifyUsers } from "./notify";
  * PRD §12.1 — Subscription & Billing (Super Admin).
  *
  * Plans are platform-level records (Trial/Basic/Premium) with student limits.
- * Each school holds one subscription: TRIAL → ACTIVE → PAST_DUE → LOCKED.
+ * Each school holds one subscription: TRIAL → ACTIVE → GRACE → LOCKED.
  * After the grace period the school's write routes get 402 (data is never
  * deleted — PRD: "Auto-lock after Trial ends (with grace period; data will
  * not be deleted)"). Invoices are generated on assignment/renewal and
@@ -16,7 +17,7 @@ import { notifyUsers } from "./notify";
 export const DEFAULT_TRIAL_DAYS = 14;
 export const DEFAULT_GRACE_DAYS = 7;
 
-export type SubStatus = "TRIAL" | "ACTIVE" | "PAST_DUE" | "LOCKED" | "CANCELLED";
+export type SubStatus = "TRIAL" | "ACTIVE" | "GRACE" | "PAST_DUE" | "LOCKED" | "CANCELLED" | "EXPIRED";
 
 export interface SubscriptionState {
   status: SubStatus | "NONE";
@@ -47,7 +48,8 @@ export async function getSubscriptionState(schoolId: string): Promise<Subscripti
 
   const now = Date.now();
   const periodEnd = sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd as any).getTime() : null;
-  const graceEnd = periodEnd !== null ? periodEnd + DEFAULT_GRACE_DAYS * DAY : null;
+  const graceEndRaw = (sub as any).graceEndsAt ? new Date((sub as any).graceEndsAt as any).getTime() : null;
+  const graceEnd = graceEndRaw ?? (periodEnd !== null ? periodEnd + DEFAULT_GRACE_DAYS * DAY : null);
 
   let status = (sub.status as SubStatus) || "TRIAL";
   let canWrite = true;
@@ -61,12 +63,12 @@ export async function getSubscriptionState(schoolId: string): Promise<Subscripti
       if (graceEnd !== null && now >= graceEnd) {
         status = "LOCKED";
         canWrite = false;
-      } else if (status === "ACTIVE" || status === "TRIAL") {
-        status = "PAST_DUE"; // within grace — reads fine, writes blocked softly
+      } else if (status === "ACTIVE" || status === "TRIAL" || status === "PAST_DUE") {
+        status = "GRACE";
         canWrite = false;
       }
     }
-  } else if (status === "LOCKED") {
+  } else if (status === "LOCKED" || status === "EXPIRED") {
     canWrite = false;
   }
 
@@ -108,8 +110,6 @@ export async function subscriptionStateForSession(schoolId: string | null | unde
     return null;
   }
 }
-
-import { NextResponse } from "next/server";
 
 /**
  * Route-friendly write guard: returns a 402 response when the school is
