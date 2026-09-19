@@ -27,12 +27,25 @@ console.log("before: attendanceToday =", before.attendanceToday, "(count of rows
 const first = before.myClasses[0];
 const today = new Date();
 const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-const roster = (await (await fetch(`${BASE}/api/attendance?classId=${first.id}&date=${date}`, { headers: H })).json()).data;
-if (!roster?.length) throw new Error("no students in roster");
-const rows = roster.slice(0, 2).map((s) => ({ studentId: s.id, classId: first.id, sectionId: undefined, status: "PRESENT", remark: "cache-test" }));
-// need sectionId: roster has no sectionId — resolve from the teacher's assignment
-const asn = (await (await fetch(`${BASE}/api/stats`, { headers: H })).json()).data.assignments.find((a) => a.classId === first.id);
-rows.forEach((r) => (r.sectionId = asn?.sectionId || null));
+// Find an UNMARKED student across the teacher's classes — marking them
+// MUST increase the "records marked today" count by 1 (re-run safe: the
+// previous test's students are already marked, so skip those).
+let target = null;
+let asn = null;
+for (const cls of before.myClasses) {
+  const roster = (await (await fetch(`${BASE}/api/attendance?classId=${cls.id}&date=${date}`, { headers: H })).json()).data;
+  const unmarked = (roster || []).find((s) => s.status === "UNMARKED");
+  if (unmarked) {
+    asn = before.assignments.find((a) => a.classId === cls.id);
+    target = { student: unmarked, classId: cls.id };
+    break;
+  }
+}
+if (!target) {
+  console.log("⚠️  every student in the teacher's classes is already marked — nothing to submit; re-run after resetting attendance");
+  process.exit(0);
+}
+const rows = [{ studentId: target.student.id, classId: target.classId, sectionId: asn?.sectionId || null, status: "PRESENT", remark: "cache-test" }];
 
 const post = await fetch(`${BASE}/api/attendance`, {
   method: "POST",
@@ -44,6 +57,7 @@ console.log("POST /api/attendance →", post.status, await post.text());
 const after = await stats();
 console.log("after:  attendanceToday =", after.attendanceToday);
 
-const ok = after.attendanceToday === before.attendanceToday + 2;
-console.log(ok ? "✅ INVALIDATION VERIFIED — dashboard reflected the submit immediately" : "❌ STALE — counts did not update");
+const changed = after.attendanceToday === before.attendanceToday + 1;
+console.log(changed ? "✅ INVALIDATION VERIFIED — dashboard reflected the submit immediately" : "❌ STALE — counts did not update");
+process.exit(changed ? 0 : 1);
 process.exit(ok ? 0 : 1);
