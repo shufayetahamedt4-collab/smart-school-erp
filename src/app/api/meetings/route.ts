@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, schoolReference, userNamesFor } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { notifyUsers } from "@/lib/notify";
@@ -16,40 +16,71 @@ export async function GET() {
   const schoolId = session.schoolId!;
 
   if (session.role === "GUARDIAN") {
-    const studentId = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
-    const slots = await prisma.meetingSlot.findMany({
-      where: { schoolId, active: true },
-      include: {
-        teacher: { select: { id: true, name: true } },
-        bookings: studentId ? { where: { studentId } } : false,
-      },
-      orderBy: { startAt: "asc" },
-      take: 60,
-    });
-    return NextResponse.json({
-      data: slots.map((s) => ({
+    // Single wave: slots + teachers + ALL school bookings; the guardian's
+    // student resolved from the memoized students pull (was a sequential
+    // findFirst + a bookings child query per slot).
+    const [slots, teacherRows, students, bookingRows] = await Promise.all([
+      prisma.meetingSlot.findMany({ where: { schoolId, active: true } }),
+      schoolReference("teacher", schoolId),
+      schoolReference("student", schoolId),
+      prisma.meetingBooking.findMany({ where: { schoolId } }),
+    ]);
+    const student =
+      session.studentId
+        ? students.find((s: any) => s.id === session.studentId)
+        : students.find((s: any) => s.guardianUserId === session.id);
+    const teacherById = new Map(teacherRows.map((t) => [t.id, t]));
+    const bookedSlotIds = new Set(
+      student ? bookingRows.filter((b: any) => b.studentId === student.id).map((b: any) => b.slotId) : []
+    );
+    const data = slots
+      .map((s: any) => ({
         id: s.id,
-        teacher: s.teacher.name,
+        teacher: s.teacherId ? teacherById.get(s.teacherId)?.name || "" : "",
         title: s.title,
         startAt: s.startAt,
         durationMin: s.durationMin,
         mode: s.mode,
-        booked: Array.isArray(s.bookings) && s.bookings.length > 0,
-      })),
-    });
+        booked: bookedSlotIds.has(s.id),
+      }))
+      .sort((a: any, b: any) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
+      .slice(0, 60);
+    return NextResponse.json({ data });
   }
 
-  // Staff view with bookings
-  const slots = await prisma.meetingSlot.findMany({
-    where: { schoolId },
-    include: {
-      teacher: { select: { id: true, name: true } },
-      bookings: { include: { student: { select: { id: true, name: true } }, guardian: { select: { name: true } } } },
-    },
-    orderBy: { startAt: "asc" },
-    take: 100,
-  });
-  return NextResponse.json({ data: slots });
+  // Staff view with bookings — single wave: slots + teachers + students +
+  // all school bookings (was a bookings query per slot, then per-booking
+  // and per-name document gets).
+  const [slots, teacherRows, studentRows, bookingRows] = await Promise.all([
+    prisma.meetingSlot.findMany({ where: { schoolId } }),
+    schoolReference("teacher", schoolId),
+    schoolReference("student", schoolId),
+    prisma.meetingBooking.findMany({ where: { schoolId } }),
+  ]);
+  const teacherById = new Map(teacherRows.map((t) => [t.id, t]));
+  const studentById = new Map(studentRows.map((s: any) => [s.id, s]));
+  const bookingsBySlot = new Map<string, any[]>();
+  for (const b of bookingRows) {
+    const arr = bookingsBySlot.get(b.slotId) || [];
+    arr.push(b);
+    bookingsBySlot.set(b.slotId, arr);
+  }
+  const guardianUserIds = [...new Set(bookingRows.map((b: any) => b.guardianUserId).filter(Boolean))];
+  const guardianNames = await userNamesFor(guardianUserIds); // memoized users pull
+  const guardianById = new Map(guardianUserIds.map((id: string) => [id, { id, name: guardianNames.get(id) || "" }]));
+  const data = slots
+    .map((s: any) => ({
+      ...s,
+      teacher: s.teacherId ? teacherById.get(s.teacherId) || null : null,
+      bookings: (bookingsBySlot.get(s.id) || []).map((b: any) => ({
+        ...b,
+        student: b.studentId ? studentById.get(b.studentId) || null : null,
+        guardian: b.guardianUserId ? guardianById.get(b.guardianUserId) || null : null,
+      })),
+    }))
+    .sort((a: any, b: any) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
+    .slice(0, 100);
+  return NextResponse.json({ data });
 }
 
 export async function POST(req: NextRequest) {
@@ -99,7 +130,7 @@ export async function POST(req: NextRequest) {
 
   const booking = await prisma.meetingBooking.upsert({
     where: { slotId_guardianUserId: { slotId, guardianUserId: session.id } },
-    create: { slotId, guardianUserId: session.id, studentId, status: "BOOKED" },
+    create: { schoolId, slotId, guardianUserId: session.id, studentId, status: "BOOKED" },
     update: { status: "BOOKED", studentId },
   });
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 
@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
 
   const subject = await prisma.subject.create({ data: { schoolId, name, code: body.code || null } });
   await audit("SUBJECT_CREATE", "subject", subject.id, { name });
+  invalidateReferenceCache(schoolId);
   return NextResponse.json({ data: subject }, { status: 201 });
 }
 

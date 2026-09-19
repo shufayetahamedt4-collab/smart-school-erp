@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/db";
+import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { qrToken, qrPin } from "@/lib/qr";
 import { writeGuard } from "@/lib/subscription";
@@ -150,6 +150,7 @@ export async function POST(req: NextRequest) {
 
     await audit("STUDENT_CREATE", "student", student.id, { name: body.name });
     invalidateStats(schoolId, "students");
+    invalidateReferenceCache(schoolId);
     return NextResponse.json({ data: { ...student, qrToken: token, qrPin: pin } }, { status: 201 });
   } catch (e: any) {
     if (e?.code === "P2002") {

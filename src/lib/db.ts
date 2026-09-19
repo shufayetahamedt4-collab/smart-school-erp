@@ -641,6 +641,50 @@ async function fetchAll(model: string, where?: Record<string, any>): Promise<any
   return snap.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
 }
 
+/**
+ * Tiny process-wide TTL memo for school-scoped reference data (classes,
+ * sections, subjects, teachers, students…). Routes that resolve names via
+ * repeated pulls reuse one fetch for ~3s; write routes call
+ * `invalidateReferenceCache(schoolId)` so pages never see stale names.
+ */
+const REF_TTL_MS = 3_000;
+const refMemo = new Map<string, { at: number; rows: any[] }>();
+
+export function invalidateReferenceCache(schoolId: string | null | undefined): void {
+  if (!schoolId) return;
+  for (const k of refMemo.keys()) if (k.endsWith(`:${schoolId}`)) refMemo.delete(k);
+}
+
+export async function schoolReference(model: string, schoolId: string): Promise<any[]> {
+  const key = `${model}:${schoolId}`;
+  const hit = refMemo.get(key);
+  if (hit && Date.now() - hit.at < REF_TTL_MS) return hit.rows;
+  const modelOps: any = (prisma as any)[model];
+  const rows: any[] = await modelOps.findMany({ where: { schoolId } });
+  refMemo.set(key, { at: Date.now(), rows });
+  return rows;
+}
+
+/**
+ * userId → name map in ONE pull. Replaces the per-uid findUnique waves
+ * routes used to resolve teacher/guardian display names. Reads the same
+ * user docs as before (users are few and carry no schoolId, so a memoized
+ * full pull filtered in memory is both cheapest and drift-free).
+ */
+export async function userNamesFor(userIds: string[]): Promise<Map<string, string>> {
+  const want = new Set(userIds.filter(Boolean));
+  const out = new Map<string, string>();
+  if (!want.size) return out;
+  const key = "users:ALL";
+  let rowsP = refMemo.get(key);
+  if (!rowsP || Date.now() - rowsP.at >= REF_TTL_MS) {
+    rowsP = { at: Date.now(), rows: await prisma.user.findMany({ select: { id: true, name: true } }) };
+    refMemo.set(key, rowsP);
+  }
+  for (const u of rowsP.rows) if (want.has(u.id)) out.set(u.id, u.name);
+  return out;
+}
+
 /** Context with per-query caches so relation lookups are cheap. */
 class Ctx {
   private docCache = new Map<string, Promise<any>>();
@@ -680,11 +724,11 @@ class Ctx {
 /** Async filter over a list using a Prisma-style where clause. */
 async function filterList(list: any[], model: string, where: Record<string, any> | undefined, ctx: Ctx): Promise<any[]> {
   if (!where || Object.keys(where).length === 0) return list;
-  const out: any[] = [];
-  for (const d of list) {
-    if (await match(d, model, where, ctx)) out.push(d);
-  }
-  return out;
+  // Match all docs in parallel — relation lookups inside match() dedupe
+  // through the Ctx promise caches, so this collapses N+1 lookups into a
+  // single wave of queries (order is preserved by Promise.all).
+  const keep = await Promise.all(list.map((d) => match(d, model, where, ctx)));
+  return list.filter((_, i) => keep[i]);
 }
 
 async function filterAll(model: string, where: Record<string, any>): Promise<any[]> {
@@ -854,34 +898,44 @@ function sortBy(list: any[], orderBy: any): any[] {
 // ---------------------------------------------------------------------------
 
 async function applyInclude(doc: any, model: string, include: Record<string, any>, ctx: Ctx): Promise<void> {
-  for (const [key, spec] of Object.entries(include)) {
-    if (key === "_count") {
-      doc._count = {};
-      for (const [relKey, flag] of Object.entries(spec.select || {})) {
-        if (!flag) continue;
-        const rel = RELS[model][relKey];
-        if (!rel) continue;
-        const count = rel.kind === "many" || rel.kind === "oneInverse" ? await ctx.list(rel.to, rel.via!, doc.id) : [];
-        doc._count[relKey] = rel.kind === "oneInverse" ? (count.length ? 1 : 0) : count.length;
+  // Resolve all include keys in one parallel wave (each key writes a
+  // distinct property; relation queries dedupe through the Ctx caches).
+  await Promise.all(
+    Object.entries(include).map(async ([key, spec]) => {
+      if (key === "_count") {
+        const countSpec = spec.select || {};
+        const entries = Object.entries(countSpec).filter(([, flag]) => flag);
+        const counts = await Promise.all(
+          entries.map(([relKey]) => {
+            const rel = RELS[model][relKey];
+            if (!rel) return Promise.resolve({ relKey, n: 0, inverse: false });
+            const many = rel.kind === "many" || rel.kind === "oneInverse";
+            return many
+              ? ctx.list(rel.to, rel.via!, doc.id).then((l) => ({ relKey, n: l.length, inverse: rel.kind === "oneInverse" }))
+              : Promise.resolve({ relKey, n: 0, inverse: false });
+          })
+        );
+        doc._count = {};
+        for (const { relKey, n, inverse } of counts) doc._count[relKey] = inverse ? (n ? 1 : 0) : n;
+        return;
       }
-      continue;
-    }
-    const rel = RELS[model]?.[key];
-    if (!rel) continue;
-    if (rel.kind === "one") {
-      const related = await ctx.doc(rel.to, doc[rel.fk!]);
-      doc[key] = related ? await shape(related, rel.to, spec, ctx) : null;
-    } else if (rel.kind === "oneInverse") {
-      const related = (await ctx.list(rel.to, rel.via!, doc.id))[0];
-      doc[key] = related ? await shape(related, rel.to, spec, ctx) : null;
-    } else {
-      let list = await ctx.list(rel.to, rel.via!, doc.id);
-      if (spec && spec.where) list = await filterList(list, rel.to, spec.where, ctx);
-      if (spec && spec.orderBy) list = sortBy(list, spec.orderBy);
-      if (spec && spec.take !== undefined) list = list.slice(0, spec.take);
-      doc[key] = await Promise.all(list.map((d) => shape(d, rel.to, spec, ctx)));
-    }
-  }
+      const rel = RELS[model]?.[key];
+      if (!rel) return;
+      if (rel.kind === "one") {
+        const related = await ctx.doc(rel.to, doc[rel.fk!]);
+        doc[key] = related ? await shape(related, rel.to, spec, ctx) : null;
+      } else if (rel.kind === "oneInverse") {
+        const related = (await ctx.list(rel.to, rel.via!, doc.id))[0];
+        doc[key] = related ? await shape(related, rel.to, spec, ctx) : null;
+      } else {
+        let list = await ctx.list(rel.to, rel.via!, doc.id);
+        if (spec && spec.where) list = await filterList(list, rel.to, spec.where, ctx);
+        if (spec && spec.orderBy) list = sortBy(list, spec.orderBy);
+        if (spec && spec.take !== undefined) list = list.slice(0, spec.take);
+        doc[key] = await Promise.all(list.map((d) => shape(d, rel.to, spec, ctx)));
+      }
+    })
+  );
 }
 
 async function shape(doc: any, model: string, spec: any, ctx: Ctx): Promise<any> {
@@ -892,26 +946,29 @@ async function shape(doc: any, model: string, spec: any, ctx: Ctx): Promise<any>
   if (spec.select) {
     const picked: Record<string, any> = {};
     const select: Record<string, any> = spec.select;
-    for (const [k, v] of Object.entries(select)) {
-      if (v === true) {
-        picked[k] = out[k];
-      } else if (v && typeof v === "object") {
-        const rel = RELS[model]?.[k];
-        if (rel?.kind === "one") {
-          const related = await ctx.doc(rel.to, out[rel.fk!]);
-          picked[k] = related ? await shape(related, rel.to, v, ctx) : null;
-        } else if (rel?.kind === "oneInverse") {
-          const related = (await ctx.list(rel.to, rel.via!, out.id))[0];
-          picked[k] = related ? await shape(related, rel.to, v, ctx) : null;
-        } else if (rel) {
-          let list = await ctx.list(rel.to, rel.via!, out.id);
-          if (v.where) list = await filterList(list, rel.to, v.where, ctx);
-          if (v.orderBy) list = sortBy(list, v.orderBy);
-          if (v.take !== undefined) list = list.slice(0, v.take);
-          picked[k] = await Promise.all(list.map((d) => shape(d, rel.to, v, ctx)));
+    // Pick/select all keys in one parallel wave.
+    await Promise.all(
+      Object.entries(select).map(async ([k, v]) => {
+        if (v === true) {
+          picked[k] = out[k];
+        } else if (v && typeof v === "object") {
+          const rel = RELS[model]?.[k];
+          if (rel?.kind === "one") {
+            const related = await ctx.doc(rel.to, out[rel.fk!]);
+            picked[k] = related ? await shape(related, rel.to, v, ctx) : null;
+          } else if (rel?.kind === "oneInverse") {
+            const related = (await ctx.list(rel.to, rel.via!, out.id))[0];
+            picked[k] = related ? await shape(related, rel.to, v, ctx) : null;
+          } else if (rel) {
+            let list = await ctx.list(rel.to, rel.via!, out.id);
+            if (v.where) list = await filterList(list, rel.to, v.where, ctx);
+            if (v.orderBy) list = sortBy(list, v.orderBy);
+            if (v.take !== undefined) list = list.slice(0, v.take);
+            picked[k] = await Promise.all(list.map((d) => shape(d, rel.to, v, ctx)));
+          }
         }
-      }
-    }
+      })
+    );
     return picked;
   }
   return out;
@@ -971,11 +1028,11 @@ async function findMany(model: string, args: any): Promise<any[]> {
 async function count(model: string, args: any): Promise<number> {
   const where = args?.where || {};
   const keys = Object.keys(where).filter((k) => where[k] !== undefined && where[k] !== null);
-  // Fast path: a lone schoolId equality pushes down to Firestore cleanly, so
-  // use the native count aggregation instead of pulling every document
-  // (a school-wide count previously transferred all rows just to count them).
-  if (keys.length === 1 && keys[0] === "schoolId" && typeof where.schoolId === "string") {
-    const snap = await col(model).where("schoolId", "==", where.schoolId).count().get();
+  // Fast path: a lone string-equality filter pushes down to Firestore cleanly
+  // (schoolId, examId, …), so use the native count aggregation instead of
+  // pulling every document just to count it.
+  if (keys.length === 1 && typeof where[keys[0]] === "string") {
+    const snap = await col(model).where(keys[0], "==", where[keys[0]]).count().get();
     return Number((snap.data() as any).count ?? (snap.data() as any).totalCount ?? 0);
   }
   const list = await filterAll(model, where);

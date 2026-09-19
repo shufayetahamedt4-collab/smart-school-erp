@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { gradeFor } from "@/lib/grades";
 import { invalidateStats } from "@/lib/stats-cache";
@@ -39,5 +39,6 @@ export async function POST(req: NextRequest) {
   );
   await audit("MARKS_SAVE", "exam", examId, { count });
   invalidateStats(schoolId, "marks");
+  invalidateReferenceCache(schoolId);
   return NextResponse.json({ data: { ok: true, count } });
 }

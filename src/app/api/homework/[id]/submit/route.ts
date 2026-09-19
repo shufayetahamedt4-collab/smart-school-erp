@@ -38,6 +38,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       ...(fileUrl ? { fileUrl } : {}),
     },
     create: {
+      schoolId: homework.schoolId,
       homeworkId: id,
       studentId,
       status,

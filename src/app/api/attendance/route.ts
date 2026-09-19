@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
+import { invalidateReferenceCache } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -17,24 +18,38 @@ export async function GET(req: NextRequest) {
   if (!classId || !dateStr) return NextResponse.json({ error: "classId and date are required." }, { status: 400 });
   const date = new Date(`${dateStr}T00:00:00`);
 
-  const students = await prisma.student.findMany({
-    where: { schoolId, classId, sectionId, active: true },
-    include: {
-      section: { select: { id: true, name: true } },
-      attendance: { where: { date }, take: 1 },
-    },
-    orderBy: { roll: "asc" },
-  });
+  // Single-wave: students + ONE date-windowed attendance pull (the include
+  // ran one child query per student), joined in memory. The gte/lt window
+  // rides the (schoolId, date) composite index and is re-checked in memory.
+  const nextDay = new Date(date);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const [students, attendanceRows] = await Promise.all([
+    prisma.student.findMany({
+      where: { schoolId, classId, sectionId, active: true },
+      include: {
+        section: { select: { id: true, name: true } },
+      },
+      orderBy: { roll: "asc" },
+    }),
+    prisma.attendance.findMany({ where: { schoolId, date: { gte: date, lt: nextDay } } }),
+  ]);
+  const sameDay = (d: any) => d && new Date(d).toDateString() === date.toDateString();
+  const attByStudent = new Map(
+    attendanceRows.filter((a: any) => sameDay(a.date)).map((a: any) => [a.studentId, a])
+  );
   return NextResponse.json({
-    data: students.map((s) => ({
-      id: s.id,
-      name: s.name,
-      roll: s.roll,
-      admissionNo: s.admissionNo,
-      photoUrl: s.photoUrl,
-      status: s.attendance[0]?.status || "UNMARKED",
-      remark: s.attendance[0]?.remark || "",
-    })),
+    data: students.map((s) => {
+      const att: any = attByStudent.get(s.id);
+      return {
+        id: s.id,
+        name: s.name,
+        roll: s.roll,
+        admissionNo: s.admissionNo,
+        photoUrl: s.photoUrl,
+        status: att?.status || "UNMARKED",
+        remark: att?.remark || "",
+      };
+    }),
   });
 }
 
@@ -76,5 +91,6 @@ export async function POST(req: NextRequest) {
   );
   await audit("ATTENDANCE_SAVE", "attendance", date);
   invalidateStats(schoolId, "attendance");
+  invalidateReferenceCache(schoolId);
   return NextResponse.json({ data: { ok: true, count: rows.filter((r: any) => r.status && r.status !== "UNMARKED").length } });
 }

@@ -1,9 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, schoolReference } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { postToLedger } from "@/lib/ledger";
 import { writeGuard } from "@/lib/subscription";
+
+/**
+ * All payments for the given fees — now a single school-scoped pull filtered
+ * in memory by the caller (kept as a named helper for readability).
+ */
+async function paymentRowsFor(fees: any[]): Promise<any[]> {
+  if (!fees.length) return [];
+  const schoolId = fees[0].schoolId;
+  const rows = await prisma.payment.findMany({ where: { schoolId } });
+  const feeIds = new Set(fees.map((f) => f.id));
+  return rows.filter((p: any) => feeIds.has(p.feeId));
+}
+
+/** All installments for the given fees — one school-scoped pull (see above). */
+async function installmentRowsFor(fees: any[]): Promise<any[]> {
+  if (!fees.length) return [];
+  const schoolId = fees[0].schoolId;
+  const rows = await prisma.installment.findMany({ where: { schoolId } });
+  const feeIds = new Set(fees.map((f) => f.id));
+  return rows.filter((i: any) => feeIds.has(i.feeId));
+}
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -11,15 +32,23 @@ export async function GET(req: NextRequest) {
   const schoolId = session.schoolId!;
   const sp = req.nextUrl.searchParams;
 
+  // Identity + role filtering resolved in-memory from memoized reference
+  // pulls (was a sequential student findFirst before the main query).
+  // NOTE: role branching matches the original exactly — only GUARDIAN and
+  // STUDENT are scoped to their own fees; TEACHER and other staff roles see
+  // the school-wide list. wantsFull only gates the templates payload.
+  const wantsFull = can(session.role, "feePayment", "full");
   let where: any = { schoolId };
-  if (session.role === "GUARDIAN") {
-    const studentId = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
-    if (!studentId) return NextResponse.json({ data: { fees: [], settings: null } });
-    where.studentId = studentId;
-  } else if (session.role === "STUDENT") {
-    const studentId = (await prisma.student.findFirst({ where: { userId: session.id } }))?.id;
-    if (!studentId) return NextResponse.json({ data: { fees: [], settings: null } });
-    where.studentId = studentId;
+  if (session.role === "GUARDIAN" || session.role === "STUDENT") {
+    const students = await schoolReference("student", schoolId);
+    const student =
+      session.role === "GUARDIAN"
+        ? session.studentId
+          ? students.find((s: any) => s.id === session.studentId)
+          : students.find((s: any) => s.guardianUserId === session.id)
+        : students.find((s: any) => s.userId === session.id);
+    if (!student) return NextResponse.json({ data: { fees: [], settings: null } });
+    where.studentId = student.id;
   } else {
     if (sp.get("status")) where.status = sp.get("status");
     if (sp.get("studentId")) where.studentId = sp.get("studentId");
@@ -28,21 +57,77 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const fees = await prisma.fee.findMany({
-    where,
-    include: {
-      student: { select: { id: true, name: true, admissionNo: true, roll: true, photoUrl: true, classRoom: { select: { name: true } }, section: { select: { name: true } } } },
-      payments: { orderBy: { date: "desc" } },
-      installments: { orderBy: { seq: "asc" } },
-    },
-    orderBy: [{ status: "asc" }, { dueDate: "desc" }],
+  // ONE wave: fees + settings + templates + payments + installments + the
+  // reference maps (payments/installments are school-scoped and filtered to
+  // the visible fees in memory — they never depended on the fees result).
+  const [feesRaw, settings, templates, paymentRows, installmentRows, studentRows, classRows, sectionRows] = await Promise.all([
+    prisma.fee.findMany({ where: { schoolId } }),
+    prisma.feeSetting.findUnique({ where: { schoolId } }),
+    wantsFull ? prisma.feeTemplate.findMany({ where: { schoolId }, include: { items: true } }) : Promise.resolve([]),
+    prisma.payment.findMany({ where: { schoolId } }),
+    prisma.installment.findMany({ where: { schoolId } }),
+    schoolReference("student", schoolId),
+    schoolReference("classRoom", schoolId),
+    schoolReference("section", schoolId),
+  ]);
+  // Role/q filtering that the where-clause used to do — now in memory.
+  const q = (sp.get("q") || "").toLowerCase();
+  const fees = feesRaw.filter((f: any) => {
+    if (where.studentId && f.studentId !== where.studentId) return false;
+    if (where.status && f.status !== where.status) return false;
+    if (q) {
+      const s = studentRows.find((x: any) => x.id === f.studentId);
+      if (!s || !String(s.name || "").toLowerCase().includes(q)) return false;
+    }
+    return true;
   });
-
-  const settings = await prisma.feeSetting.findUnique({ where: { schoolId } });
-  const templates = can(session.role, "feePayment", "full")
-    ? await prisma.feeTemplate.findMany({ where: { schoolId }, include: { items: true } })
-    : [];
-  return NextResponse.json({ data: { fees, settings, templates } });
+  const visibleFeeIds = new Set(fees.map((f: any) => f.id));
+  const paymentsByFee = new Map<string, any[]>();
+  for (const p of paymentRows) {
+    if (!visibleFeeIds.has(p.feeId)) continue;
+    const arr = paymentsByFee.get(p.feeId) || [];
+    arr.push(p);
+    paymentsByFee.set(p.feeId, arr);
+  }
+  const installmentsByFee = new Map<string, any[]>();
+  for (const i of installmentRows) {
+    if (!visibleFeeIds.has(i.feeId)) continue;
+    const arr = installmentsByFee.get(i.feeId) || [];
+    arr.push(i);
+    installmentsByFee.set(i.feeId, arr);
+  }
+  const studentById = new Map(studentRows.map((s) => [s.id, s]));
+  const classById = new Map(classRows.map((c) => [c.id, c]));
+  const sectionById = new Map(sectionRows.map((s) => [s.id, s]));
+  const shaped = fees
+    .map((f: any) => {
+      const s = f.studentId ? studentById.get(f.studentId) : null;
+      return {
+        ...f,
+        student: s
+          ? {
+              id: s.id,
+              name: s.name,
+              admissionNo: s.admissionNo,
+              roll: s.roll,
+              photoUrl: s.photoUrl,
+              classRoom: s.classId ? classById.get(s.classId) || null : null,
+              section: s.sectionId ? sectionById.get(s.sectionId) || null : null,
+            }
+          : null,
+        payments: (paymentsByFee.get(f.id) || []).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+        installments: (installmentsByFee.get(f.id) || []).sort((a: any, b: any) => (a.seq ?? 0) - (b.seq ?? 0)),
+      };
+    })
+    .sort((a: any, b: any) => {
+      // orderBy [{ status: "asc" }, { dueDate: "desc" }]
+      const st = String(a.status).localeCompare(String(b.status));
+      if (st !== 0) return st;
+      const ad = a.dueDate ? new Date(a.dueDate).getTime() : 0;
+      const bd = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+      return bd - ad;
+    });
+  return NextResponse.json({ data: { fees: shaped, settings, templates } });
 }
 
 /**

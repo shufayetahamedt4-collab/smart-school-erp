@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/db";
+import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 
@@ -87,5 +87,6 @@ export async function POST(req: NextRequest) {
   });
 
   await audit("TEACHER_CREATE", "teacher", teacher.id, { name });
+  invalidateReferenceCache(schoolId); // teacher + user docs feed the memoized name/reference maps
   return NextResponse.json({ data: teacher }, { status: 201 });
 }

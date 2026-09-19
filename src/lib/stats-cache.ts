@@ -34,13 +34,13 @@ export function statsCachePut(key: string, payload: any, schoolId: string): void
 
 /**
  * Drop cached stats for a school after its underlying data changed.
- * `what` documents the trigger (attendance | homework | marks | students |
- * classes | all) — every payload depends on all of them, so all of the
- * school's entries are invalidated regardless.
+ * `what` documents the trigger (attendance | homework | marks | exams |
+ * students | classes | all) — every payload depends on all of them, so all
+ * of the school's entries are invalidated regardless.
  */
 export function invalidateStats(
   schoolId: string | null | undefined,
-  _what: "attendance" | "homework" | "marks" | "students" | "classes" | "all" = "all"
+  _what: "attendance" | "homework" | "marks" | "exams" | "students" | "classes" | "all" = "all"
 ): void {
   if (!schoolId) return;
   for (const [k, v] of store) {

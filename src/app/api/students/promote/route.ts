@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { invalidateStats } from "@/lib/stats-cache";
@@ -77,5 +77,6 @@ export async function POST(req: NextRequest) {
 
   await audit("STUDENT_PROMOTE", "classRoom", fromClassId, { promoted, graduated, excluded: excludeIds.length });
   invalidateStats(schoolId, "students");
+  invalidateReferenceCache(schoolId);
   return NextResponse.json({ data: { promoted, graduated, excluded: excludeIds.length } });
 }
