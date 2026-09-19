@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { invalidateStats } from "@/lib/stats-cache";
 
 /** PRD §5.3 — Alumni tracking: archive (never delete) + listing + re-archive. */
 export async function GET(req: NextRequest) {
@@ -48,5 +49,6 @@ export async function POST(req: NextRequest) {
     data: { status: body?.restore ? "ACTIVE" : "ALUMNI" },
   });
   await audit(body?.restore ? "STUDENT_RESTORE" : "STUDENT_ARCHIVE", "student", studentId);
+  invalidateStats(student.schoolId, "students");
   return NextResponse.json({ data: updated });
 }

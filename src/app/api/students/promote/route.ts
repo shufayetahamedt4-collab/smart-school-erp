@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { invalidateStats } from "@/lib/stats-cache";
 
 /**
  * PRD §5.2 — Class Promotion Workflow.
@@ -75,5 +76,6 @@ export async function POST(req: NextRequest) {
   }
 
   await audit("STUDENT_PROMOTE", "classRoom", fromClassId, { promoted, graduated, excluded: excludeIds.length });
+  invalidateStats(schoolId, "students");
   return NextResponse.json({ data: { promoted, graduated, excluded: excludeIds.length } });
 }

@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
+import { invalidateStats } from "@/lib/stats-cache";
 
 /**
  * PRD §7.2 — "Separate, limited-permission login from Guardian (school will
@@ -102,6 +103,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const updated = await prisma.student.update({ where: { id }, data });
   await audit("STUDENT_UPDATE", "student", id);
+  invalidateStats(session.schoolId, "students");
   return NextResponse.json({ data: updated });
 }
 
@@ -112,6 +114,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const locked = await writeGuard(session.schoolId);
   if (locked) return locked;
   await audit("STUDENT_DELETE", "student", id);
+  invalidateStats(session.schoolId, "students");
   await prisma.student.delete({ where: { id } });
   return NextResponse.json({ data: { ok: true } });
 }

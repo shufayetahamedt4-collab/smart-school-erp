@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { qrToken, qrPin } from "@/lib/qr";
 import { writeGuard } from "@/lib/subscription";
+import { invalidateStats } from "@/lib/stats-cache";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -148,6 +149,7 @@ export async function POST(req: NextRequest) {
     });
 
     await audit("STUDENT_CREATE", "student", student.id, { name: body.name });
+    invalidateStats(schoolId, "students");
     return NextResponse.json({ data: { ...student, qrToken: token, qrPin: pin } }, { status: 201 });
   } catch (e: any) {
     if (e?.code === "P2002") {

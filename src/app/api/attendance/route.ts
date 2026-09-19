@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
+import { invalidateStats } from "@/lib/stats-cache";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -74,5 +75,6 @@ export async function POST(req: NextRequest) {
       )
   );
   await audit("ATTENDANCE_SAVE", "attendance", date);
+  invalidateStats(schoolId, "attendance");
   return NextResponse.json({ data: { ok: true, count: rows.filter((r: any) => r.status && r.status !== "UNMARKED").length } });
 }

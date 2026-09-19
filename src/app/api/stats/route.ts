@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { statsCacheGet, statsCachePut } from "@/lib/stats-cache";
 
 /**
  * PRD §14.2 — dashboard stats for every role.
@@ -9,27 +10,10 @@ import { getSession } from "@/lib/auth";
  * so each branch resolves in ONE parallel batch of school-scoped pulls and
  * derives every relation/count in memory (the db layer only pushes one
  * equality filter down and would otherwise do per-relation or per-month
- * queries). A 30s TTL cache keeps repeat dashboard navigations instant —
- * the payload is non-critical aggregate stats, so brief staleness is fine.
+ * queries). Payloads are cached for 30s (src/lib/stats-cache.ts) and
+ * invalidated by write routes on attendance/homework/marks/class-student
+ * changes, so dashboards never show stale numbers after a submit.
  */
-
-const STATS_TTL_MS = 30_000;
-const statsCache = new Map<string, { at: number; payload: any }>();
-
-function cachedGet(key: string) {
-  const hit = statsCache.get(key);
-  if (hit && Date.now() - hit.at < STATS_TTL_MS) return hit.payload;
-  return null;
-}
-
-function cachePut(key: string, payload: any) {
-  statsCache.set(key, { at: Date.now(), payload });
-  // keep the cache bounded
-  if (statsCache.size > 200) {
-    const cutoff = Date.now() - STATS_TTL_MS;
-    for (const [k, v] of statsCache) if (v.at < cutoff) statsCache.delete(k);
-  }
-}
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -37,6 +21,8 @@ export async function GET(req: NextRequest) {
   const schoolId = session.schoolId!;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const trendStart = new Date(today);
+  trendStart.setDate(trendStart.getDate() - 6); // 7-day window start (00:00)
 
   // ---- SCHOOL ADMIN / SUPER ADMIN (super admin passes schoolId)
   if (session.role === "SCHOOL_ADMIN" || session.role === "SUPER_ADMIN") {
@@ -44,7 +30,7 @@ export async function GET(req: NextRequest) {
     if (!sid) return NextResponse.json({ error: "No school context" }, { status: 400 });
 
     const cacheKey = `admin|${session.id}|${sid}`;
-    const cached = cachedGet(cacheKey);
+    const cached = statsCacheGet(cacheKey);
     if (cached) return NextResponse.json(cached);
 
     const [students, teachers, classes, exams, notices, fees, attendanceRows, marksCount] = await Promise.all([
@@ -54,7 +40,7 @@ export async function GET(req: NextRequest) {
       prisma.exam.count({ where: { schoolId: sid } }),
       prisma.notice.count({ where: { schoolId: sid } }),
       prisma.fee.findMany({ where: { schoolId: sid }, select: { amount: true, paidAmount: true, status: true } }),
-      prisma.attendance.findMany({ where: { schoolId: sid }, select: { status: true, date: true } }),
+      prisma.attendance.findMany({ where: { schoolId: sid, date: { gte: trendStart } }, select: { status: true, date: true } }),
       prisma.examMark.count({ where: { exam: { schoolId: sid } } }),
     ]);
 
@@ -96,14 +82,14 @@ export async function GET(req: NextRequest) {
         trend: trendDays,
       },
     };
-    cachePut(cacheKey, payload);
+    statsCachePut(cacheKey, payload, sid);
     return NextResponse.json(payload);
   }
 
   // ---- TEACHER
   if (session.role === "TEACHER") {
     const cacheKey = `teacher|${session.id}|${schoolId}`;
-    const cached = cachedGet(cacheKey);
+    const cached = statsCacheGet(cacheKey);
     if (cached) return NextResponse.json(cached);
 
     // Single parallel batch. teacher-scoped pulls use the db layer's
@@ -118,7 +104,7 @@ export async function GET(req: NextRequest) {
       prisma.attendance.findMany({ where: { schoolId, date: today }, select: { markedById: true, status: true } }),
       prisma.section.findMany({ where: { schoolId } }),
       prisma.student.findMany({ where: { schoolId, active: true }, select: { id: true, classId: true } }),
-      prisma.classRoom.findMany({ where: { schoolId }, select: { id: true, name: true } }),
+      prisma.classRoom.findMany({ where: { schoolId } }),
       prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } }),
     ]);
     if (!teacher) return NextResponse.json({ error: "Teacher profile missing" }, { status: 404 });
@@ -139,9 +125,9 @@ export async function GET(req: NextRequest) {
     const subjectById = new Map(subjects.map((s) => [s.id, s]));
     const shapedAssignments = assignments.map((a: any) => ({
       ...a,
-      classRoom: a.classId ? classById.get(a.classId) || null : null,
-      section: a.sectionId ? sectionById.get(a.sectionId) || null : null,
-      subject: a.subjectId ? subjectById.get(a.subjectId) || null : null,
+      classRoom: a.classId ? (classById.get(a.classId) ? { name: classById.get(a.classId)!.name } : null) : null,
+      section: a.sectionId ? (sectionById.get(a.sectionId) ? { name: sectionById.get(a.sectionId)!.name } : null) : null,
+      subject: a.subjectId ? (subjectById.get(a.subjectId) ? { name: subjectById.get(a.subjectId)!.name } : null) : null,
     }));
     // classes where this teacher has an assignment, with student counts + sections
     const myClassIds = [...new Set(assignments.map((a: any) => a.classId))];
@@ -152,20 +138,22 @@ export async function GET(req: NextRequest) {
         ...c,
         _count: { students: studentsByClass.get(c.id) || 0 },
         sections: allSections.filter((s) => s.classId === c.id).map((s) => ({ id: s.id, name: s.name })),
-      }));
+      }))
+      // Firestore's implicit doc-id order, preserved from the old code path
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const attendanceToday = allAttendanceToday.filter((a) => a.markedById === teacher.id).length;
 
     const payload = {
       data: { assignments: shapedAssignments, homeworks, myClasses, attendanceToday },
     };
-    cachePut(cacheKey, payload);
+    statsCachePut(cacheKey, payload, schoolId);
     return NextResponse.json(payload);
   }
 
   // ---- GUARDIAN
   if (session.role === "GUARDIAN") {
     const cacheKey = `guardian|${session.id}|${schoolId}`;
-    const cached = cachedGet(cacheKey);
+    const cached = statsCacheGet(cacheKey);
     if (cached) return NextResponse.json(cached);
 
     // Single parallel batch when session.studentId is known (the normal
@@ -186,11 +174,15 @@ export async function GET(req: NextRequest) {
 
     let attendance = attendance0;
     let marks = marks0;
+    let fees2 = fees;
+    let remarks2 = remarks;
     if (!sid0) {
       // rare fallback: session had no studentId — pull with the real id now
-      [attendance, marks] = await Promise.all([
+      [attendance, marks, fees2, remarks2] = await Promise.all([
         prisma.attendance.findMany({ where: { studentId: student.id }, select: { status: true, date: true } }),
         prisma.examMark.findMany({ where: { studentId: student.id } }),
+        prisma.fee.findMany({ where: { studentId: student.id }, select: { amount: true, paidAmount: true, status: true } }),
+        prisma.dailyRemark.count({ where: { studentId: student.id } }),
       ]);
     }
 
@@ -213,7 +205,7 @@ export async function GET(req: NextRequest) {
         ).length;
 
     const present = attendance.filter((a) => a.status === "PRESENT" || a.status === "LATE").length;
-    const dueFees = fees.reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
+    const dueFees = fees2.reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
 
     // 6-month attendance trend — grouped in memory
     const byMonth = new Map<string, { present: number; total: number }>();
@@ -249,14 +241,14 @@ export async function GET(req: NextRequest) {
       data: {
         attendance: { present, total: attendance.length, rate: attendance.length ? Math.round((present / attendance.length) * 100) : 0 },
         homeworks,
-        fees: { due: dueFees, total: fees.length },
-        remarks,
+        fees: { due: dueFees, total: fees2.length },
+        remarks: remarks2,
         trend,
         subjectPerf,
         marksCount: shapedMarks.length,
       },
     };
-    cachePut(cacheKey, payload);
+    statsCachePut(cacheKey, payload, schoolId);
     return NextResponse.json(payload);
   }
 

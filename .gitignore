@@ -39,3 +39,7 @@ npm-debug.log*
 .freebuff/
 dev-server.log
 dev-server.pid
+
+# session tooling state (local only; save.mjs/resume.mjs read them from disk)
+scripts/session-state.json
+scripts/session-progress.log

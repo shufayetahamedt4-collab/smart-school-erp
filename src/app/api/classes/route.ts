@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
+import { invalidateStats } from "@/lib/stats-cache";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest) {
     });
   }
   await audit("CLASS_CREATE", "class", cls.id, { name });
+  invalidateStats(schoolId, "classes");
   return NextResponse.json({ data: cls }, { status: 201 });
 }
 
@@ -78,5 +80,6 @@ export async function DELETE(req: NextRequest) {
     prisma.classRoom.delete({ where: { id } }),
   ]);
   await audit("CLASS_DELETE", "class", id);
+  invalidateStats(schoolId, "classes");
   return NextResponse.json({ data: { ok: true } });
 }

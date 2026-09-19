@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
+import { invalidateStats } from "@/lib/stats-cache";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -93,5 +94,6 @@ export async function POST(req: NextRequest) {
     },
   });
   await audit("HOMEWORK_CREATE", "homework", homework.id, { title });
+  invalidateStats(schoolId, "homework");
   return NextResponse.json({ data: homework }, { status: 201 });
 }

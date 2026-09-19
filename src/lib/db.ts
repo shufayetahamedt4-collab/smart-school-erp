@@ -610,6 +610,27 @@ async function fetchAll(model: string, where?: Record<string, any>): Promise<any
   // Push one equality filter down (single-field, avoids composite indexes).
   if (where && typeof where.schoolId === "string") {
     q = q.where("schoolId", "==", where.schoolId);
+    // Bonus pushdown: schoolId equality + a date range works with the
+    // (schoolId, date) composite index and bounds the transfer for
+    // time-windowed reads (e.g. the 7-day stats trend). Falls back to the
+    // equality-only query while the index builds or if it is missing.
+    const dateCond = where.date;
+    if (dateCond && typeof dateCond === "object" && !(dateCond instanceof Date)) {
+      const gte = dateCond.gte instanceof Date ? dateCond.gte : null;
+      const lt = dateCond.lt instanceof Date ? dateCond.lt : null;
+      if (gte || lt) {
+        let ranged: FirebaseFirestore.Query = q;
+        if (gte) ranged = ranged.where("date", ">=", gte);
+        if (lt) ranged = ranged.where("date", "<", lt);
+        try {
+          const snap = await ranged.get();
+          return snap.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
+        } catch {
+          // composite index not ready — fall through to equality-only pull;
+          // the in-memory filter still enforces the range.
+        }
+      }
+    }
   } else if (where) {
     const first = Object.entries(where).find(
       ([, v]) => v !== undefined && v !== null && typeof v !== "object"
