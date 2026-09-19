@@ -43,12 +43,17 @@ export async function GET(req: NextRequest) {
   const sectionById = new Map(sectionRows.map((s) => [s.id, s]));
   const markCounts = await Promise.all(exams.map((e: any) => prisma.examMark.count({ where: { examId: e.id } })));
   const data = exams
-    .map((e: any, i: number) => ({
-      ...e,
-      classRoom: e.classId ? classById.get(e.classId) || null : null,
-      section: e.sectionId ? sectionById.get(e.sectionId) || null : null,
-      _count: { marks: markCounts[i] },
-    }))
+    .map((e: any, i: number) => {
+      // Select-parity with the pre-sweep include: {id, name} only.
+      const c: any = e.classId ? classById.get(e.classId) : null;
+      const s: any = e.sectionId ? sectionById.get(e.sectionId) : null;
+      return {
+        ...e,
+        classRoom: c ? { id: c.id, name: c.name } : null,
+        section: s ? { id: s.id, name: s.name } : null,
+        _count: { marks: markCounts[i] },
+      };
+    })
     .sort((a: any, b: any) => {
       // orderBy [{ year: "desc" }, { startDate: "desc" }]
       const y = (b.year ?? 0) - (a.year ?? 0);

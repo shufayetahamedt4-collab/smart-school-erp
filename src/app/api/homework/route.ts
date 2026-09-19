@@ -79,22 +79,38 @@ export async function GET(req: NextRequest) {
   }
 
   const data = homeworks
-    .map((h) => {
+    .map((h: any) => {
       const subs = (subsByHomework.get(h.id) || []).map((s: any) => ({ id: s.id, status: s.status, submittedAt: s.submittedAt }));
       const t = h.teacherId ? teacherById.get(h.teacherId) : null;
+      // Select-parity with the pre-sweep includes: subject {id,name},
+      // classRoom/section {id,name} only.
+      const subj: any = h.subjectId ? subjectById.get(h.subjectId) : null;
+      const cls: any = h.classId ? classById.get(h.classId) : null;
+      const sec: any = h.sectionId ? sectionById.get(h.sectionId) : null;
       return {
         ...h,
-        subject: h.subjectId ? subjectById.get(h.subjectId) || null : null,
+        subject: subj ? { id: subj.id, name: subj.name } : null,
         teacher: t ? { id: t.id, user: { name: userNames.get(t.userId) || "" } } : null,
-        classRoom: h.classId ? classById.get(h.classId) || null : null,
-        section: h.sectionId ? sectionById.get(h.sectionId) || null : null,
+        classRoom: cls ? { id: cls.id, name: cls.name } : null,
+        section: sec ? { id: sec.id, name: sec.name } : null,
         submissions: subs,
         submittedCount: subs.filter((s: any) => s.status === "SUBMITTED").length,
         totalStudents: 0,
         myStatus: mySubmissionMap ? mySubmissionMap[h.id] || (h.dueDate && new Date(h.dueDate) < new Date() ? "OVERDUE" : "PENDING") : null,
       };
     })
-    .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    // Descending createdAt with legacy NaN semantics: docs missing createdAt
+    // sort FIRST, exactly as the pre-sweep pipeline (db-layer orderBy + V8
+    // stable sort over a NaN comparator) deterministically produced.
+    .sort((a: any, b: any) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : NaN;
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : NaN;
+      if (Number.isNaN(ta) || Number.isNaN(tb)) {
+        if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
+        return Number.isNaN(ta) ? -1 : 1;
+      }
+      return tb - ta;
+    });
   return NextResponse.json({ data });
 }
 

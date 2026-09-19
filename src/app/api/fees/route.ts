@@ -57,15 +57,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ONE wave: fees + settings + templates + payments + installments + the
-  // reference maps (payments/installments are school-scoped and filtered to
-  // the visible fees in memory — they never depended on the fees result).
-  const [feesRaw, settings, templates, paymentRows, installmentRows, studentRows, classRows, sectionRows] = await Promise.all([
+  // ONE wave: fees + settings + templates + payments + the reference maps
+  // (payments are school-scoped and filtered to the visible fees in memory
+  // — they never depended on the fees result). Installments are NOT emitted:
+  // the pre-sweep include was silently dropped by the old db layer (no
+  // fee→installments relation in its registry), so parity = absent key.
+  const [feesRaw, settings, templates, paymentRows, studentRows, classRows, sectionRows] = await Promise.all([
     prisma.fee.findMany({ where: { schoolId } }),
     prisma.feeSetting.findUnique({ where: { schoolId } }),
     wantsFull ? prisma.feeTemplate.findMany({ where: { schoolId }, include: { items: true } }) : Promise.resolve([]),
     prisma.payment.findMany({ where: { schoolId } }),
-    prisma.installment.findMany({ where: { schoolId } }),
     schoolReference("student", schoolId),
     schoolReference("classRoom", schoolId),
     schoolReference("section", schoolId),
@@ -89,20 +90,16 @@ export async function GET(req: NextRequest) {
     arr.push(p);
     paymentsByFee.set(p.feeId, arr);
   }
-  const installmentsByFee = new Map<string, any[]>();
-  for (const i of installmentRows) {
-    if (!visibleFeeIds.has(i.feeId)) continue;
-    const arr = installmentsByFee.get(i.feeId) || [];
-    arr.push(i);
-    installmentsByFee.set(i.feeId, arr);
-  }
   const studentById = new Map(studentRows.map((s) => [s.id, s]));
   const classById = new Map(classRows.map((c) => [c.id, c]));
   const sectionById = new Map(sectionRows.map((s) => [s.id, s]));
   const shaped = fees
     .map((f: any) => {
       const s = f.studentId ? studentById.get(f.studentId) : null;
-      return {
+      // Shape-parity with the pre-sweep include selects: classRoom/section
+      // carry { name } only, and the installments key is omitted (the old
+      // db layer dropped that unknown include).
+      const out: any = {
         ...f,
         student: s
           ? {
@@ -111,13 +108,12 @@ export async function GET(req: NextRequest) {
               admissionNo: s.admissionNo,
               roll: s.roll,
               photoUrl: s.photoUrl,
-              classRoom: s.classId ? classById.get(s.classId) || null : null,
-              section: s.sectionId ? sectionById.get(s.sectionId) || null : null,
+              classRoom: s.classId ? (() => { const c: any = classById.get(s.classId); return c ? { name: c.name } : null; })() : null,
+              section: s.sectionId ? (() => { const x: any = sectionById.get(s.sectionId); return x ? { name: x.name } : null; })() : null,
             }
-          : null,
-        payments: (paymentsByFee.get(f.id) || []).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()),
-        installments: (installmentsByFee.get(f.id) || []).sort((a: any, b: any) => (a.seq ?? 0) - (b.seq ?? 0)),
+          : null,              payments: (paymentsByFee.get(f.id) || []).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()),
       };
+      return out;
     })
     .sort((a: any, b: any) => {
       // orderBy [{ status: "asc" }, { dueDate: "desc" }]

@@ -36,7 +36,9 @@ export async function GET() {
     const data = slots
       .map((s: any) => ({
         id: s.id,
-        teacher: s.teacherId ? teacherById.get(s.teacherId)?.name || "" : "",
+        // Legacy parity: teacher docs carry no `name`, so the old route's
+        // s.teacher.name serialized as undefined → the key was dropped.
+        teacher: s.teacherId ? teacherById.get(s.teacherId)?.name : undefined,
         title: s.title,
         startAt: s.startAt,
         durationMin: s.durationMin,
@@ -57,8 +59,11 @@ export async function GET() {
     schoolReference("student", schoolId),
     prisma.meetingBooking.findMany({ where: { schoolId } }),
   ]);
-  const teacherById = new Map(teacherRows.map((t) => [t.id, t]));
-  const studentById = new Map(studentRows.map((s: any) => [s.id, s]));
+  // Legacy select-parity: teacher {id} only (teacher docs have no `name`);
+  // booking student {id, name}; guardian {name} (no id — the old include
+  // selected name only). Missing relations present as null.
+  const teacherById = new Map(teacherRows.map((t: any) => [t.id, { id: t.id }]));
+  const studentById = new Map(studentRows.map((s: any) => [s.id, { id: s.id, name: s.name }]));
   const bookingsBySlot = new Map<string, any[]>();
   for (const b of bookingRows) {
     const arr = bookingsBySlot.get(b.slotId) || [];
@@ -67,7 +72,7 @@ export async function GET() {
   }
   const guardianUserIds = [...new Set(bookingRows.map((b: any) => b.guardianUserId).filter(Boolean))];
   const guardianNames = await userNamesFor(guardianUserIds); // memoized users pull
-  const guardianById = new Map(guardianUserIds.map((id: string) => [id, { id, name: guardianNames.get(id) || "" }]));
+  const guardianById = new Map(guardianUserIds.map((id: string) => [id, { name: guardianNames.get(id) || "" }]));
   const data = slots
     .map((s: any) => ({
       ...s,

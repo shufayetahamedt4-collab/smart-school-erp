@@ -88,7 +88,10 @@ for (const role of ROLES) {
   const fees = await get(cookie, "/api/fees");
   const feeArr = fees.json?.data?.fees || [];
   check(fees.status === 200 && Array.isArray(feeArr), "fees 200 + array");
-  check(feeArr.every((f) => Array.isArray(f.payments) && Array.isArray(f.installments)), "fees payments/installments arrays");
+  // Parity with the legacy include semantics: payments present (array),
+  // installments key intentionally ABSENT (old db layer dropped that include).
+  check(feeArr.every((f) => Array.isArray(f.payments)), "fees payments arrays");
+  check(feeArr.every((f) => !("installments" in f)), "fees installments key absent (legacy parity)");
   if (role.label !== "guardian") {
     check(feeArr.length > 0, `${role.label} sees fees (${feeArr.length})`);
     check(feeArr.every((f) => !f.student || typeof f.student.name === "string"), "fees student names resolved");
@@ -102,7 +105,9 @@ for (const role of ROLES) {
   const mtArr = mt.json?.data || [];
   check(mt.status === 200 && Array.isArray(mtArr), "meetings 200 + array");
   if (role.label === "guardian") {
-    check(mtArr.every((m) => typeof m.teacher === "string" && typeof m.booked === "boolean"), "guardian meetings shape (teacher name + booked flag)");
+    // Legacy parity: teacher docs have no `name`, so the key serializes as
+    // undefined (absent in JSON). booked must always be a boolean.
+    check(mtArr.every((m) => (m.teacher === undefined || typeof m.teacher === "string") && typeof m.booked === "boolean"), "guardian meetings shape (booked flag; teacher key absent per legacy)");
   } else if (mtArr.length) {
     const withBooking = mtArr.find((m) => (m.bookings || []).length > 0);
     if (withBooking) {

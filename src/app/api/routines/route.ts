@@ -29,12 +29,17 @@ export async function GET(req: NextRequest) {
   const data = routines
     .map((r: any) => {
       const t = r.teacherId ? teacherById.get(r.teacherId) : null;
+      // Select-parity with the pre-sweep include: subject/classRoom/section
+      // {id, name}; teacher {id, user:{name}}.
+      const subj: any = r.subjectId ? subjectById.get(r.subjectId) : null;
+      const cls: any = r.classId ? classById.get(r.classId) : null;
+      const sec: any = r.sectionId ? sectionById.get(r.sectionId) : null;
       return {
         ...r,
-        subject: r.subjectId ? subjectById.get(r.subjectId) || null : null,
+        subject: subj ? { id: subj.id, name: subj.name } : null,
         teacher: t ? { id: t.id, user: { name: userNames.get(t.userId) || "" } } : null,
-        classRoom: r.classId ? classById.get(r.classId) || null : null,
-        section: r.sectionId ? sectionById.get(r.sectionId) || null : null,
+        classRoom: cls ? { id: cls.id, name: cls.name } : null,
+        section: sec ? { id: sec.id, name: sec.name } : null,
       };
     })
     .sort((a: any, b: any) => (a.day ?? 0) - (b.day ?? 0) || (a.period ?? 0) - (b.period ?? 0));
