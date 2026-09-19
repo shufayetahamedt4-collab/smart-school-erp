@@ -2,6 +2,35 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
+/**
+ * PRD §14.2 — dashboard stats for every role.
+ *
+ * Performance: this connection costs ~2s per round-trip batch to Firestore,
+ * so each branch resolves in ONE parallel batch of school-scoped pulls and
+ * derives every relation/count in memory (the db layer only pushes one
+ * equality filter down and would otherwise do per-relation or per-month
+ * queries). A 30s TTL cache keeps repeat dashboard navigations instant —
+ * the payload is non-critical aggregate stats, so brief staleness is fine.
+ */
+
+const STATS_TTL_MS = 30_000;
+const statsCache = new Map<string, { at: number; payload: any }>();
+
+function cachedGet(key: string) {
+  const hit = statsCache.get(key);
+  if (hit && Date.now() - hit.at < STATS_TTL_MS) return hit.payload;
+  return null;
+}
+
+function cachePut(key: string, payload: any) {
+  statsCache.set(key, { at: Date.now(), payload });
+  // keep the cache bounded
+  if (statsCache.size > 200) {
+    const cutoff = Date.now() - STATS_TTL_MS;
+    for (const [k, v] of statsCache) if (v.at < cutoff) statsCache.delete(k);
+  }
+}
+
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -13,6 +42,10 @@ export async function GET(req: NextRequest) {
   if (session.role === "SCHOOL_ADMIN" || session.role === "SUPER_ADMIN") {
     const sid = session.role === "SUPER_ADMIN" ? req.nextUrl.searchParams.get("schoolId") || undefined : schoolId;
     if (!sid) return NextResponse.json({ error: "No school context" }, { status: 400 });
+
+    const cacheKey = `admin|${session.id}|${sid}`;
+    const cached = cachedGet(cacheKey);
+    if (cached) return NextResponse.json(cached);
 
     const [students, teachers, classes, exams, notices, fees, attendanceRows, marksCount] = await Promise.all([
       prisma.student.count({ where: { schoolId: sid, active: true } }),
@@ -29,7 +62,7 @@ export async function GET(req: NextRequest) {
     const paidFees = fees.reduce((a, f) => a + Number(f.paidAmount), 0);
     const dueFees = fees.filter((f) => f.status !== "PAID").reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
 
-    // attendance trend (last 7 days including today)
+    // attendance trend (last 7 days including today) — grouped in memory
     const attendanceByDate = new Map<string, { status: string }[]>();
     for (const row of attendanceRows) {
       const key = new Date(row.date).toISOString().slice(0, 10);
@@ -51,7 +84,7 @@ export async function GET(req: NextRequest) {
     });
     const attendanceToday = attendanceByDate.get(today.toISOString().slice(0, 10)) || [];
 
-    return NextResponse.json({
+    const payload = {
       data: {
         counts: { students, teachers, classes, exams, notices, marksCount },
         fees: { totalFees, paidFees, dueFees, unpaidCount: fees.filter((f) => f.status === "UNPAID").length },
@@ -62,61 +95,148 @@ export async function GET(req: NextRequest) {
         },
         trend: trendDays,
       },
-    });
+    };
+    cachePut(cacheKey, payload);
+    return NextResponse.json(payload);
   }
 
   // ---- TEACHER
   if (session.role === "TEACHER") {
-    const teacher = await prisma.teacher.findUnique({ where: { userId: session.id } });
-    if (!teacher) return NextResponse.json({ error: "Teacher profile missing" }, { status: 404 });
-    const [assignments, homeworks, attendanceToday] = await Promise.all([
-      prisma.classAssignment.findMany({ where: { teacherId: teacher.id }, include: { classRoom: { select: { name: true } }, section: { select: { name: true } }, subject: { select: { name: true } } } }),
-      prisma.homework.findMany({ where: { teacherId: teacher.id }, orderBy: { createdAt: "desc" }, take: 5 }),
-      prisma.attendance.findMany({ where: { schoolId, date: today, markedById: teacher.id }, select: { status: true } }),
+    const cacheKey = `teacher|${session.id}|${schoolId}`;
+    const cached = cachedGet(cacheKey);
+    if (cached) return NextResponse.json(cached);
+
+    // Single parallel batch. teacher-scoped pulls use the db layer's
+    // documented deterministic teacher id (t_<userId>) so they can fire in
+    // the same batch as the teacher lookup; the fallback below re-pulls with
+    // the real id if that convention ever drifts.
+    const teacherIdHint = `t_${session.id}`;
+    let [teacher, assignments, homeworks, allAttendanceToday, allSections, allStudents, classRooms, subjects] = await Promise.all([
+      prisma.teacher.findUnique({ where: { userId: session.id } }),
+      prisma.classAssignment.findMany({ where: { schoolId, teacherId: teacherIdHint } }),
+      prisma.homework.findMany({ where: { schoolId, teacherId: teacherIdHint }, orderBy: { createdAt: "desc" }, take: 5 }),
+      prisma.attendance.findMany({ where: { schoolId, date: today }, select: { markedById: true, status: true } }),
+      prisma.section.findMany({ where: { schoolId } }),
+      prisma.student.findMany({ where: { schoolId, active: true }, select: { id: true, classId: true } }),
+      prisma.classRoom.findMany({ where: { schoolId }, select: { id: true, name: true } }),
+      prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } }),
     ]);
-    const myClasses = await prisma.classRoom.findMany({
-      where: { assignments: { some: { teacherId: teacher.id } } },
-      include: { _count: { select: { students: true } }, sections: { select: { id: true, name: true } } },
-    });
-    return NextResponse.json({ data: { assignments, homeworks, myClasses, attendanceToday: attendanceToday.length } });
+    if (!teacher) return NextResponse.json({ error: "Teacher profile missing" }, { status: 404 });
+    if (teacher.id !== teacherIdHint) {
+      [assignments, homeworks] = await Promise.all([
+        prisma.classAssignment.findMany({ where: { schoolId, teacherId: teacher.id } }),
+        prisma.homework.findMany({ where: { schoolId, teacherId: teacher.id }, orderBy: { createdAt: "desc" }, take: 5 }),
+      ]);
+    }
+
+    const sectionById = new Map(allSections.map((s) => [s.id, s]));
+    const studentsByClass = new Map<string, number>();
+    for (const s of allStudents) {
+      if (!s.classId) continue;
+      studentsByClass.set(s.classId, (studentsByClass.get(s.classId) || 0) + 1);
+    }
+    const classById = new Map(classRooms.map((c) => [c.id, c]));
+    const subjectById = new Map(subjects.map((s) => [s.id, s]));
+    const shapedAssignments = assignments.map((a: any) => ({
+      ...a,
+      classRoom: a.classId ? classById.get(a.classId) || null : null,
+      section: a.sectionId ? sectionById.get(a.sectionId) || null : null,
+      subject: a.subjectId ? subjectById.get(a.subjectId) || null : null,
+    }));
+    // classes where this teacher has an assignment, with student counts + sections
+    const myClassIds = [...new Set(assignments.map((a: any) => a.classId))];
+    const myClasses = myClassIds
+      .map((classId) => classById.get(classId))
+      .filter((c): c is (typeof classRooms)[number] => Boolean(c))
+      .map((c) => ({
+        ...c,
+        _count: { students: studentsByClass.get(c.id) || 0 },
+        sections: allSections.filter((s) => s.classId === c.id).map((s) => ({ id: s.id, name: s.name })),
+      }));
+    const attendanceToday = allAttendanceToday.filter((a) => a.markedById === teacher.id).length;
+
+    const payload = {
+      data: { assignments: shapedAssignments, homeworks, myClasses, attendanceToday },
+    };
+    cachePut(cacheKey, payload);
+    return NextResponse.json(payload);
   }
 
   // ---- GUARDIAN
   if (session.role === "GUARDIAN") {
-    const student = session.studentId
-      ? await prisma.student.findUnique({ where: { id: session.studentId } })
-      : await prisma.student.findFirst({ where: { guardianUserId: session.id } });
+    const cacheKey = `guardian|${session.id}|${schoolId}`;
+    const cached = cachedGet(cacheKey);
+    if (cached) return NextResponse.json(cached);
+
+    // Single parallel batch when session.studentId is known (the normal
+    // case): every student-scoped pull keys off it directly. The fallback
+    // re-pulls in a second stage when the session carries no studentId.
+    const sid0 = session.studentId;
+    const [student, attendance0, fees, remarks, marks0, examRows, subjectRows, schoolHomeworks] = await Promise.all([
+      sid0 ? prisma.student.findUnique({ where: { id: sid0 } }) : prisma.student.findFirst({ where: { guardianUserId: session.id } }),
+      sid0 ? prisma.attendance.findMany({ where: { studentId: sid0 }, select: { status: true, date: true } }) : Promise.resolve([] as any[]),
+      sid0 ? prisma.fee.findMany({ where: { studentId: sid0 }, select: { amount: true, paidAmount: true, status: true } }) : Promise.resolve([] as any[]),
+      sid0 ? prisma.dailyRemark.count({ where: { studentId: sid0 } }) : Promise.resolve(0),
+      sid0 ? prisma.examMark.findMany({ where: { studentId: sid0 } }) : Promise.resolve([] as any[]),
+      prisma.exam.findMany({ where: { schoolId }, select: { id: true, name: true, published: true } }),
+      prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } }),
+      prisma.homework.findMany({ where: { schoolId }, select: { id: true, classId: true, sectionId: true } }),
+    ]);
     if (!student) return NextResponse.json({ error: "No linked student" }, { status: 404 });
 
-    const [attendance, homeworks, fees, remarks] = await Promise.all([
-      prisma.attendance.findMany({ where: { studentId: student.id }, select: { status: true } }),
-      prisma.homework.count({ where: { schoolId: student.schoolId, classId: student.classId || undefined, sectionId: student.sectionId || undefined } }),
-      prisma.fee.findMany({ where: { studentId: student.id }, select: { amount: true, paidAmount: true, status: true } }),
-      prisma.dailyRemark.count({ where: { studentId: student.id } }),
-    ]);
+    let attendance = attendance0;
+    let marks = marks0;
+    if (!sid0) {
+      // rare fallback: session had no studentId — pull with the real id now
+      [attendance, marks] = await Promise.all([
+        prisma.attendance.findMany({ where: { studentId: student.id }, select: { status: true, date: true } }),
+        prisma.examMark.findMany({ where: { studentId: student.id } }),
+      ]);
+    }
+
+    // published marks only, with subject/exam names resolved in memory
+    const examById = new Map(examRows.map((e) => [e.id, e]));
+    const subjectById = new Map(subjectRows.map((s) => [s.id, s]));
+    const publishedMarks = marks.filter((m: any) => examById.get(m.examId)?.published);
+    const shapedMarks = publishedMarks.map((m: any) => ({
+      ...m,
+      subject: { id: m.subjectId, name: subjectById.get(m.subjectId)?.name || "" },
+      exam: { name: examById.get(m.examId)?.name || "" },
+    }));
+
+    // homework count with the original semantics:
+    // classId filter only when the student has one; sectionId additionally when set
+    const homeworks = !student.classId
+      ? schoolHomeworks.length
+      : schoolHomeworks.filter(
+          (h) => h.classId === student.classId && (!student.sectionId || h.sectionId === student.sectionId)
+        ).length;
+
     const present = attendance.filter((a) => a.status === "PRESENT" || a.status === "LATE").length;
     const dueFees = fees.reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
 
-    // 6-month attendance trend
+    // 6-month attendance trend — grouped in memory
+    const byMonth = new Map<string, { present: number; total: number }>();
+    for (const row of attendance) {
+      const d = new Date(row.date);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const agg = byMonth.get(key) || { present: 0, total: 0 };
+      agg.total += 1;
+      if (row.status === "PRESENT" || row.status === "LATE") agg.present += 1;
+      byMonth.set(key, agg);
+    }
     const trend = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date();
       d.setDate(1);
       d.setMonth(d.getMonth() - i);
-      const start = new Date(d.getFullYear(), d.getMonth(), 1);
-      const end = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-      const rows = await prisma.attendance.findMany({ where: { studentId: student.id, date: { gte: start, lt: end } } });
-      const p = rows.filter((r) => r.status === "PRESENT" || r.status === "LATE").length;
-      trend.push({ label: d.toLocaleDateString("en-GB", { month: "short" }), rate: rows.length ? Math.round((p / rows.length) * 100) : 0 });
+      const agg = byMonth.get(`${d.getFullYear()}-${d.getMonth()}`);
+      trend.push({ label: d.toLocaleDateString("en-GB", { month: "short" }), rate: agg && agg.total ? Math.round((agg.present / agg.total) * 100) : 0 });
     }
 
     // subject performance from published exams
-    const marks = await prisma.examMark.findMany({
-      where: { studentId: student.id, exam: { published: true } },
-      include: { subject: { select: { id: true, name: true } }, exam: { select: { name: true } } },
-    });
     const subjectPerf = Object.values(
-      marks.reduce<Record<string, { subject: string; obtained: number; full: number }>>((acc, m) => {
+      shapedMarks.reduce<Record<string, { subject: string; obtained: number; full: number }>>((acc, m) => {
         const key = m.subjectId;
         if (!acc[key]) acc[key] = { subject: m.subject.name, obtained: 0, full: 0 };
         acc[key].obtained += Number(m.obtained);
@@ -125,7 +245,7 @@ export async function GET(req: NextRequest) {
       }, {})
     ).map((s) => ({ ...s, pct: s.full ? Math.round((s.obtained / s.full) * 100) : 0 }));
 
-    return NextResponse.json({
+    const payload = {
       data: {
         attendance: { present, total: attendance.length, rate: attendance.length ? Math.round((present / attendance.length) * 100) : 0 },
         homeworks,
@@ -133,9 +253,11 @@ export async function GET(req: NextRequest) {
         remarks,
         trend,
         subjectPerf,
-        marksCount: marks.length,
+        marksCount: shapedMarks.length,
       },
-    });
+    };
+    cachePut(cacheKey, payload);
+    return NextResponse.json(payload);
   }
 
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });

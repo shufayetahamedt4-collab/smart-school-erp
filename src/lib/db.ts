@@ -948,7 +948,16 @@ async function findMany(model: string, args: any): Promise<any[]> {
 }
 
 async function count(model: string, args: any): Promise<number> {
-  const list = await filterAll(model, args?.where || {});
+  const where = args?.where || {};
+  const keys = Object.keys(where).filter((k) => where[k] !== undefined && where[k] !== null);
+  // Fast path: a lone schoolId equality pushes down to Firestore cleanly, so
+  // use the native count aggregation instead of pulling every document
+  // (a school-wide count previously transferred all rows just to count them).
+  if (keys.length === 1 && keys[0] === "schoolId" && typeof where.schoolId === "string") {
+    const snap = await col(model).where("schoolId", "==", where.schoolId).count().get();
+    return Number((snap.data() as any).count ?? (snap.data() as any).totalCount ?? 0);
+  }
+  const list = await filterAll(model, where);
   return list.length;
 }
 
