@@ -101,3 +101,4 @@ SESSION PAUSED — PRD v1.2 pushed (be71192). Paused on: firebase:deploy blocked
 [2026-09-18 18:15:56] seed — PRD plans + subscription demo done
 [2026-09-18 18:15:56] seed — SEED COMPLETE — all phases logged
 [2026-09-19 05:33:15] SAVE — SESSION PAUSED — Phase 2 done (8e8346a,8cea3ca,1aba4bb); follow-up QA refinements (GRACE lifecycle, plan-wired school creation, N+1 fixes, permission hardening) verified tsc-green and checkpoint-committed; preview re-registered; pending: firebase:deploy (browser Allow), push, Phase 3
+[2026-09-19 05:52:09] SAVE — SESSION PAUSED (2) — deploy blocked on CLI auth (session file has no user; user terminal login did not persist). Everything else saved: Phase 2 + checkpoint commit 6862ebd clean. Dev server live port 3000 PID 11196. Next: firebase login (user terminal) → npm run firebase:deploy → Phase 3.
