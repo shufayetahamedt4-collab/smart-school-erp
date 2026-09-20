@@ -666,22 +666,42 @@ export async function schoolReference(model: string, schoolId: string): Promise<
 }
 
 /**
- * userId → name map in ONE pull. Replaces the per-uid findUnique waves
- * routes used to resolve teacher/guardian display names. Reads the same
- * user docs as before (users are few and carry no schoolId, so a memoized
- * full pull filtered in memory is both cheapest and drift-free).
+ * userId → name map in ONE school-scoped pull. Replaces the per-uid
+ * findUnique waves routes used to resolve teacher/guardian display names.
+ * Memo key and pull are both per school: teacher/guardian users always
+ * carry `schoolId`, so filtering by the session's school resolves exactly
+ * the same docs as before while keeping other schools' users out of the
+ * memo. (SUPER_ADMIN users carry no schoolId, but no call site resolves
+ * their names.) Rare schoolId-less docs are covered by direct gets.
  */
-export async function userNamesFor(userIds: string[]): Promise<Map<string, string>> {
+export async function userNamesFor(
+  userIds: string[],
+  schoolId?: string | null
+): Promise<Map<string, string>> {
   const want = new Set(userIds.filter(Boolean));
   const out = new Map<string, string>();
   if (!want.size) return out;
-  const key = "users:ALL";
+  const key = `users:${schoolId || "ALL"}`;
   let rowsP = refMemo.get(key);
   if (!rowsP || Date.now() - rowsP.at >= REF_TTL_MS) {
-    rowsP = { at: Date.now(), rows: await prisma.user.findMany({ select: { id: true, name: true } }) };
+    rowsP = {
+      at: Date.now(),
+      rows: await prisma.user.findMany({
+        where: schoolId ? { schoolId } : {},
+        select: { id: true, name: true },
+      }),
+    };
     refMemo.set(key, rowsP);
   }
   for (const u of rowsP.rows) if (want.has(u.id)) out.set(u.id, u.name);
+  // Fall back to direct gets for any wanted id the scoped pull missed.
+  const missing = [...want].filter((id) => !out.has(id));
+  await Promise.all(
+    missing.map(async (id) => {
+      const u = await prisma.user.findUnique({ where: { id }, select: { id: true, name: true } });
+      if (u) out.set(u.id, u.name);
+    })
+  );
   return out;
 }
 

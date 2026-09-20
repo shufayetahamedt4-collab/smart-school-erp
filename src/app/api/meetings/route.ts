@@ -71,7 +71,7 @@ export async function GET() {
     bookingsBySlot.set(b.slotId, arr);
   }
   const guardianUserIds = [...new Set(bookingRows.map((b: any) => b.guardianUserId).filter(Boolean))];
-  const guardianNames = await userNamesFor(guardianUserIds); // memoized users pull
+  const guardianNames = await userNamesFor(guardianUserIds, schoolId); // memoized school-scoped users pull
   const guardianById = new Map(guardianUserIds.map((id: string) => [id, { name: guardianNames.get(id) || "" }]));
   const data = slots
     .map((s: any) => ({

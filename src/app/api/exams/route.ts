@@ -3,23 +3,7 @@ import { prisma, schoolReference } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
-
-/** Exams are near-static between mark entries; 30s cache with tag invalidation. */
-const EXAMS_CACHE_TTL_MS = 30_000;
-const examsCache = new Map<string, { at: number; data: any }>();
-
-function examsCacheGet(key: string) {
-  const hit = examsCache.get(key);
-  if (hit && Date.now() - hit.at < EXAMS_CACHE_TTL_MS) return hit.data;
-  return null;
-}
-function examsCachePut(key: string, data: any) {
-  examsCache.set(key, { at: Date.now(), data });
-  if (examsCache.size > 100) {
-    const cutoff = Date.now() - EXAMS_CACHE_TTL_MS;
-    for (const [k, v] of examsCache) if (v.at < cutoff) examsCache.delete(k);
-  }
-}
+import { examsCacheGet, examsCachePut, invalidateExamsCache } from "@/lib/exams-cache";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -62,7 +46,7 @@ export async function GET(req: NextRequest) {
       const as = a.startDate ? new Date(a.startDate).getTime() : 0;
       return bs - as;
     });
-  examsCachePut(cacheKey, data);
+  examsCachePut(cacheKey, data, schoolId);
   return NextResponse.json({ data });
 }
 
@@ -89,5 +73,6 @@ export async function POST(req: NextRequest) {
   });
   await audit("EXAM_CREATE", "exam", exam.id, { name });
   invalidateStats(schoolId, "exams");
+  invalidateExamsCache(schoolId);
   return NextResponse.json({ data: exam }, { status: 201 });
 }

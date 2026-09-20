@@ -43,3 +43,6 @@ dev-server.pid
 # session tooling state (local only; save.mjs/resume.mjs read them from disk)
 scripts/session-state.json
 scripts/session-progress.log
+
+.freebuff-qr.env
+scripts/.qa-fixtures.json

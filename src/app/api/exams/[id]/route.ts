@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { gpaOf, positions } from "@/lib/grades";
 import { writeGuard } from "@/lib/subscription";
+import { invalidateExamsCache } from "@/lib/exams-cache";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -76,6 +77,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   const updated = await prisma.exam.update({ where: { id }, data });
   await audit("EXAM_UPDATE", "exam", id, { published: updated.published });
+  invalidateExamsCache(exam.schoolId);
   return NextResponse.json({ data: updated });
 }
 
@@ -92,5 +94,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     prisma.exam.delete({ where: { id } }),
   ]);
   await audit("EXAM_DELETE", "exam", id);
+  invalidateExamsCache(exam.schoolId);
   return NextResponse.json({ data: { ok: true } });
 }

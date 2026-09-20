@@ -13,14 +13,14 @@ export async function GET(req: NextRequest) {
   // Bulk-parallel: routines + all reference data in one wave, names mapped
   // in memory (was per-include document gets per routine row). Teachers come
   // from the memoized reference pull first so the display-name lookup can
-  // ride the same wave (users have no schoolId, so ids are needed upfront).
+  // ride the same wave (school-scoped users pull, memoized per school).
   const teacherRows = await schoolReference("teacher", schoolId);
   const [routines, subjectRows, classRows, sectionRows, userNames] = await Promise.all([
     prisma.routine.findMany({ where: { schoolId, ...(classId ? { classId } : {}) } }),
     schoolReference("subject", schoolId),
     schoolReference("classRoom", schoolId),
     schoolReference("section", schoolId),
-    userNamesFor(teacherRows.map((t: any) => t.userId)),
+    userNamesFor(teacherRows.map((t: any) => t.userId), schoolId),
   ]);
   const subjectById = new Map(subjectRows.map((s) => [s.id, s]));
   const teacherById = new Map(teacherRows.map((t) => [t.id, t]));

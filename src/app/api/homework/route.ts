@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
     schoolReference("classRoom", schoolId),
     schoolReference("section", schoolId),
     prisma.homeworkSubmission.findMany({ where: { schoolId } }),
-    userNamesFor(teachers.map((t: any) => t.userId)),
+    userNamesFor(teachers.map((t: any) => t.userId), schoolId),
   ]);
 
   if (scopedStudentId) {

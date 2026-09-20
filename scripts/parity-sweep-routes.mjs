@@ -10,12 +10,34 @@ const NEW_BASE = process.env.NEW_BASE || "http://localhost:3000";
 const OLD_BASE = process.env.OLD_BASE || "http://localhost:3001";
 const GUARDIAN_EMAIL = process.env.GUARDIAN_EMAIL || "guardian1@demo.com";
 const GUARDIAN_PASSWORD = process.env.GUARDIAN_PASSWORD || "Guardian@123";
+import { readFileSync, existsSync } from "node:fs";
 
 const ACCOUNTS = [
   { label: "school-admin", email: "principal@sunrise.edu", password: "School@123" },
   { label: "teacher", email: "teacher@sunrise.edu", password: "Teacher@123" },
   { label: "guardian", email: GUARDIAN_EMAIL, password: GUARDIAN_PASSWORD },
 ];
+
+// Optional role 1 — QR guardian (session carries studentId, the fast path).
+// Credentials via env only (same convention as parity-diff-qr.mjs).
+if (process.env.QR_TOKEN && process.env.QR_PIN) {
+  ACCOUNTS.push({ label: "qr-guardian(studentId)", kind: "qr" });
+} else {
+  console.log("(QR_TOKEN/QR_PIN not set — skipping QR-guardian role)");
+}
+// Optional role 2 — STUDENT session, via the isolation fixture's demo-student
+// user. Credentials live ONLY in the untracked .qa-fixtures.json track file.
+const TRACK = new URL(".qa-fixtures.json", import.meta.url);
+if (existsSync(TRACK)) {
+  const track = JSON.parse(readFileSync(TRACK, "utf8"));
+  if (track.creds?.demoStudent) {
+    ACCOUNTS.push({ label: "student(fixture)", kind: "student", email: "zz-iso-demo-student@test.local", password: track.creds.demoStudent });
+  } else {
+    console.log("(fixture track lacks student creds — skipping student role)");
+  }
+} else {
+  console.log("(no scripts/.qa-fixtures.json — skipping student role; run isolation-fixture.mjs create)");
+}
 
 async function login(base, email, password) {
   const res = await fetch(`${base}/api/auth/login`, {
@@ -26,6 +48,20 @@ async function login(base, email, password) {
   });
   if (!res.ok) throw new Error(`login ${email}@${base}: ${res.status} ${await res.text()}`);
   return (res.headers.get("set-cookie") || "").split(";")[0];
+}
+/** Session cookie per role kind — QR guardians log in via /api/qr/verify. */
+async function cookieFor(base, acc) {
+  if (acc.kind === "qr") {
+    const res = await fetch(`${base}/api/qr/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: process.env.QR_TOKEN, pin: process.env.QR_PIN }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) throw new Error(`qr login@${base}: ${res.status} ${await res.text()}`);
+    return (res.headers.get("set-cookie") || "").split(";")[0];
+  }
+  return login(base, acc.email, acc.password);
 }
 async function getJSON(base, cookie, route) {
   const res = await fetch(`${base}${route}`, { headers: { cookie }, signal: AbortSignal.timeout(60000) });
@@ -61,8 +97,8 @@ const TODAY = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2,
 let mismatches = 0;
 for (const acc of ACCOUNTS) {
   const [newCookie, oldCookie] = await Promise.all([
-    login(NEW_BASE, acc.email, acc.password),
-    login(OLD_BASE, acc.email, acc.password),
+    cookieFor(NEW_BASE, acc),
+    cookieFor(OLD_BASE, acc),
   ]);
   // Discover a classId from each server's own /api/classes (ids are stable).
   const clsNew = (await getJSON(NEW_BASE, newCookie, "/api/classes")).data || [];

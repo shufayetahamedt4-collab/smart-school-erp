@@ -3,6 +3,7 @@ import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { gradeFor } from "@/lib/grades";
 import { invalidateStats } from "@/lib/stats-cache";
+import { invalidateExamsCache } from "@/lib/exams-cache";
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -39,6 +40,7 @@ export async function POST(req: NextRequest) {
   );
   await audit("MARKS_SAVE", "exam", examId, { count });
   invalidateStats(schoolId, "marks");
+  invalidateExamsCache(schoolId); // cached exams list carries _count.marks
   invalidateReferenceCache(schoolId);
   return NextResponse.json({ data: { ok: true, count } });
 }
