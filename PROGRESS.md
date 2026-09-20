@@ -29,6 +29,7 @@
 - Timetable uses `attendanceMarks:full` permission (existing convention); page lives at `/dashboard/timetable` — distinct from `/dashboard/routine` (period-only subject grid without teachers; consider merging later).
 - Certificate conduct value is hardcoded "Good" in `/api/certificates` — a conduct field/picker is a natural follow-up.
 - QA scripts so far: `qa-phase23.mjs` (36), `qa-phase3.mjs` (18), `qa-cleanup-users.mjs` (orphan sweep).
+- **Infra:** duplicate App Hosting backends `smart-school-erp` (shared repo link → double builds per push) and `test` (orphan, no repo) were deleted on 2026-09-21 with owner approval. `smart-school-erp-1` is the ONLY backend — every push now triggers exactly one build. Live URL: `https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app` (= `APP_URL` in apphosting.yaml).
 
 ---
 
