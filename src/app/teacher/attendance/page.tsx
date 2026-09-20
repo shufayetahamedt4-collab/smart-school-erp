@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ClipboardList, Save, Check } from "lucide-react";
-import { api } from "@/lib/client";
+import { api, qs } from "@/lib/client";
 import { Card, Select, PageHeader, LoadingScreen, ErrorNote } from "@/components/ui";
 import { todayISO, initials } from "@/lib/utils";
 
@@ -28,7 +28,8 @@ export default function AttendancePage() {
   const loadRoster = async () => {
     if (!classId || !date) return;
     setLoading(true);
-    const data = await api<RosterRow[]>(`/api/attendance?classId=${classId}&sectionId=${sectionId || undefined}&date=${date}`);
+    // qs() drops empty params — "All" must not send sectionId=undefined
+    const data = await api<RosterRow[]>(`/api/attendance${qs({ classId, sectionId: sectionId || undefined, date })}`);
     setRows(data);
     setLoading(false);
   };

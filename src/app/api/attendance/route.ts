@@ -13,7 +13,10 @@ export async function GET(req: NextRequest) {
   const schoolId = session.schoolId!;
   const sp = req.nextUrl.searchParams;
   const classId = sp.get("classId") || "";
-  const sectionId = sp.get("sectionId") || undefined;
+  // The literal string "undefined" (legacy client bug) or an empty value must
+  // mean "no section filter" — not a section whose id is "undefined".
+  const rawSectionId = (sp.get("sectionId") || "").trim();
+  const sectionId = rawSectionId && rawSectionId !== "undefined" && rawSectionId !== "null" ? rawSectionId : undefined;
   const dateStr = sp.get("date") || "";
   if (!classId || !dateStr) return NextResponse.json({ error: "classId and date are required." }, { status: 400 });
   const date = new Date(`${dateStr}T00:00:00`);
