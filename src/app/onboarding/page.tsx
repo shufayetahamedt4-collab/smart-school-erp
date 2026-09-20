@@ -46,6 +46,7 @@ export default function OnboardingPage() {
   const router = useRouter();
   const [status, setStatus] = useState<Status | null>(null);
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [step, setStep] = useState(0);
@@ -69,10 +70,11 @@ export default function OnboardingPage() {
   useEffect(() => {
     Promise.all([
       api<Status>("/api/onboarding").catch(() => null),
-      api<{ user: { id: string; name: string; email: string | null } }>("/api/auth/me").catch(() => null),
+      api<{ user: { id: string; name: string; email: string | null; role: string } }>("/api/auth/me").catch(() => null),
     ])
       .then(([st, me]) => {
         setAuthed(!!me);
+        setRole(me?.user?.role || null);
         if (st) {
           setStatus(st);
           if (st.school) {
@@ -146,6 +148,19 @@ export default function OnboardingPage() {
           <h1 className="text-xl font-black text-slate-900">Set up your school</h1>
           <p className="mt-2 text-sm text-slate-500">Sign in with your admin account first, then run this wizard to configure your school.</p>
           <Link href="/login" className="btn btn-primary mt-5 inline-flex">Go to login</Link>
+        </div>
+      </Centered>
+    );
+  }
+
+  if (authed && role && !(role === "SCHOOL_ADMIN" || role === "SUPER_ADMIN")) {
+    return (
+      <Centered>
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-amber-600"><Sparkles size={26} /></div>
+          <h1 className="text-xl font-black text-slate-900">Admins only</h1>
+          <p className="mt-2 text-sm text-slate-500">The setup wizard is available to school and platform administrators. You are signed in as {role.replace("_", " ").toLowerCase()}.</p>
+          <Link href="/" className="btn btn-secondary mt-5 inline-flex">Back to home</Link>
         </div>
       </Centered>
     );
@@ -314,7 +329,7 @@ export default function OnboardingPage() {
               <ArrowLeft size={14} /> Back
             </button>
             {step < 4 ? (
-              <button className="btn btn-primary" onClick={() => setStep((s) => s + 1)} disabled={!canNext}>Continue <ArrowRight size={14} /></button>
+              <button className="btn btn-primary" onClick={() => setStep((s) => (extendMode && s === 0 ? 2 : s + 1))} disabled={!canNext}>Continue <ArrowRight size={14} /></button>
             ) : (
               <button className="btn btn-primary" onClick={submit} disabled={busy || !school.name.trim()}>
                 <Check size={14} /> {busy ? "Setting up…" : extendMode ? "Save setup" : "Create school"}
