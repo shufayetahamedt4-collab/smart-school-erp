@@ -68,6 +68,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             <Link href="/dashboard/students" className="btn btn-secondary btn-sm"><ArrowLeft size={14} /> Students</Link>
             {!edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}><Pencil size={14} /> Edit</button>}
             <Link href={`/print/id-card/${s.id}`} className="btn btn-primary btn-sm"><IdCard size={14} /> ID Card</Link>
+            <Link href={`/print/certificate/${s.id}?type=TC`} target="_blank" className="btn btn-secondary btn-sm"><FileText size={14} /> Certificate</Link>
           </>
         }
       />

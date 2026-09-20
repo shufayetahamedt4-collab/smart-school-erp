@@ -9,6 +9,29 @@
 
 ---
 
+## 🔁 Session — 2026-09-21 #2 (Phase 3: timetable builder UI §9.2 + printable certificates §9.2)
+
+### Done this session (typecheck + build green, 18/18 QA assertions)
+
+1. **Timetable builder UI** (`/dashboard/timetable`): 8-period × Sun–Fri slot grid per class (+optional section filter). Click a cell → modal to assign subject + teacher; filled cells show subject/teacher/time. Print button (print stylesheet hides chrome). **Substitution finder** modal: pick a date → slots affected by approved teacher leaves + free-teacher suggestions with on-leave flags. Nav: "Timetable Builder".
+2. **Server-side double-booking guard** in `POST /api/timetable-slots`: 409 when the same teacher already holds a slot at that day+period (`replaceId` param exempts the cell being replaced so in-place edits work).
+3. **Teacher-name resolution fix (pre-existing bug):** teacher docs store no `name` (it lives on the linked `user` doc) — GET slots and the PUT substitution finder now join names via one school-scoped `users` pull. Builder cells + suggestion chips previously showed null names.
+4. **Printable certificate page** (`/print/certificate/[studentId]`): TC & Character Certificate from `GET /api/certificates` — serial no., school letterhead (logo/address/phone), double-rule border, seal + signature spaces, PrintActions (print + PDF via html2canvas/jspdf), **client-side TC↔CHARACTER switcher**, Bengali-name support. Linked from student detail page ("Certificate" button).
+5. **UI bug found in QA & fixed:** slot-save failure (e.g. 409 clash) set the error message *before* `loadSlots()` which resets it — the clash reason flashed invisible. Order swapped (refresh grid → then set error); modal now stays open with selections intact and the red banner persists.
+
+### Verified
+- ✅ `npm run typecheck` — 0 errors; `npm run build` — 131 routes
+- ✅ `scripts/qa-phase3.mjs` — 18/18: login guard, slot CRUD, 409 double-booking, replaceId swap, same-teacher-different-period, list with names, substitution finder shape, TC/CHARACTER data (serials, conduct, dates), 404/401 guards; slot cleanup built in
+- ✅ Preview click-through: grid renders, modal assign → cell shows "Bangla · Sharmin Sultana", cross-class same-period clash shows banner, remove-slot works; certificate DOM verified (serial CERT-TC-2026-…, body, toolbar)
+- ⚠️ Dev-server + `npm run build` on the same `.next` dir conflicts — after running a build, restart `npm run dev` (hit this once; server restarted clean on port 55826)
+
+### Notes for future sessions
+- Timetable uses `attendanceMarks:full` permission (existing convention); page lives at `/dashboard/timetable` — distinct from `/dashboard/routine` (period-only subject grid without teachers; consider merging later).
+- Certificate conduct value is hardcoded "Good" in `/api/certificates` — a conduct field/picker is a natural follow-up.
+- QA scripts so far: `qa-phase23.mjs` (36), `qa-phase3.mjs` (18), `qa-cleanup-users.mjs` (orphan sweep).
+
+---
+
 ## 🔁 Session — 2026-09-21 (Phase 2/3 completion: billing gaps, onboarding wizard §3.3, CSV import/export §12.4)
 
 **Starting state:** working tree clean on `main`, typecheck green. Repo had advanced past the 2026-09-18 notes: PRD §12.1 subscription billing backend already existed (`/api/plans`, `/api/subscriptions`, `/api/subscription/state`, `lib/subscription.ts` with TRIAL→ACTIVE→GRACE→LOCKED lifecycle + `writeGuard()` on tenant writes, `/admin/billing` console, `/print/invoice/[id]`, `/api/subscriptions/invoice/[id]`).

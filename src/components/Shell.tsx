@@ -34,6 +34,7 @@ import {
   CreditCard,
   BookUp,
   FileSpreadsheet,
+  CalendarRange,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/client";
@@ -100,6 +101,7 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
     { href: "/dashboard/subjects", label: "Subjects", icon: BookOpen },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
+    { href: "/dashboard/timetable", label: "Timetable Builder", icon: CalendarRange },
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },

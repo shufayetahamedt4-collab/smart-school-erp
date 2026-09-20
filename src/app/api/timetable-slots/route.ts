@@ -25,18 +25,27 @@ export async function GET(req: NextRequest) {
     if (teacher) where.teacherId = teacher.id;
   }
 
-  const slots = await prisma.timetableSlot.findMany({
-    where,
-    include: {
-      subject: { select: { name: true } },
-      teacher: { select: { id: true, name: true } },
-      classRoom: { select: { name: true } },
-      section: { select: { name: true } },
-    },
-    orderBy: [{ dayOfWeek: "asc" }, { period: "asc" }],
-    take: 500,
-  });
-  return NextResponse.json({ data: slots });
+  const [slots, users] = await Promise.all([
+    prisma.timetableSlot.findMany({
+      where,
+      include: {
+        subject: { select: { name: true } },
+        teacher: { select: { id: true, userId: true } },
+        classRoom: { select: { name: true } },
+        section: { select: { name: true } },
+      },
+      orderBy: [{ dayOfWeek: "asc" }, { period: "asc" }],
+      take: 500,
+    }),
+    // Teacher display names live on the linked user doc (teacher has userId).
+    prisma.user.findMany({ where: { schoolId }, select: { id: true, name: true } }),
+  ]);
+  const nameByUser = new Map(users.map((u: any) => [u.id, u.name]));
+  const data = slots.map((s: any) => ({
+    ...s,
+    teacher: s.teacher ? { id: s.teacher.id, name: nameByUser.get(s.teacher.userId) || null } : null,
+  }));
+  return NextResponse.json({ data });
 }
 
 export async function POST(req: NextRequest) {
@@ -49,6 +58,19 @@ export async function POST(req: NextRequest) {
   if (!classId || !subjectId || !teacherId || dayOfWeek === undefined || period === undefined) {
     return NextResponse.json({ error: "classId, subjectId, teacherId, dayOfWeek and period are required." }, { status: 400 });
   }
+
+  // Teacher double-booking guard (§9.2): the same teacher cannot hold two
+  // slots at the same day+period (excluding the cell being replaced).
+  const existingSlots = await prisma.timetableSlot.findMany({
+    where: { schoolId: session.schoolId!, dayOfWeek: Number(dayOfWeek), period: Number(period) },
+    select: { id: true, teacherId: true },
+  });
+  const replaceId = typeof body?.replaceId === "string" ? body.replaceId : null;
+  const clash = existingSlots.find((s: any) => s.teacherId === String(teacherId) && s.id !== replaceId);
+  if (clash) {
+    return NextResponse.json({ error: "That teacher already has a class in this period. Choose another teacher or period." }, { status: 409 });
+  }
+
   const slot = await prisma.timetableSlot.create({
     data: {
       schoolId: session.schoolId!,
@@ -89,42 +111,45 @@ export async function PUT(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const date = body?.date ? new Date(body.date) : new Date();
   const dayOfWeek = date.getDay();
-  const slots = await prisma.timetableSlot.findMany({
-    where: { schoolId: session.schoolId!, dayOfWeek },
-    include: { teacher: { select: { id: true, name: true } } },
-  });
+  const [slots, leaveRows, allTeachers, users] = await Promise.all([
+    prisma.timetableSlot.findMany({
+      where: { schoolId: session.schoolId!, dayOfWeek },
+      include: { teacher: { select: { id: true, userId: true } } },
+    }),
+    prisma.leaveRequest.findMany({
+      where: {
+        schoolId: session.schoolId!,
+        type: "TEACHER",
+        status: "APPROVED",
+        fromDate: { lte: date },
+        toDate: { gte: date },
+      },
+      select: { teacherId: true },
+    }),
+    prisma.teacher.findMany({
+      where: { schoolId: session.schoolId! },
+      select: { id: true, userId: true },
+    }),
+    prisma.user.findMany({ where: { schoolId: session.schoolId! }, select: { id: true, name: true } }),
+  ]);
+  const nameByUser = new Map(users.map((u: any) => [u.id, u.name]));
+  const teacherName = (t: any) => (t ? nameByUser.get(t.userId) || null : null);
 
   // Teachers with approved leave that day
-  const leaveTeacherIds = new Set(
-    (
-      await prisma.leaveRequest.findMany({
-        where: {
-          schoolId: session.schoolId!,
-          type: "TEACHER",
-          status: "APPROVED",
-          fromDate: { lte: date },
-          toDate: { gte: date },
-        },
-        select: { teacherId: true },
-      })
-    )
-      .map((l) => l.teacherId)
-      .filter(Boolean)
-  );
+  const leaveTeacherIds = new Set(leaveRows.map((l: any) => l.teacherId).filter(Boolean));
 
-  const busy = new Set(slots.map((s) => s.teacherId));
-  const allTeachers = await prisma.teacher.findMany({
-    where: { schoolId: session.schoolId! },
-    select: { id: true, name: true },
-  });
+  const busy = new Set(slots.map((s: any) => s.teacherId));
   const suggestions = allTeachers
-    .filter((t) => !busy.has(t.id))
-    .map((t) => ({
-      ...t,
+    .filter((t: any) => !busy.has(t.id))
+    .map((t: any) => ({
+      id: t.id,
+      name: teacherName(t) || "Unnamed teacher",
       available: true,
       isOnLeave: leaveTeacherIds.has(t.id),
     }));
-  const affected = slots.filter((s) => s.teacherId && leaveTeacherIds.has(s.teacherId));
+  const affected = slots
+    .filter((s: any) => s.teacherId && leaveTeacherIds.has(s.teacherId))
+    .map((s: any) => ({ ...s, teacher: { id: s.teacher.id, name: teacherName(s.teacher) } }));
 
   return NextResponse.json({ data: { date: date.toISOString(), affected, suggestions } });
 }
