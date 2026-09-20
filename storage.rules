@@ -5,10 +5,22 @@ rules_version = '2';
 // so direct client uploads are denied.
 service firebase.storage {
   match /b/{bucket}/o {
+    // General uploads (gallery, resources, admission documents…)
     match /uploads/{fileName} {
       allow read: if true;
       allow write: if false;
     }
+
+    // Certificate template artwork, scoped per school:
+    //   certificates/{schoolId}/logo-…, /seal-…, /signature-…
+    // Written only by the Admin SDK (after the session + role + image
+    // type + 2MB checks in /api/uploads?kind=certificate); clients can
+    // read the public URLs but can never write or move objects directly.
+    match /certificates/{schoolId}/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

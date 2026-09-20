@@ -121,6 +121,7 @@ const COLS: Record<string, string> = {
   substitution: "substitutions",
   calendarEvent: "calendarEvents",
   twoFactor: "twoFactor",
+  certificateTemplate: "certificateTemplates",
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
@@ -548,6 +549,7 @@ const RELS: Record<string, Record<string, Rel>> = {
   calendarEvent: { school: { to: "school", fk: "schoolId", kind: "one" } },
   twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
+  certificateTemplate: { school: { to: "school", fk: "schoolId", kind: "one" } },
 };
 
 // ---------------------------------------------------------------------------
@@ -1303,5 +1305,6 @@ export const prisma = {
   substitution: model("substitution"),
   calendarEvent: model("calendarEvent"),
   twoFactor: model("twoFactor"),
+  certificateTemplate: model("certificateTemplate"),
   $transaction: transaction,
 };

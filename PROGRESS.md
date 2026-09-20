@@ -5,7 +5,44 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** `E:\SmartSchoolERP`
-**Last updated:** 2026-09-21
+**Last updated:** 2026-09-21 (evening)
+
+---
+
+## 🔁 Session — 2026-09-21 #3 (custom certificate templates — no-code per-school design)
+
+### Done this session (typecheck + build green, 41/41 QA + 18/18 + 36/36 regression)
+
+Plan was written and owner-approved before coding. All 9 owner requirements met:
+
+1. **`certificateTemplates` collection** registered in `src/lib/db.ts` (COLS/RELS/facade). Per-school docs: `schoolId`, `type` (TC|CHARACTER), `name`, `isDefault`, `bodyEn`, `bodyBn`, `design`.
+2. **Design settings** (`lib/certificate.ts` `CertDesign`): logo, watermark (text/image + opacity 0–1 + 5 positions), seal image, principal & class-teacher signature images, border (double/simple/none), primary color (hex), font (serif/sans/**Noto Sans Bengali** webfonts loaded via React-hoisted <link>), header/footer text, signatory labels, A4 portrait/landscape (print @page hint follows the template).
+3. **Safe placeholder engine** (`lib/certificate.ts`): exactly 15 placeholders (studentName, fatherName, motherName, class, section, admissionNo, admissionDate, leaveDate, serialNo, schoolName, dateOfBirth, issueDate, conduct, academicYear, rollNo) + **`[[…]]` conditional clauses** — a clause containing any empty value is dropped entirely (requirement 4), `**bold**`. Bodies are plain text only: HTML rejected at save (`<`/`>`), unknown placeholders rejected, unbalanced/nested `[[ ]]` rejected; resolver escapes nothing-by-default (React text nodes) and QA asserts no `{{` leaks into output.
+4. **Missing-data fix in `/api/certificates`:** father/mother derived from `guardianRelation` (FATHER→fatherName, MOTHER→motherName) with the guardian user doc as fallback — previously "son/daughter of —". Built-in bodies rewritten with conditionals (EN + BN).
+5. **`/dashboard/certificate-templates`** settings page: template list per type with Default badges, editor (name, default flag, EN body, BN body with **insert-placeholder chips**, all design controls incl. uploads), **live preview using the exact print renderer** + EN/বাং toggle, duplicate/delete/set-default. Nav: "Certificate Templates" (SCHOOL_ADMIN).
+6. **Built-in fallback preserved:** `useBuiltIn: true` when a school has no template — renderer falls back to `BUILTIN_CERT_BODIES` + `DEFAULT_CERT_DESIGN`.
+7. **Bangla:** `bodyBn` per template, Noto Sans/Serif Bengali loaded, bengali font option, print page EN/বাংলা switcher.
+8. **Storage:** `POST /api/uploads?kind=certificate` (admins only) → `certificates/{schoolId}/…`, images only (jpg/png/webp), 2 MB cap; `storage.rules` adds a read-only `certificates/{schoolId}/{fileName}` block. Template validation **rejects any image URL outside `certificates/{schoolId}/`** → cross-school image references impossible.
+9. **Admins only:** both template APIs gate on SCHOOL_ADMIN/SUPER_ADMIN (`systemSettings` semantics); SUPER_ADMIN may pass `?schoolId=` to inspect. `[id]` routes resolve the doc then require `tpl.schoolId === session.schoolId` (SUPER_ADMIN exempt) — cross-school PATCH/DELETE → 404 (QA-verified).
+
+**`/api/certificates` hardening (found during planning):** previously any role with `studentTeacherInfo:full` could read ANY student's certificate cross-school. Now: tenant check (`student.schoolId === session.schoolId`, SUPER_ADMIN exempt) + teachers restricted to students of their own assigned classes (`viewOwnClass`) + guardian own-child logic kept. Response now includes `template` (resolved), `values` (15 placeholders), `resolved.en/bn` (plain text), father/mother.
+
+**Shared renderer:** `src/components/CertificateDocument.tsx` — ONE component for editor preview AND print page (identical output; inline hex styles so html2canvas PDFs match). Print page rewritten to consume it.
+
+### Verified
+- ✅ `npm run typecheck` 0 errors; `npm run build` — all routes incl. `/api/certificate-templates(+/[id])`, `/dashboard/certificate-templates`, `/print/certificate/[studentId]`
+- ✅ `scripts/qa-certificates.mjs` — **41/41**: auth guards, throwaway school + 2 students (FATHER + MOTHER relations) via real import flow, built-in fallback + father/mother derivation + no "—" in output, validation matrix (HTML/unknown-placeholder/cross-school-URL/unbalanced), custom template create/resolve, per-type defaults, PATCH + Bangla resolution, cross-school 404s, teacher 403s, certificate tenant 403, teacher own-class 403, guardian own-child allow + other-child 403, CHARACTER/TC independence, full cleanup (templates, students, classes, subjects, school, 3 orphaned users, storage sweep)
+- ✅ Regression: `qa-phase3.mjs` 18/18, `qa-phase23.mjs` 36/36 (certificates route changed)
+- ✅ Preview click-through: editor renders (chips/controls/live preview), typed custom body → preview resolved live, saved via UI, print page used the custom template with clean conditional dropping, screenshot verified (serif + maroon double border + toolbar + "Using custom template" note); Bangla toggle verified in QA
+- ⚠️ Again hit the `.next` clobbering (ran `npm run build` while dev was live → dynamic routes 500) — server restarted clean on **port 55874**, then all suites passed. **Rule: restart dev after any production build.**
+
+### Notes for future sessions
+- To activate storage rules: `npx firebase deploy --only storage --project amar-e-school` (not run yet — confirm in console first).
+- Custom template on the demo school was deleted after QA click-through; demo school is back on built-ins.
+- The old inline-designed certificate page is fully replaced; `fmtDate` import removed from it.
+- Conduct is still hardcoded "Good" for CHARACTER certs (placeholder `{{conduct}}` exists; a picker is a natural follow-up).
+- QA scripts: `qa-phase23.mjs` (36), `qa-phase3.mjs` (18), `qa-certificates.mjs` (41), `qa-cleanup-users.mjs`.
+- **Infra:** only App Hosting backend is `smart-school-erp-1` (`https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app`); duplicates were deleted 2026-09-21.
 
 ---
 
