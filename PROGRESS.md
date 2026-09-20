@@ -5,7 +5,37 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** `E:\SmartSchoolERP`
-**Last updated:** 2026-09-18
+**Last updated:** 2026-09-21
+
+---
+
+## 🔁 Session — 2026-09-21 (Phase 2/3 completion: billing gaps, onboarding wizard §3.3, CSV import/export §12.4)
+
+**Starting state:** working tree clean on `main`, typecheck green. Repo had advanced past the 2026-09-18 notes: PRD §12.1 subscription billing backend already existed (`/api/plans`, `/api/subscriptions`, `/api/subscription/state`, `lib/subscription.ts` with TRIAL→ACTIVE→GRACE→LOCKED lifecycle + `writeGuard()` on tenant writes, `/admin/billing` console, `/print/invoice/[id]`, `/api/subscriptions/invoice/[id]`).
+
+### Done this session (typecheck + build green)
+
+1. **Plan-limit enforcement (§12.1):** `assertPlanStudentLimit()` + `planLimitGuard()` in `lib/subscription.ts` — 402 with upgrade-oriented message when a school exceeds its plan's `maxStudents` (alumni/transferred excluded from the count). Wired into `POST /api/students` and admission `action=enroll`. Unlimited when no plan/no limit.
+2. **School-side billing (§12.1):** `GET /api/subscription/billing` (plan, status, daysLeft, usage vs. cap, own invoices — read-only) + `/dashboard/billing` page (plan card, status card, capacity progress bar, invoice table linking to PDF) + "Billing & Plan" nav item.
+3. **Onboarding wizard (§3.3):** `GET/POST /api/onboarding` — status endpoint (progress counts classes/subjects/fees, `school.<id>.onboarded` setting) + transactional create-or-extend (school + branding setting + admin account + classes with sections + subjects + feeSetting + Main Campus branch). `/onboarding` — 5-step wizard (profile→admin→classes→subjects→fees) with quick-add presets (Play–KG, Class 1–5, 6–10; section A/B/C toggles; common BD subjects), extend-mode when the admin already has a school (skips admin step, jumps to classes), review + success screens. Linked from Super Admin Schools page ("Setup wizard").
+4. **CSV import/export (§12.4):** dependency-free `lib/csv.ts` (RFC-style parser: quotes/escaped quotes, BOM, delimiter sniffing; serializer; alias-tolerant header mapping). `GET/POST /api/import/students` + `/api/import/teachers` — template download, `dryRun` preview with per-row OK/ERROR/SKIP results (dup admission-no/email detection, class/section existence checks, plan-limit pre-check), transactional commit (shared guardian accounts deduped by email, default passwords Guardian@123 / Teacher@123, idempotent guards). `GET /api/export?type=students|teachers|fees|ledger|attendance` (attendance supports from/to). `/dashboard/import-export` console + nav item. Imports respect `writeGuard` + `planLimitGuard`; exports read-only and school-scoped from the session.
+
+### Verified
+- ✅ `npm run typecheck` — 0 errors
+- ✅ `npm run build` — success, 130 routes (new: /api/onboarding, /api/subscription/billing, /api/import/students|teachers, /api/export, /onboarding, /dashboard/billing, /dashboard/import-export)
+- ℹ️ No seed changes needed (features operate on runtime data; §12.1 plans/subscription demo already seeded)
+
+### Next steps (in order)
+1. Click-through test: `/onboarding` wizard (new + extend modes), import preview→commit round-trip with the downloaded template, export downloads, plan-limit 402 (set a small `maxStudents` on a plan first).
+2. Remaining from §12.x: white-label settings UI polish (§12.2), multi-branch UI (§12.3 schema ready).
+3. Remaining Phase 3: timetable builder UI, certificate print page, quizzes UI polish, i18n toggle, calendar UI.
+4. Provide credentials when ready: FCM (push), BD SMS, bKash/Nagad/Rocket/Card sandbox, then set `PAYMENT_WEBHOOK_SECRET`.
+
+### Notes for future sessions
+- `planLimitGuard()` must be called on any future route that creates ACTIVE students (enrollment paths) — search for `writeGuard(` call sites when adding new ones.
+- CSV import maps headers case/space/underscore-insensitively via aliases in the import routes; extend those maps when adding columns.
+- `/api/subscription/billing` and `/api/onboarding` accept `?schoolId=` for SUPER_ADMIN; otherwise they use the session school.
+- The db facade's `$transaction(fn)` returns `unknown | undefined` to TS — use `(await …)!` when the callback always returns.
 
 ---
 

@@ -33,6 +33,7 @@ import {
   FolderOpen,
   CreditCard,
   BookUp,
+  FileSpreadsheet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/client";
@@ -102,6 +103,7 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
+    { href: "/dashboard/billing", label: "Billing & Plan", icon: CreditCard },
     { href: "/dashboard/ledger", label: "Ledger", icon: Scale },
     { href: "/dashboard/leaves", label: "Leave Requests", icon: CalendarX2 },
     { href: "/dashboard/meetings", label: "PTM Slots", icon: CalendarCheck },
@@ -113,6 +115,7 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/guardians", label: "Guardians", icon: ShieldCheck },
     { href: "/dashboard/id-cards", label: "ID Cards", icon: IdCard },
     { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
+    { href: "/dashboard/import-export", label: "Import & Export", icon: FileSpreadsheet },
     { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
     { href: "/dashboard/settings", label: "Settings", icon: Settings },
   ],

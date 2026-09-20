@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import type { AdmissionStatus } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { planLimitGuard } from "@/lib/subscription";
 import {
   canTransition,
   suggestClassIndex,
@@ -87,6 +88,8 @@ export async function POST(req: NextRequest) {
     const admissionId = String(body?.admissionId || "");
     const method = (body?.method || "CASH") as "CASH" | "BANK" | "BKASH" | "NAGAD" | "ROCKET" | "CARD";
     try {
+      const limit = await planLimitGuard(schoolId);
+      if (limit) return limit; // PRD §12.1 — plan maxStudents cap on enrollment
       const result = await payAdmissionFeeAndEnroll(admissionId, { method, refNo: body?.refNo, actorId: session.id });
 
       // PRD §8.1 — Book/Uniform receipt checklist at admission time: issued

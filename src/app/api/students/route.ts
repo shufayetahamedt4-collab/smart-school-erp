@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { qrToken, qrPin } from "@/lib/qr";
-import { writeGuard } from "@/lib/subscription";
+import { writeGuard, planLimitGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 
 export async function GET(req: NextRequest) {
@@ -73,6 +73,8 @@ export async function POST(req: NextRequest) {
   if (locked) return locked; // PRD §12.1 — subscription auto-lock
   const body = await req.json().catch(() => null);
   if (!body || !body.name) return NextResponse.json({ error: "Student name is required." }, { status: 400 });
+  const limit = await planLimitGuard(schoolId);
+  if (limit) return limit; // PRD §12.1 — plan maxStudents cap
 
   const existing = await prisma.student.findFirst({
     where: { schoolId, admissionNo: String(body.admissionNo || "") },

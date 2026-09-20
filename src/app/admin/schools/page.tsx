@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Building2, Plus, Eye } from "lucide-react";
+import { Building2, Plus, Eye, Sparkles } from "lucide-react";
 import { api } from "@/lib/client";
 import { Card, Badge, Modal, Field, TextInput, Select, PageHeader, EmptyState, LoadingScreen, ErrorNote, statusTone, prettyStatus } from "@/components/ui";
 import { fmtDate, fmtMoney } from "@/lib/utils";
@@ -135,9 +135,12 @@ export default function SchoolsPage() {
         title="Schools"
         subtitle={`${schools.length} schools on the platform`}
         actions={
-          <button className="btn btn-primary" onClick={() => { setOpen(true); setStep(0); }}>
-            <Plus size={16} /> New School
-          </button>
+          <div className="flex items-center gap-2">
+            <Link href="/onboarding" className="btn btn-secondary"><Sparkles size={15} /> Setup wizard</Link>
+            <button className="btn btn-primary" onClick={() => { setOpen(true); setStep(0); }}>
+              <Plus size={16} /> New School
+            </button>
+          </div>
         }
       />
 
