@@ -4,8 +4,36 @@
 > Keep this file updated at the end of each working session so the next one resumes instantly.
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
-**Location:** `E:\SmartSchoolERP`
-**Last updated:** 2026-09-21 (evening)
+**Location:** GitHub — `github.com/shufayetahamedt4-collab/smart-school-erp` (any clone works — see "Working from a different PC/device" below)
+**Last updated:** 2026-09-21 (late evening) — all work saved & pushed through `b31569c`
+
+---
+
+## 🔁 Session — 2026-09-21 #4 (save point: storage rules deployed, everything pushed)
+
+- ✅ **Storage rules deployed to production:** `npx firebase deploy --only storage --project amar-e-school` — compile + release clean. Before deploying, the live rules were fetched via the Firebase Rules API and diffed against the new file: **purely additive** (existing `uploads/` public-read block and deny-all untouched; one new read-only `certificates/{schoolId}/` block). After deploying, the live release was re-fetched and matches (only a trailing newline differs). Temp fetcher script removed after each use.
+- ✅ **Everything committed and pushed:** `main` = `origin/main` = `b31569c`. The push triggered the (single) App Hosting build on `smart-school-erp-1`.
+- 📄 Added the **"Working from a different PC/device"** checklist (below) so any machine can resume from this exact point.
+
+**Nothing is pending:** working tree clean, no unpushed commits, no undeployed config.
+
+---
+
+## 💻 Working from a different PC/device — resume checklist
+
+The source of truth is **GitHub**, not any one machine. To pick up exactly where this left off:
+
+1. **Clone or pull:** `git clone https://github.com/shufayetahamedt4-collab/smart-school-erp.git && cd smart-school-erp` (or `git pull` in an existing clone).
+2. **Restore secrets** — `.env` is deliberately NOT in git (Firebase service creds, JWT_SECRET, APP_URL). Copy it from the other machine by hand (USB / secure channel) into the project root. Without it, `npm run setup` and the Admin-SDK-based scripts/APIs won't run. Never paste secret values into any committed file.
+3. **Install:** `npm install` (the lockfile is committed — use npm, not pnpm/yarn).
+4. **Read this file top-to-bottom** — newest session section is always at the top; it records what was built, what was verified, and what's next.
+5. **Seed only if starting from a fresh Firebase project:** `npm run setup` (idempotent) creates the demo school + demo users (table at the bottom of this file). Skip when pointing at the existing project's Firestore.
+6. **Run & verify:** `npm run dev` (Next auto-picks a free port — read it from the `- Local:` startup line). Health checks: `npm run typecheck` (0 errors) and `npm run build`. QA suites (hit a running server): `node scripts/qa-certificates.mjs http://localhost:<port>` (41), `node scripts/qa-phase3.mjs …` (18), `node scripts/qa-phase23.mjs …` (36) — each creates a throwaway school via the real API and cleans up; `node --env-file=.env scripts/qa-cleanup-users.mjs` sweeps orphaned QA users.
+7. **Save convention:** end every meaningful step with `npm run save "<what you did>"` — appends to `scripts/session-progress.log`, snapshots `scripts/session-state.json`, auto-commits (fix identity first if needed), then `git push`. Check state anytime with `npm run resume`.
+8. **Deploys:** every push to `main` auto-builds on Firebase App Hosting (single backend `smart-school-erp-1`; URL = `APP_URL` in `apphosting.yaml`). Firestore/Storage rules deploy manually via `npx firebase deploy --only storage --project amar-e-school` (requires `firebase login`).
+9. **Dev-server gotcha:** never run `npm run build` while `npm run dev` is live — they share `.next` and dynamic routes start 500ing. Restart the dev server after any production build.
+
+Machine-specific run notes (original PC) live in `.freebuff/run.md` in that workspace (not committed).
 
 ---
 
@@ -37,7 +65,7 @@ Plan was written and owner-approved before coding. All 9 owner requirements met:
 - ⚠️ Again hit the `.next` clobbering (ran `npm run build` while dev was live → dynamic routes 500) — server restarted clean on **port 55874**, then all suites passed. **Rule: restart dev after any production build.**
 
 ### Notes for future sessions
-- To activate storage rules: `npx firebase deploy --only storage --project amar-e-school` (not run yet — confirm in console first).
+- Storage rules deployed 2026-09-21 (session #4) — pre-deploy live diff verified additive; post-deploy re-fetch matches. 🔐
 - Custom template on the demo school was deleted after QA click-through; demo school is back on built-ins.
 - The old inline-designed certificate page is fully replaced; `fmtDate` import removed from it.
 - Conduct is still hardcoded "Good" for CHARACTER certs (placeholder `{{conduct}}` exists; a picker is a natural follow-up).
