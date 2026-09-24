@@ -27,7 +27,9 @@ env:
     value: https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app
 
 runConfig:
-  minInstances: 0
+  # One always-warm instance kills cold starts (scale-to-zero reconnection cost
+  # was visible as +150–300 ms on the first request after idle).
+  minInstances: 1
   maxInstances: 10
   concurrency: 80
   cpu: 1
