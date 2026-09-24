@@ -5,7 +5,48 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** GitHub — `github.com/shufayetahamedt4-collab/smart-school-erp` (any clone works — see "Working from a different PC/device" below)
-**Last updated:** 2026-09-21 (late evening) — all work saved & pushed through `b31569c`
+**Last updated:** 2026-09-24 (late evening) — Firestore region migration CUTOVER COMPLETE & verified; production runs on `smart-school-db` (asia-southeast1)
+
+---
+
+## 🔁 Session — 2026-09-24 #2 (Firestore region migration: africa-south1 → asia-southeast1 — CUTOVER DONE)
+
+**Problem (measured, not guessed):** the Firestore database lived in **`africa-south1` (Johannesburg)** while the App Hosting backend is in **`asia-southeast1` (Singapore)** and users are in Bangladesh. Every query did Singapore→Johannesburg→Singapore: raw Firestore round trips from a Dhaka-area PC measured **567–1,139 ms** (3.7 s first call in a fresh process), prod endpoints flat **~450 ms** regardless of payload. Caching (30 s TTL, stale-while-revalidate) had been masking this; the cold path paid the full tax.
+
+**Chosen strategy:** a **second database in the same project** (`smart-school-db`, `asia-southeast1`, FIRESTORE_NATIVE) — keeps Firebase Auth users, Cloud Storage bucket and the App Hosting backend untouched; cutover is one env var; the old database is never modified so it is its own backup. Multiple databases per project is GA and needs Blaze (the project already is, via App Hosting). `firebase-admin@13` routes named databases (verified with a live NOT_FOUND probe on a fake id).
+
+### What was done (Phases 0–3)
+1. **Target created:** `npx firebase firestore:databases:create smart-school-db --location=asia-southeast1` (production/deny-all at birth). Both composite indexes from `firestore.indexes.json` deployed to it — the `subscriptions` one **with its pre-existing `schoold` typo verbatim** (fixing it is a separate cleanup; changing it during migration would 500 that query). Deny-all rules deployed to both databases via `firebase.json` (now declares both).
+2. **Copy + parity tools (committed):** `scripts/migrate-firestore.mjs` (recursive incl. subcollections — found the stray `conversations/*/noop`; document ids preserved exactly; BulkWriter; re-runnable upserts; structural guard against ever writing the source; reports any `DocumentReference` fields — the dataset has **zero** DocumentReference/GeoPoint fields) and `scripts/verify-firestore-parity.mjs` (collection-group counts + doc-id SHA-256 digests + deep field-by-field compares incl. Timestamps; fails loudly on any mismatch). Gotcha fixed on the way: a source-client doc ref used as the **write key** makes the RPC flip to the source db (INVALID_ARGUMENT) — keys are rebuilt through the target client.
+3. **Parity result: 40/40 collection groups matched on counts AND id digests; 161 deep-compared docs field-identical (users 27, schools 8, settings 17, feeSettings 13, plans 3, certificateTemplates 3 + random docs). Dataset: 1,646 docs / 39 top-level collections — the copy takes ~2 minutes.**
+4. **Owner-ordered sequence, all followed:** (1) local test first — dev server with `FIRESTORE_DB_ID=smart-school-db` in `.env` only: login 200, all dashboard endpoints 200, `bench-routes.mjs` green, warm routes 31–382 ms (no push). (2) Delta copy + parity re-run immediately before push. (3) Repo census of default-DB consumers: **no Cloud Functions exist**; all app code flows through `getDb()`; 12 scripts taken from `getFirestore()` directly — **all 12 now honor `FIRESTORE_DB_ID`** with `(default)` fallback. (4) ONE commit, no minInstances change. (5) After rollout: final delta copy, prod smoke, benchmarks.
+5. **Cutover commit: `e7222c5`** (pushed 2026-09-24) — `src/lib/firebase.ts` `getDb()` reads `process.env.FIRESTORE_DB_ID || "(default)"`; `apphosting.yaml` sets `FIRESTORE_DB_ID: smart-school-db`; 12 scripts + the two migration tools. Typecheck clean before commit.
+6. **Verified prod is on the new DB by WRITES, not config:** `auditLogs` in `smart-school-db` grew 853 → 854+ from prod logins while `(default)` stayed frozen at 837. Login 200, all prod endpoints 200, sessions unaffected (they are HS256 JWT cookies — `verifySession()` reads no Firestore — so **nobody was logged out**).
+
+### Numbers (before → after)
+
+| measurement | before (africa) | after (asia) |
+|---|---|---|
+| raw Firestore query, this PC, steady state | 567–1,139 ms | **154–173 ms** (5–6×) |
+| raw Firestore query, first call in fresh process | 3.7 s | 0.85 s |
+| prod `/api/stats` cold cache miss | ~2.8 s | **~0.9 s** |
+| prod endpoints, warm | ~450 ms flat | ~440–620 ms (unchanged envelope) |
+| local dev warm routes (same machine) | 1.2–3.8 s typical | 31–382 ms |
+
+Warm prod endpoints did NOT get faster because their ~450 ms envelope is the **client↔Singapore HTTP round trip from Bangladesh** — even a bare HTML page costs ~450 ms RTT here. The DB hop inside that envelope is now ~5–20 ms instead of ~500 ms; from Bangladesh the internet's RTT is the floor, and no database change moves physics. Server-side and in-app (via the backend, same region) every query is 25–60× cheaper, so multi-query pages and cache misses benefit most.
+
+### Rollback procedure (keep until archive retirement)
+- Set `FIRESTORE_DB_ID: "(default)"` in `apphosting.yaml`, push → one rollout (~5–10 min) back to the africa database. Local dev: remove the var from `.env`.
+- The africa database is untouched and current as of the **final delta copy 2026-09-24 ~18:52 UTC+6** (after it, writes land only in the new DB). Data written to the new DB between cutover and a rollback would need a reverse copy first (run `migrate-firestore.mjs` with source/target swapped, or accept the loss for throwaway data).
+- `scripts/migrate-firestore.mjs` / `verify-firestore-parity.mjs` are permanent tools — re-runnable any time (the copy is idempotent upserts; parity fails loudly).
+
+### Notes for future sessions
+- **2026-10-08 (≈2 weeks after cutover): delete the africa-south1 `(default)` database** after one last parity spot-check — until then it is the free rollback insurance. Deletion needs delete-protection OFF (it is).
+- `FIRESTORE_DB_ID` is now a load-bearing env var: `apphosting.yaml` (prod), local `.env`, and the 12 scripts. A fresh checkout copy-pasting `.env` gets the right database automatically.
+- Known CLI bug hit during the work: `firebase deploy --only firestore:indexes` crashes with `TypeError: Cannot read properties of undefined (reading 'map')` in the `--only` filter path (firebase-tools); deploying via the Firestore API directly works, and rules/indexes also deploy per-database from the two-entry `firebase.json` firestore config.
+- Remaining perf follow-up (owner-approved direction, not yet done): `minInstances: 1` on the App Hosting backend to kill cold starts.
+- The `schoold`→`schoolId` index typo in `subscriptions` is still live in BOTH databases (queried by name from code) — fix needs a code-side field rename + new index + old-index removal, its own session.
+- Migration reports (copy + parity JSON, per run) live in `.freebuff/migration/` (not committed).
 
 ---
 
