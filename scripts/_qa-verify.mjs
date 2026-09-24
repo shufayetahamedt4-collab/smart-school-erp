@@ -16,7 +16,8 @@ if (!getApps().length) {
     }),
   });
 }
-const db = getFirestore();
+// FIRESTORE_DB_ID selects the database (migration cutover switch); unset = (default).
+const db = getFirestore(undefined, process.env.FIRESTORE_DB_ID || "(default)");
 const sha1 = (s) => createHash("sha1").update(s).digest("hex");
 
 const schoolId = "s_" + sha1("qa-demo-school-2026");

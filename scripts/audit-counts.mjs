@@ -10,7 +10,8 @@ import { readFileSync } from "node:fs";
 
 const serviceAccount = JSON.parse(readFileSync(new URL("../service-account.json", import.meta.url), "utf8"));
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-const db = admin.firestore();
+// FIRESTORE_DB_ID selects the database (migration cutover switch); unset = (default).
+const db = admin.firestore(process.env.FIRESTORE_DB_ID || "(default)");
 
 const schools = await db.collection("schools").get();
 const school = schools.docs.find((d) => (d.data().name || "").includes("Sunrise")) || schools.docs[0];

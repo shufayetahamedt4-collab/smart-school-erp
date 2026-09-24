@@ -15,6 +15,11 @@ env:
   - variable: JWT_SECRET
     secret: JWT_SECRET
 
+  # Firestore database selector — the asia-southeast1 database next to the backend.
+  # Migration cutover switch: unset or "(default)" = the africa-south1 database.
+  - variable: FIRESTORE_DB_ID
+    value: smart-school-db
+
   # Public origin — used for QR links and storage download URLs.
   # ⚠️ Replace with the real App Hosting URL after the first deploy
   # (e.g. https://smart-school-erp-XXXX.web.app), then with your custom domain.

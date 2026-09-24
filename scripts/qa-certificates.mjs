@@ -307,7 +307,8 @@ async function main() {
     });
   }
   if (getApps().length) {
-    const db = getFirestore();
+    // FIRESTORE_DB_ID selects the database (migration cutover switch); unset = (default).
+    const db = getFirestore(undefined, process.env.FIRESTORE_DB_ID || "(default)");
     const snap = await db.collection("users").get();
     const batch = db.batch();
     let n = 0;

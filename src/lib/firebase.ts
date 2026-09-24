@@ -38,7 +38,9 @@ export function adminApp(): App {
 }
 
 export function getDb(): Firestore {
-  if (!_db) _db = getFirestore(adminApp());
+  // FIRESTORE_DB_ID selects the database (e.g. "smart-school-db"); unset = the project's
+  // (default). This is the migration cutover switch — see .freebuff/migration/.
+  if (!_db) _db = getFirestore(adminApp(), process.env.FIRESTORE_DB_ID || "(default)");
   return _db;
 }
 

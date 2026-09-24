@@ -25,7 +25,8 @@ try {
 }
 import { cert } from "firebase-admin/app";
 initializeApp(cred.sa ? { credential: cert(cred.sa), projectId: cred.sa.project_id } : { credential: applicationDefault() });
-const db = getFirestore();
+// FIRESTORE_DB_ID selects the database (migration cutover switch); unset = (default).
+const db = getFirestore(undefined, process.env.FIRESTORE_DB_ID || "(default)");
 
 const JOB = "backfill-child-schoolid";
 console.log(`[${JOB}] start`);

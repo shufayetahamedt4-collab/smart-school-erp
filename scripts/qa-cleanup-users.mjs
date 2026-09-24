@@ -17,7 +17,8 @@ if (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
 if (!getApps().length) {
   initializeApp({ projectId: PROJECT_ID, credential: cert({ project_id: PROJECT_ID, client_email: CLIENT_EMAIL, private_key: PRIVATE_KEY.replace(/\\n/g, "\n") }) });
 }
-const db = getFirestore();
+// FIRESTORE_DB_ID selects the database (migration cutover switch); unset = (default).
+const db = getFirestore(undefined, process.env.FIRESTORE_DB_ID || "(default)");
 
 const snap = await db.collection("users").get();
 const batch = db.batch();

@@ -23,7 +23,8 @@ try {
   sa = JSON.parse(readFileSync(new URL("../service-account.json", import.meta.url), "utf8"));
 } catch {}
 initializeApp(sa ? { credential: cert(sa), projectId: sa.project_id } : { credential: applicationDefault() });
-const db = getFirestore();
+// FIRESTORE_DB_ID selects the database (migration cutover switch); unset = (default).
+const db = getFirestore(undefined, process.env.FIRESTORE_DB_ID || "(default)");
 
 const TRACK = new URL(".qa-fixtures.json", import.meta.url);
 const P = "zziso-"; // fixture id prefix
