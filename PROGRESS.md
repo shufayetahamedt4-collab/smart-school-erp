@@ -44,7 +44,7 @@ Warm prod endpoints did NOT get faster because their ~450 ms envelope is the **c
 - **2026-10-08 (≈2 weeks after cutover): delete the africa-south1 `(default)` database** after one last parity spot-check — until then it is the free rollback insurance. Deletion needs delete-protection OFF (it is).
 - `FIRESTORE_DB_ID` is now a load-bearing env var: `apphosting.yaml` (prod), local `.env`, and the 12 scripts. A fresh checkout copy-pasting `.env` gets the right database automatically.
 - Known CLI bug hit during the work: `firebase deploy --only firestore:indexes` crashes with `TypeError: Cannot read properties of undefined (reading 'map')` in the `--only` filter path (firebase-tools); deploying via the Firestore API directly works, and rules/indexes also deploy per-database from the two-entry `firebase.json` firestore config.
-- Remaining perf follow-up (owner-approved direction, not yet done): `minInstances: 1` on the App Hosting backend to kill cold starts.
+- ~~Remaining perf follow-up~~ **Done 2026-09-24 (commit `7c29f65`): `minInstances: 1`** — one always-warm instance. Measured cold penalty on this backend was small (+150–300 ms on the first request after an 8–20 min idle gap: Firestore channel + container reconnection on top of the ~450 ms RTT envelope); post-change idle-gap probes return at warm speed. Cost: one always-on instance (~$10–15/mo at cpu 1 / 512 MiB).
 - The `schoold`→`schoolId` index typo in `subscriptions` is still live in BOTH databases (queried by name from code) — fix needs a code-side field rename + new index + old-index removal, its own session.
 - Migration reports (copy + parity JSON, per run) live in `.freebuff/migration/` (not committed).
 
