@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Matches the Parents App accent used on the web. -->
+  <color name="brand">#0EA5E9</color>
+  <color name="background">#F8FAFC</color>
+</resources>

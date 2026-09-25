@@ -10,10 +10,10 @@ next-env.d.ts
 # production
 /build
 
-# local env
+# local env — every .env variant is a live credential file, never the template
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
 
 # 🔒 SECURITY: Firebase service-account keys must NEVER be committed
 service-account.json
@@ -34,11 +34,15 @@ storage-debug.log*
 # misc
 .DS_Store
 npm-debug.log*
+# local logs: server output, CLI traces — never worth committing, and a log
+# can hold a query string or a token
+*.log
 
 # freebuff thread-local artifacts
 .freebuff/
 dev-server.log
 dev-server.pid
+dev-server-restart.log
 
 # session tooling state (local only; save.mjs/resume.mjs read them from disk)
 scripts/session-state.json
@@ -46,3 +50,17 @@ scripts/session-progress.log
 
 .freebuff-qr.env
 scripts/.qa-fixtures.json
+
+# dev-server guard lockfile
+.dev-server.lock
+
+# netlify CLI state (site link, deploy cache)
+.netlify/
+
+# packaging artifacts (make-zip.ps1 output + its staging dir)
+.zip-stage/
+*.zip
+
+# "run it on this PC" artifacts (npm run app writes these)
+.app.pid
+app.log

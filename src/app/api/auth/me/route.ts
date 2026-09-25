@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { getSession, guardianChildId } from "@/lib/auth";
 
 export async function GET() {
   const session = await getSession();
@@ -59,7 +59,11 @@ export async function GET() {
 
   const user = await prisma.user.findUnique({
     where: { id: session.id },
-    select: { id: true, name: true, email: true, phone: true, role: true, schoolId: true, photoUrl: true },
+    select: {
+      id: true, name: true, email: true, phone: true, role: true, schoolId: true, photoUrl: true,
+      scope: true, branchId: true,
+      branch: { select: { id: true, name: true, code: true, enabled: true } },
+    },
   });
 
   if (!user) {
@@ -75,9 +79,13 @@ export async function GET() {
 
   let student = null;
   if (user.role === "GUARDIAN") {
-    const studentId = session.studentId;
-    student = await prisma.student.findFirst({
-      where: studentId ? { id: studentId } : { guardianUserId: user.id },
+    // The portal's default child, from lib/auth's stable order: every screen
+    // that keys off this payload (attendance, remarks, results) agrees with the
+    // rest of the portal, instead of each picking whichever child the store
+    // happened to return first.
+    const childId = await guardianChildId({ ...session, id: user.id, schoolId: user.schoolId });
+    student = childId ? await prisma.student.findFirst({
+      where: { id: childId },
       select: {
         id: true,
         name: true,
@@ -86,7 +94,7 @@ export async function GET() {
         classRoom: { select: { name: true } },
         section: { select: { name: true } },
       },
-    });
+    }) : null;
   }
 
   return NextResponse.json({ data: { user, school, student } });

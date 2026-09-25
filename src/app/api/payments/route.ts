@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianChildId, guardianChildIds } from "@/lib/auth";
 import { can, PermissionError } from "@/lib/permissions";
 import { createPaymentIntent, markFailed, markConfirmed } from "@/lib/payments";
 import type { PaymentMethod } from "@/lib/db";
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   const where: any = { schoolId };
   if (status) where.status = status;
   if (session.role === "GUARDIAN") {
-    const studentId = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
+    const studentId = await guardianChildId(session);
     if (!studentId) return NextResponse.json({ data: [] });
     where.studentId = studentId;
   }
@@ -57,11 +57,12 @@ export async function POST(req: NextRequest) {
   const fee = await prisma.fee.findUnique({ where: { id: String(feeId) } });
   if (!fee) return NextResponse.json({ error: "Fee not found" }, { status: 404 });
 
-  // Authorization per §2.1 matrix: guardians pay own child's fees;
+  // Authorization per §2.1 matrix: guardians pay any of their own children's
+  // fees (the second child used to be refused as if it were a stranger's);
   // accountant/admin record on behalf of any student.
   if (session.role === "GUARDIAN") {
-    const studentId = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
-    if (!studentId || studentId !== fee.studentId) {
+    const ownChildIds = await guardianChildIds(session);
+    if (!ownChildIds.includes(fee.studentId)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   } else if (!can(session.role, "feePayment", "full")) {

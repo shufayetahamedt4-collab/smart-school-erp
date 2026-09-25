@@ -1,0 +1,18 @@
+// Top-level build file.
+//
+// The Android Gradle Plugin is declared on the buildscript classpath rather than
+// through the newer `plugins { }` block: the classpath form resolves the plugin
+// artifact directly, which also lets the build run from a pre-populated Gradle
+// cache with no network access.
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    // Pinned to a version whose full toolchain (including aapt2) is available
+    // in a populated Gradle cache, so the build works without network access.
+    // Bump this when building in Android Studio with internet available.
+    classpath 'com.android.tools.build:gradle:8.12.0'
+  }
+}

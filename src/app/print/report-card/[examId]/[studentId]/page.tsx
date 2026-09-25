@@ -1,11 +1,19 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { gpaOf } from "@/lib/grades";
+import { getSession, guardianOwnsStudent } from "@/lib/auth";
+import { bandForPercent, bandLabel, gpaOfScheme, gradeForScheme } from "@/lib/grading";
+import { loadScheme } from "@/lib/grading-store";
 import { fmtDate, classOf } from "@/lib/utils";
 import { PrintActions } from "@/components/PrintActions";
 
+const NOT_FOUND = <div className="p-10 text-center text-sm text-slate-500">Report card not found.</div>;
+
 export default async function ReportCardPage({ params }: { params: Promise<{ examId: string; studentId: string }> }) {
   const { examId, studentId } = await params;
+  // Defence in depth: the URL carries both ids, so authorize the session here
+  // (below the middleware) to stop cross-school and cross-family reads.
+  const session = await getSession();
+  if (!session) return NOT_FOUND;
 
   const [exam, student] = await Promise.all([
     prisma.exam.findUnique({
@@ -18,9 +26,21 @@ export default async function ReportCardPage({ params }: { params: Promise<{ exa
     }),
   ]);
 
-  if (!exam || !student) {
-    return <div className="p-10 text-center text-sm text-slate-500">Report card not found.</div>;
+  if (!exam || !student) return NOT_FOUND;
+  if (session.role !== "SUPER_ADMIN") {
+    if (exam.schoolId !== session.schoolId || student.schoolId !== session.schoolId) return NOT_FOUND;
   }
+  // PRD §7.2 — a guardian sees only their own child's PUBLISHED report card, and
+  // only for the class that child is actually in (so the id in the URL cannot be
+  // re-pointed at a class the child never sat in). A sibling counts as their own.
+  if (session.role === "GUARDIAN") {
+    if (!(await guardianOwnsStudent(session, student)) || !exam.published || exam.classId !== student.classId) return NOT_FOUND;
+  }
+
+  // The school's own grading scale — grades are recomputed from it here so a
+  // band the school edits is reflected on the printed card immediately, even
+  // for marks entered before the change.
+  const scheme = await loadScheme(exam.schoolId);
 
   const marks = await prisma.examMark.findMany({
     where: { examId, studentId },
@@ -32,10 +52,31 @@ export default async function ReportCardPage({ params }: { params: Promise<{ exa
   const present = attendanceRows.filter((a) => a.status === "PRESENT" || a.status === "LATE").length;
   const attendancePct = attendanceRows.length ? Math.round((present / attendanceRows.length) * 100) : 0;
 
-  const marksOut = marks.map((m) => ({ name: m.subject.name, full: m.fullMarks, obtained: Number(m.obtained), grade: m.grade || "—", gpa: Number(m.gradePoint || 0) }));
+  const marksOut = marks.map((m) => {
+    const g = gradeForScheme(scheme, Number(m.obtained), Number(m.fullMarks));
+    return {
+      name: m.subject.name,
+      full: Number(m.fullMarks),
+      obtained: Number(m.obtained),
+      grade: g.grade,
+      gpa: g.gpa,
+      pass: g.pass,
+    };
+  });
   const totalObtained = marksOut.reduce((a, m) => a + m.obtained, 0);
   const totalFull = marksOut.reduce((a, m) => a + m.full, 0);
-  const gpa = gpaOf(marksOut.map((m) => m.gpa));
+  const gpa = gpaOfScheme(scheme, marksOut.map((m) => m.gpa));
+  const overallPercent = totalFull ? (totalObtained / totalFull) * 100 : 0;
+  const failedSubjects = marksOut.filter((m) => !m.pass);
+  const hasMarks = marksOut.length > 0;
+  const passed = hasMarks && failedSubjects.length === 0;
+  // The school writes its own remark for each band, so use its words rather
+  // than ours: the failed band when something failed, else the overall band.
+  const bandRemark = !hasMarks
+    ? undefined
+    : failedSubjects.length
+      ? bandForPercent(scheme, 0).remark
+      : bandForPercent(scheme, overallPercent).remark;
 
   const allStudents = await prisma.examMark.findMany({
     where: { examId },
@@ -137,26 +178,45 @@ export default async function ReportCardPage({ params }: { params: Promise<{ exa
             </div>
             <div className="flex-1 rounded-xl bg-amber-50 px-4 py-3 text-center">
               <div className="text-[10px] font-bold uppercase tracking-wide text-amber-600">Percentage</div>
-              <div className="text-xl font-black text-amber-700">{totalFull ? Math.round((totalObtained / totalFull) * 100) : 0}%</div>
+              <div className="text-xl font-black text-amber-700">{Math.round(overallPercent)}%</div>
+            </div>
+            <div
+              className={`flex-1 rounded-xl px-4 py-3 text-center ${
+                !hasMarks ? "bg-slate-50" : passed ? "bg-emerald-50" : "bg-rose-50"
+              }`}
+            >
+              <div
+                className={`text-[10px] font-bold uppercase tracking-wide ${
+                  !hasMarks ? "text-slate-500" : passed ? "text-emerald-600" : "text-rose-600"
+                }`}
+              >
+                Result
+              </div>
+              <div className={`text-xl font-black ${!hasMarks ? "text-slate-500" : passed ? "text-emerald-700" : "text-rose-700"}`}>
+                {!hasMarks ? "—" : passed ? "Passed" : `${failedSubjects.length} failed`}
+              </div>
             </div>
           </div>
 
-          {/* grade scale */}
-          <div className="mx-8 mt-5 grid grid-cols-2 gap-x-6 gap-y-1 rounded-xl bg-slate-50 p-4 text-[10px] text-slate-500 sm:grid-cols-4">
-            {[
-              ["80–100", "A+ (5.00)"],
-              ["70–79", "A (4.00)"],
-              ["60–69", "A- (3.50)"],
-              ["50–59", "B (3.00)"],
-              ["40–49", "C (2.00)"],
-              ["33–39", "D (1.00)"],
-              ["0–32", "F (0.00)"],
-            ].map(([r, g]) => (
-              <div key={r} className="flex justify-between">
-                <span>{r}</span>
-                <span className="font-bold text-slate-600">{g}</span>
-              </div>
-            ))}
+          {/* grade scale — the school's own bands */}
+          <div className="mx-8 mt-5 rounded-xl bg-slate-50 p-4">
+            <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-wide text-slate-500">
+              <span>Grading scale — {scheme.name}</span>
+              <span>Pass mark {scheme.passPercent}% · GPA out of {scheme.gpaScale.toFixed(2)}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[10px] text-slate-500 sm:grid-cols-4">
+              {scheme.bands.map((band) => (
+                <div key={band.grade} className="flex justify-between">
+                  <span>{bandLabel(band)}</span>
+                  <span className="font-bold text-slate-600">
+                    {band.grade} ({band.gpa.toFixed(2)})
+                  </span>
+                </div>
+              ))}
+            </div>
+            {scheme.failCapsGpa && (
+              <p className="mt-2 text-[10px] text-slate-400">A failed subject makes the overall GPA 0.</p>
+            )}
           </div>
 
           {/* remarks & signatures */}
@@ -164,7 +224,10 @@ export default async function ReportCardPage({ params }: { params: Promise<{ exa
             <div className="max-w-xs text-xs text-slate-500">
               <div className="font-bold uppercase tracking-wide text-slate-400">Class Teacher&apos;s Remarks</div>
               <p className="mt-2 italic">
-                {gpa >= 4 ? "Excellent performance! Keep up the great work." : gpa >= 3 ? "Good progress. Keep practising to reach the top." : gpa >= 2 ? "Satisfactory. More effort needed in weaker subjects." : "Needs significant improvement. Please arrange extra practice at home."}
+                {bandRemark ||
+                  (passed
+                    ? "A satisfactory result. Keep up the effort."
+                    : "Needs significant improvement. Please arrange extra practice at home.")}
               </p>
             </div>
             <div className="flex gap-12 text-center text-[10px] font-semibold text-slate-400">

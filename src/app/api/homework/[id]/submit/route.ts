@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianChildId, resolveActingStudent } from "@/lib/auth";
 
 /**
  * PRD §7.2 — homework submission (student self-service + guardian-assisted).
@@ -19,12 +19,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  let studentId = body?.studentId;
+  let studentId: string | null = body?.studentId ? String(body.studentId) : null;
   if (session.role === "GUARDIAN") {
-    studentId = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
+    // The guardian's own child — the requested one when they name a child they
+    // actually have, otherwise the stable default child (lib/auth).
+    studentId = await guardianChildId(session, studentId);
   } else if (session.role === "STUDENT") {
     // Students submit for themselves only (§7.2).
-    studentId = (await prisma.student.findFirst({ where: { userId: session.id } }))?.id;
+    studentId = (await resolveActingStudent(session))?.id ?? null;
+  } else if (studentId) {
+    // Staff may submit on behalf of a student, but never for another school's
+    // learner — the submission used to accept any student id at all.
+    const target = await prisma.student.findUnique({ where: { id: studentId }, select: { schoolId: true } });
+    if (!target || target.schoolId !== session.schoolId) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
   }
   if (!studentId) return NextResponse.json({ error: "Missing studentId" }, { status: 400 });
 

@@ -15,6 +15,14 @@ env:
   - variable: JWT_SECRET
     secret: JWT_SECRET
 
+  # Storage bucket. Without this the Admin SDK falls back to
+  # `<projectId>.appspot.com`, which does NOT exist for this project — the real
+  # bucket is `<projectId>.firebasestorage.app`, so every upload and every
+  # download URL (student photos, ID cards, attachments) would 404 in production.
+  # Not a secret: the bucket name is already in the web app config.
+  - variable: FIREBASE_STORAGE_BUCKET
+    value: amar-e-school.firebasestorage.app
+
   # Public origin — used for QR links and storage download URLs.
   # ⚠️ Replace with the real App Hosting URL after the first deploy
   # (e.g. https://smart-school-erp-XXXX.web.app), then with your custom domain.

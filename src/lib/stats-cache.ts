@@ -8,6 +8,8 @@
  * all of those datasets, so any of them drops the school's entries.
  */
 
+import { invalidateDbCache } from "./db";
+
 const TTL_MS = 30_000;
 
 interface Entry {
@@ -46,4 +48,7 @@ export function invalidateStats(
   for (const [k, v] of store) {
     if (v.schoolId === schoolId) store.delete(k);
   }
+  // Write routes that invalidate stats but never touched a reference cache
+  // (e.g. exams, student edits) must not keep serving a pre-write pull.
+  invalidateDbCache();
 }

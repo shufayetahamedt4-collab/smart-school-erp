@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DEBUG-ONLY manifest additions (merged over src/main in debug builds).
+     The extra http intent filter lets a deep link to the local dev server
+     (http://parents.localhost:3000/...) reach MainActivity on an emulator,
+     where there is no HTTPS and no App Links verification. Release builds keep
+     only the https filter from src/main and are unaffected by this file. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <application>
+
+    <activity
+      android:name=".MainActivity">
+
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="http" android:host="${parentsHost}" android:port="3000" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

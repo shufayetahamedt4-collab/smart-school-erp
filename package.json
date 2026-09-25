@@ -2,12 +2,18 @@
   "name": "smart-school-erp",
   "version": "2.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "description": "Smart School ERP & Parent Communication System (Multi-Tenant SaaS) — Firebase edition",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "app": "node scripts/launch.mjs",
+    "app:stop": "node scripts/stop.mjs",
+    "install:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-windows.ps1",
     "seed": "node scripts/seed.mjs",
     "setup": "node scripts/setup.mjs",
     "save": "node scripts/save.mjs",

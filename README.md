@@ -4,6 +4,10 @@ A **multi-tenant SaaS** platform for kindergartens, pre-schools, private schools
 
 Built with **Next.js 15 (App Router)**, **TypeScript**, **Firebase** (Firestore + Cloud Storage) and **Tailwind CSS 4**.
 
+> **Just want to run it?** See **[INSTALL.md](INSTALL.md)** — on Windows, double-click `install.cmd`
+> once and then `start.cmd` whenever you want the app. It asks for one Firebase key, seeds a demo
+> school and opens in your browser. No server, no hosting, no terminal required after that.
+
 ---
 
 ## ✨ Features

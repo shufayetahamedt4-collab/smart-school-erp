@@ -9,6 +9,8 @@ import { Timestamp, type WriteBatch } from "firebase-admin/firestore";
 export type Role =
   | "SUPER_ADMIN"
   | "SCHOOL_ADMIN"
+  | "BRANCH_ADMIN"
+  | "REGISTRAR"
   | "TEACHER"
   | "GUARDIAN"
   | "STUDENT"
@@ -19,6 +21,17 @@ export type Role =
 // ---- PRD v1.2 shared enums (future-proof schema) --------------------------
 
 export type StudentStatus = "ACTIVE" | "ALUMNI" | "TRANSFERRED";
+
+/**
+ * "Still on the roll", as a where-fragment for student queries.
+ *
+ * A student whose `status` was never written — every row the seed creates, and
+ * anything created before the field existed — IS enrolled. Filtering on the bare
+ * string "ACTIVE" therefore hides them: it kept seeded children out of the
+ * guardian portal's sibling list and would have skipped them in promotion. Ask
+ * for what is NOT finished instead, and a missing status counts as active.
+ */
+export const ON_ROLL_STUDENT = { status: { notIn: ["ALUMNI", "TRANSFERRED"] } } as const;
 export type AdmissionStatus =
   | "ENQUIRY"
   | "APPLIED"
@@ -253,6 +266,7 @@ const RELS: Record<string, Record<string, Rel>> = {
   },
   user: {
     school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
     teacherProfile: { to: "teacher", via: "userId", kind: "oneInverse" },
     studentOf: { to: "student", via: "guardianUserId", kind: "oneInverse" },
     messagesSent: { to: "message", via: "senderId", kind: "many" },
@@ -579,16 +593,37 @@ function conv(v: any): any {
   return v;
 }
 
-/** Strip undefined values (Firestore rejects them). */
+/**
+ * Plain objects are recursed into; everything else (Date, Firestore Timestamp,
+ * GeoPoint, FieldValue, Buffer…) is handed to Firestore untouched.
+ */
+function isPlainObject(v: any): boolean {
+  if (!v || typeof v !== "object") return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Strip undefined values (Firestore rejects them).
+ *
+ * Arrays are cleaned too, and that is not cosmetic: `[].map()` keeps a key that
+ * holds `undefined`, so an array of objects where one optional field is unset
+ * (a grade band without a remark, a quiz question without an image) made the
+ * whole write fail with "Cannot use undefined as a Firestore value". Undefined
+ * array ENTRIES are dropped as a whole.
+ */
+function cleanValue(v: any): any {
+  if (v === undefined) return undefined;
+  if (Array.isArray(v)) return v.map(cleanValue).filter((x) => x !== undefined);
+  if (isPlainObject(v)) return clean(v);
+  return v;
+}
+
 function clean(data: Record<string, any>): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(data)) {
-    if (v === undefined) continue;
-    if (v && typeof v === "object" && !(v instanceof Date) && !Array.isArray(v)) {
-      out[k] = clean(v);
-    } else {
-      out[k] = v;
-    }
+    const cleaned = cleanValue(v);
+    if (cleaned !== undefined) out[k] = cleaned;
   }
   return out;
 }
@@ -605,11 +640,134 @@ async function resolveIds(model: string, where: Record<string, any>): Promise<st
 // Fetch + in-memory filtering
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Read cache — the single biggest win for "click and it is there".
+// ---------------------------------------------------------------------------
+
+/**
+ * A Firestore round trip on this dataset costs ~550ms and one API read
+ * routinely pulls 2-4 collections, so a click used to cost 1-2.2s even though
+ * the payload is only a few KB. The same TTL + invalidate pattern already
+ * makes /api/stats and every schoolReference()-backed route answer in ~2ms;
+ * this applies it to the collection pull that every read route goes through.
+ *
+ * The cached value is the RAW pull for one pushdown filter, so callers with
+ * different `where` clauses (but the same school) legitimately share a single
+ * round trip and still filter in memory exactly as before. Rows are deep
+ * cloned on the way out, so a caller that decorates or strips fields (e.g.
+ * dropping a student's qrPin) can never poison what the next caller sees.
+ */
+/**
+ * How long a Firestore round trip's result counts as fresh. 30s matches the
+ * `/api/stats` cache, so the app has one freshness story: aggregate reads are
+ * memoized for 30s and **any write through `prisma.*` clears the memo**.
+ */
+const PULL_TTL_MS = Number(process.env.DB_READ_CACHE_MS || 30_000);
+
+/**
+ * How long an EXPIRED entry may still be served while it refreshes behind the
+ * caller (stale-while-revalidate).
+ *
+ * Measured on the owner's network, one Firestore round trip costs 0.5–1.2s and
+ * the first one after a cold start ~3.6s, so blocking a click until an expired
+ * entry is re-read is exactly the wait the cache exists to remove. Past the TTL
+ * the reader now gets the previous answer immediately while the fresh one is
+ * fetched for the *next* read. Writes still clear the memo, so this window can
+ * only ever expose out-of-band changes (seed script, Firestore console, another
+ * instance) — not your own submits. Set DB_READ_GRACE_MS=0 to go back to
+ * block-until-fresh.
+ */
+const PULL_GRACE_MS = Number(process.env.DB_READ_GRACE_MS ?? 120_000);
+
+const pullMemo = new Map<string, { at: number; value: any }>();
+const pullInflight = new Map<string, Promise<any>>();
+
+/**
+ * Bumped by every write. A read that started before the write must never
+ * publish its pre-write result afterwards — without this guard a slow pull
+ * racing a submit could re-cache stale rows for another full TTL.
+ */
+let cacheGeneration = 0;
+
+/** Drop every cached pull. Write paths call this so a submit is never stale. */
+export function invalidateDbCache(): void {
+  cacheGeneration++;
+  pullMemo.clear();
+  // In-flight reads are dropped too: a read that started BEFORE the write must
+  // not be handed to anyone who asks AFTER it. Without this, a background
+  // refresh running across a submit hands out the pre-write value to the very
+  // next reader — e.g. a school changes its grading scale and the exam sheet
+  // opened a second later still grades with the old bands.
+  pullInflight.clear();
+}
+
+/** Evict entries that are past the stale window and nobody may serve any more. */
+function prunePullMemo(): void {
+  if (pullMemo.size <= 800) return;
+  const cutoff = Date.now() - PULL_GRACE_MS;
+  for (const [k, v] of pullMemo) if (v.at < cutoff) pullMemo.delete(k);
+}
+
+/**
+ * Run ONE Firestore round trip per key, shared by every concurrent reader and
+ * never republished across a write. Without the dedupe a page whose three
+ * panels ask for the same collection fires three identical 0.5–1.2s queries
+ * instead of one.
+ */
+function loadPull<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const existing = pullInflight.get(key);
+  if (existing) return existing as Promise<T>;
+  const generation = cacheGeneration;
+  const started = Promise.resolve()
+    .then(run)
+    .then((value) => {
+      if (generation === cacheGeneration) {
+        pullMemo.set(key, { at: Date.now(), value });
+        prunePullMemo();
+      }
+      return value as T;
+    });
+  pullInflight.set(key, started);
+  void started
+    .catch(() => null)
+    .finally(() => {
+      if (pullInflight.get(key) === started) pullInflight.delete(key);
+    });
+  return started;
+}
+
+/**
+ * Memo for one Firestore round trip's result — a document list, a single
+ * document, or a count. Anything that goes to Firestore outside a collection
+ * scan (relation lookups by id, child queries per parent, count aggregations)
+ * is a full-latency hit unless it lands here.
+ *
+ *   fresh                 → answer from the memo
+ *   expired, within grace → answer from the memo, refresh in the background
+ *   otherwise             → wait for a fresh read (deduped across readers)
+ */
+async function cachedValue<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const hit = pullMemo.get(key);
+  if (hit) {
+    const age = Date.now() - hit.at;
+    if (age < PULL_TTL_MS) return structuredClone(hit.value);
+    if (age < PULL_GRACE_MS) {
+      // Stale-while-revalidate: a click never waits for the refresh.
+      void loadPull(key, run).catch(() => null);
+      return structuredClone(hit.value);
+    }
+  }
+  return structuredClone(await loadPull(key, run));
+}
+
+
 async function fetchAll(model: string, where?: Record<string, any>): Promise<any[]> {
   let q: FirebaseFirestore.Query = col(model);
+  let key = model;
   // Push one equality filter down (single-field, avoids composite indexes).
   if (where && typeof where.schoolId === "string") {
     q = q.where("schoolId", "==", where.schoolId);
+    key += `|schoolId=${where.schoolId}`;
     // Bonus pushdown: schoolId equality + a date range works with the
     // (schoolId, date) composite index and bounds the transfer for
     // time-windowed reads (e.g. the 7-day stats trend). Falls back to the
@@ -622,9 +780,14 @@ async function fetchAll(model: string, where?: Record<string, any>): Promise<any
         let ranged: FirebaseFirestore.Query = q;
         if (gte) ranged = ranged.where("date", ">=", gte);
         if (lt) ranged = ranged.where("date", "<", lt);
+        // Distinct key from the equality-only fallback below: a wider result
+        // must never be served for the narrower range.
+        const rangeKey = `${key}|date=${gte ? gte.getTime() : ""}:${lt ? lt.getTime() : ""}`;
         try {
-          const snap = await ranged.get();
-          return snap.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
+          return await cachedValue(rangeKey, async () => {
+            const snap = await ranged.get();
+            return snap.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
+          });
         } catch {
           // composite index not ready — fall through to equality-only pull;
           // the in-memory filter still enforces the range.
@@ -635,10 +798,15 @@ async function fetchAll(model: string, where?: Record<string, any>): Promise<any
     const first = Object.entries(where).find(
       ([, v]) => v !== undefined && v !== null && typeof v !== "object"
     );
-    if (first) q = q.where(first[0], "==", first[1]);
+    if (first) {
+      q = q.where(first[0], "==", first[1]);
+      key += `|${first[0]}=${String(first[1])}`;
+    }
   }
-  const snap = await q.get();
-  return snap.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
+  return cachedValue(key, async () => {
+    const snap = await q.get();
+    return snap.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
+  });
 }
 
 /**
@@ -653,6 +821,9 @@ const refMemo = new Map<string, { at: number; rows: any[] }>();
 export function invalidateReferenceCache(schoolId: string | null | undefined): void {
   if (!schoolId) return;
   for (const k of refMemo.keys()) if (k.endsWith(`:${schoolId}`)) refMemo.delete(k);
+  // Any write must also drop the raw pull cache: a freshly submitted row has
+  // to show up on the very next read, not after the TTL.
+  invalidateDbCache();
 }
 
 export async function schoolReference(model: string, schoolId: string): Promise<any[]> {
@@ -706,6 +877,19 @@ export async function userNamesFor(
 }
 
 /** Context with per-query caches so relation lookups are cheap. */
+/**
+ * One document by id, through the memo. `findUnique`/`findFirst` by id and
+ * every relation lookup share this key space, so `writeGuard`'s school read
+ * and a notice's `include: { school }` cost one round trip between them
+ * instead of one each.
+ */
+async function getDoc(model: string, id: string): Promise<any> {
+  return cachedValue(`doc:${model}:${id}`, async () => {
+    const snap = await col(model).doc(id).get();
+    return snap.exists ? { id: snap.id, ...conv(snap.data()) } : null;
+  });
+}
+
 class Ctx {
   private docCache = new Map<string, Promise<any>>();
   private listCache = new Map<string, Promise<any[]>>();
@@ -715,13 +899,11 @@ class Ctx {
     if (!id) return Promise.resolve(null);
     const key = `${model}:${id}`;
     if (!this.docCache.has(key)) {
-      this.docCache.set(
-        key,
-        col(model)
-          .doc(id)
-          .get()
-          .then((s) => (s.exists ? { id: s.id, ...conv(s.data()) } : null))
-      );
+      // Relation lookups (every `include: { school: … }`, `student: …`) are
+      // single-document gets; they cost a full round trip each unless they
+      // share the process memo, which is why one `include` used to add ~530ms
+      // to an otherwise instant route.
+      this.docCache.set(key, getDoc(model, id));
     }
     return this.docCache.get(key)!;
   }
@@ -729,12 +911,13 @@ class Ctx {
   list(model: string, via: string, parentId: string): Promise<any[]> {
     const key = `${model}:${via}:${parentId}`;
     if (!this.listCache.has(key)) {
+      // Same reasoning for to-many relations: a query per parent document.
       this.listCache.set(
         key,
-        col(model)
-          .where(via, "==", parentId)
-          .get()
-          .then((s) => s.docs.map((d) => ({ id: d.id, ...conv(d.data()) })))
+        cachedValue(`list:${model}:${via}=${parentId}`, async () => {
+          const s = await col(model).where(via, "==", parentId).get();
+          return s.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
+        })
       );
     }
     return this.listCache.get(key)!;
@@ -1003,8 +1186,7 @@ async function findUnique(model: string, args: any): Promise<any> {
   const did = idFor(model, args?.where || {});
   let doc: any = null;
   if (did) {
-    const snap = await col(model).doc(did).get();
-    if (snap.exists) doc = { id: snap.id, ...conv(snap.data()) };
+    doc = await getDoc(model, did);
   } else {
     const list = await fetchAll(model, args?.where);
     const matched = await filterList(list, model, args?.where, ctx);
@@ -1020,8 +1202,7 @@ async function findFirst(model: string, args: any): Promise<any> {
   const ctx = new Ctx();
   let doc: any = null;
   if (args?.where?.id) {
-    const snap = await col(model).doc(String(args.where.id)).get();
-    if (snap.exists) doc = { id: snap.id, ...conv(snap.data()) };
+    doc = await getDoc(model, String(args.where.id));
   }
   if (!doc) {
     const list = await fetchAll(model, args?.where);
@@ -1052,8 +1233,12 @@ async function count(model: string, args: any): Promise<number> {
   // (schoolId, examId, …), so use the native count aggregation instead of
   // pulling every document just to count it.
   if (keys.length === 1 && typeof where[keys[0]] === "string") {
-    const snap = await col(model).where(keys[0], "==", where[keys[0]]).count().get();
-    return Number((snap.data() as any).count ?? (snap.data() as any).totalCount ?? 0);
+    // Counts are the third uncached round trip: cache the NUMBER (a Firestore
+    // snapshot is not structured-cloneable, the count is).
+    return await cachedValue(`count:${model}:${keys[0]}=${where[keys[0]]}`, async () => {
+      const snap = await col(model).where(keys[0], "==", where[keys[0]]).count().get();
+      return Number((snap.data() as any).count ?? (snap.data() as any).totalCount ?? 0);
+    });
   }
   const list = await filterAll(model, where);
   return list.length;
@@ -1202,19 +1387,37 @@ async function deleteMany(model: string, where: Record<string, any>, batch?: Wri
 // Model facade (mirrors prisma.<model>.<method>)
 // ---------------------------------------------------------------------------
 
+/**
+ * Wrap a write so the pull cache is dropped the moment it lands.
+ *
+ * Freshness must not depend on a route remembering to invalidate: about
+ * thirty write routes never call an invalidator, and a 5s cached read after
+ * one of them would show pre-write data. Doing it here makes every write
+ * through `prisma.*` correct by construction, including future routes.
+ * (The per-route `invalidateReferenceCache` / `invalidateStats` calls remain
+ * for the other two layers — the reference memo and the stats payloads.)
+ */
+function writeOp(fn: (b?: WriteBatch) => Promise<any>): Op {
+  return new Op(async (b) => {
+    const out = await fn(b);
+    invalidateDbCache();
+    return out;
+  });
+}
+
 function model(name: string) {
   return {
     findUnique: (args?: any) => findUnique(name, args),
     findFirst: (args?: any) => findFirst(name, args),
     findMany: (args?: any) => findMany(name, args),
     count: (args?: any) => count(name, args),
-    create: (args: any) => new Op((b) => create(name, args?.data || {}, b)),
-    createMany: (args: any) => new Op((b) => createMany(name, args?.data || [], b)),
-    update: (args: any) => new Op((b) => update(name, args, b)),
-    updateMany: (args: any) => new Op(() => updateMany(name, args)),
-    upsert: (args: any) => new Op((b) => upsert(name, args, b)),
-    delete: (args: any) => new Op((b) => del(name, args, b)),
-    deleteMany: (args: any) => new Op((b) => deleteMany(name, args?.where || {}, b)),
+    create: (args: any) => writeOp((b) => create(name, args?.data || {}, b)),
+    createMany: (args: any) => writeOp((b) => createMany(name, args?.data || [], b)),
+    update: (args: any) => writeOp((b) => update(name, args, b)),
+    updateMany: (args: any) => writeOp(() => updateMany(name, args)),
+    upsert: (args: any) => writeOp((b) => upsert(name, args, b)),
+    delete: (args: any) => writeOp((b) => del(name, args, b)),
+    deleteMany: (args: any) => writeOp((b) => deleteMany(name, args?.where || {}, b)),
   };
 }
 
@@ -1232,6 +1435,10 @@ async function transaction<T>(
     const batch = getDb().batch();
     for (const op of arg) await op._run(batch);
     await batch.commit();
+    // The individual ops already cleared the memo; clear once more after the
+    // commit so a reader that squeezed in between cannot leave stale rows
+    // cached for the whole TTL.
+    invalidateDbCache();
     return undefined;
   }
   if (typeof arg === "function") {

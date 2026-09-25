@@ -1,12 +1,21 @@
 import QRCode from "qrcode";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { getSession, guardianOwnsStudent } from "@/lib/auth";
 import { qrUrl } from "@/lib/qr";
 import { initials, classOf } from "@/lib/utils";
 import { PrintActions } from "@/components/PrintActions";
 
+const NOT_FOUND = <div className="p-10 text-center text-sm text-slate-500">Student not found.</div>;
+
 export default async function IdCardPage({ params }: { params: Promise<{ studentId: string }> }) {
   const { studentId } = await params;
+  // The middleware blocks anonymous access; this is the defence-in-depth check
+  // that also stops a signed-in user reading ANOTHER school's (or family's)
+  // card — the URL carries the id, so the URL is not the authorization.
+  const session = await getSession();
+  if (!session) return NOT_FOUND;
+
   const student = await prisma.student.findUnique({
     where: { id: studentId },
     include: {
@@ -16,9 +25,10 @@ export default async function IdCardPage({ params }: { params: Promise<{ student
     },
   });
 
-  if (!student) {
-    return <div className="p-10 text-center text-sm text-slate-500">Student not found.</div>;
-  }
+  if (!student) return NOT_FOUND;
+  if (session.role !== "SUPER_ADMIN" && student.schoolId !== session.schoolId) return NOT_FOUND;
+  // A guardian may print any card in their own household (a sibling included).
+  if (session.role === "GUARDIAN" && !(await guardianOwnsStudent(session, student))) return NOT_FOUND;
 
   const qr = await QRCode.toDataURL(qrUrl(student.qrToken), { width: 260, margin: 1, color: { dark: "#0f172a" } });
 

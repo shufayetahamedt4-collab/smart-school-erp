@@ -1,0 +1,13 @@
+# Build outputs
+build/
+.gradle/
+*.apk
+*.aab
+
+# Machine-specific (points at the local Android SDK). Never commit.
+local.properties
+
+# Signing material — never commit keys or passwords.
+*.jks
+*.keystore
+keystore.properties

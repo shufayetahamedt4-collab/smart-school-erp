@@ -39,6 +39,10 @@ export async function GET(req: NextRequest) {
   // the school-wide list. wantsFull only gates the templates payload.
   const wantsFull = can(session.role, "feePayment", "full");
   let where: any = { schoolId };
+  // Branch scoping (PRD §12.3): branch admins/registrars only see their branch's fees.
+  if (session.scope === "BRANCH" && session.branchId) {
+    where.branchId = session.branchId;
+  }
   if (session.role === "GUARDIAN" || session.role === "STUDENT") {
     const students = await schoolReference("student", schoolId);
     const student =
@@ -55,6 +59,19 @@ export async function GET(req: NextRequest) {
     if (sp.get("q")) {
       where.student = { name: { contains: sp.get("q"), mode: "insensitive" } };
     }
+  }
+
+  // Monitoring drill-down (PRD §12.3): the main admin may filter the list to
+  // one branch via ?branchId=. Fees carry their branch; legacy rows fall back
+  // to the owning student's branch.
+  const drillBranch =
+    sp.get("branchId") && (session.role === "SCHOOL_ADMIN" || session.role === "SUPER_ADMIN")
+      ? sp.get("branchId")!
+      : null;
+  let drillStudentIds: Set<string> | null = null;
+  if (drillBranch) {
+    const bStudents = await prisma.student.findMany({ where: { schoolId, branchId: drillBranch }, select: { id: true } });
+    drillStudentIds = new Set(bStudents.map((s) => s.id));
   }
 
   // ONE wave: fees + settings + templates + payments + the reference maps
@@ -76,6 +93,14 @@ export async function GET(req: NextRequest) {
   const fees = feesRaw.filter((f: any) => {
     if (where.studentId && f.studentId !== where.studentId) return false;
     if (where.status && f.status !== where.status) return false;
+    // Branch scoping (PRD §12.3) — with the same legacy fallback as the
+    // drill-down: a fee belongs to the branch if it is tagged to it or its
+    // student is (rows created before the multi-branch feature are untagged).
+    if (where.branchId) {
+      const s = studentRows.find((x: any) => x.id === f.studentId);
+      if (f.branchId !== where.branchId && s?.branchId !== where.branchId) return false;
+    }
+    if (drillStudentIds && !drillStudentIds.has(f.studentId) && f.branchId !== drillBranch) return false;
     if (q) {
       const s = studentRows.find((x: any) => x.id === f.studentId);
       if (!s || !String(s.name || "").toLowerCase().includes(q)) return false;
@@ -144,10 +169,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Student, title and amount are required." }, { status: 400 });
   }
 
+  // The fee inherits its student's branch so branch monitoring stays exact
+  // even for fees created before the multi-branch feature.
+  const owner = await prisma.student.findUnique({ where: { id: studentId }, select: { branchId: true } });
+
   const fee = await prisma.fee.create({
     data: {
       schoolId,
       studentId,
+      branchId: owner?.branchId || null,
       title: String(title),
       amount: Number(amount),
       feeType: feeType || "OTHER",

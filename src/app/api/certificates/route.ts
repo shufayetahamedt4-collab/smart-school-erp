@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { getSession, resolveActingStudent } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 
 /**
@@ -16,11 +16,11 @@ export async function GET(req: NextRequest) {
   const type = req.nextUrl.searchParams.get("type") === "CHARACTER" ? "CHARACTER" : "TC";
   if (!studentId) return NextResponse.json({ error: "studentId is required." }, { status: 400 });
 
-  // Guardians may only view their own child's certificate.
+  // Guardians may only view their own child's certificate — any of their
+  // children, asked for by id (§5.4 siblings), and nothing but their own.
   if (session.role === "GUARDIAN" || session.role === "STUDENT") {
-    const studentIdOwn =
-      session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
-    if (studentIdOwn !== studentId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const own = await resolveActingStudent(session, session.role === "GUARDIAN" ? studentId : null);
+    if (!own || own.id !== studentId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   } else if (!can(session.role, "studentTeacherInfo", "full")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -35,6 +35,11 @@ export async function GET(req: NextRequest) {
     },
   });
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  // Tenant isolation: staff of one school must not read another school's
+  // student certificate by guessing the id (SUPER_ADMIN is cross-school).
+  if (session.role !== "SUPER_ADMIN" && student.schoolId !== session.schoolId) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
 
   const serial = `CERT-${type === "TC" ? "TC" : "CC"}-${new Date().getFullYear()}-${student.id.slice(-6).toUpperCase()}`;
   return NextResponse.json({

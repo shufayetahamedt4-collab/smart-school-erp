@@ -23,17 +23,24 @@ export default function StudentsPage() {
   const [q, setQ] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
 
   const load = (query: string) => api<Student[]>(`/api/students${query}`).then(setStudents).finally(() => setLoading(false));
 
   useEffect(() => {
-    load("");
+    // Deep link from the branch monitoring panel (?branchId=…).
+    const b = new URLSearchParams(window.location.search).get("branchId") || "";
+    setBranchId(b);
+    load(qs({ branchId: b || undefined }));
     api<ClassRow[]>("/api/classes").then(setClasses).catch(() => null);
+    // Branches only resolve for the main admin — the filter renders for them alone.
+    api<{ id: string; name: string }[]>("/api/branches").then(setBranches).catch(() => null);
   }, []);
 
   const applyFilters = () => {
     setLoading(true);
-    load(qs({ q: q || undefined, classId: classId || undefined, sectionId: sectionId || undefined }));
+    load(qs({ q: q || undefined, classId: classId || undefined, sectionId: sectionId || undefined, branchId: branchId || undefined }));
   };
 
   const debt = (s: Student) => s.fees.reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
@@ -46,6 +53,28 @@ export default function StudentsPage() {
         subtitle={`${students.length} students enrolled`}
         actions={<Link href="/dashboard/students/new" className="btn btn-primary"><Plus size={16} /> New Admission</Link>}
       />
+
+      {/* branch drill-down (main admin only — the list stays empty otherwise) */}
+      {branches.length > 0 && (
+        <Card className="mb-4 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Branch</span>
+            <Select
+              className="max-w-xs"
+              value={branchId}
+              onChange={(e) => {
+                const v = e.target.value;
+                setBranchId(v);
+                setLoading(true);
+                load(qs({ q: q || undefined, classId: classId || undefined, sectionId: sectionId || undefined, branchId: v || undefined }));
+              }}
+            >
+              <option value="">All branches (whole school)</option>
+              {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
+            </Select>
+          </div>
+        </Card>
+      )}
 
       {/* filters */}
       <Card className="mb-4 p-4">

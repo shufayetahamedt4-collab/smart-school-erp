@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { getSession, guardianChildIds } from "@/lib/auth";
 import { confirmPayment, refAlreadyProcessed } from "@/lib/ledger";
 import { markConfirmed } from "@/lib/payments";
 import type { PaymentMethod } from "@/lib/db";
@@ -22,10 +22,12 @@ export async function POST(req: NextRequest) {
   const intent = await prisma.paymentIntent.findUnique({ where: { id: intentId } });
   if (!intent) return NextResponse.json({ error: "Intent not found" }, { status: 404 });
 
-  // Guardian may only complete their own intents; staff any in their school.
+  // Guardian may only complete their own children's intents (§5.4 — a family
+  // login covers every child, not just whichever one resolved first);
+  // staff any in their school.
   if (session.role === "GUARDIAN") {
-    const studentId = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
-    if (!studentId || studentId !== intent.studentId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const ownChildIds = await guardianChildIds(session);
+    if (!ownChildIds.includes(intent.studentId)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   } else if (intent.schoolId !== session.schoolId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

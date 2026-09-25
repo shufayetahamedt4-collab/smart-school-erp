@@ -16,22 +16,55 @@ interface BeforeInstallPromptEvent extends Event {
 interface InstallPrompt {
   /** true once the app is running in installed (standalone) mode */
   installed: boolean;
-  /** true when the browser supports the install prompt (Chrome/Edge/Android) */
+  /** true when the browser has offered its install prompt (Chrome/Edge/Android) */
   canPrompt: boolean;
-  /** true on iOS Safari — only "Add to Home Screen" instructions are possible */
+  /** true on iOS — Apple allows no programmatic install, only Add to Home Screen */
   isIOS: boolean;
+  /** true inside an in-app browser (Facebook, Instagram, a QR app's WebView…) */
+  inAppBrowser: boolean;
+  /**
+   * true once we're confident no prompt is coming. Until then the UI must not
+   * claim install is impossible — `beforeinstallprompt` fires after load.
+   */
+  settled: boolean;
   /** fires the native install prompt; resolves with whether the user accepted */
   promptInstall: () => Promise<boolean>;
 }
 
 let swRegistered = false;
 
+/**
+ * Register the service worker in EVERY environment.
+ *
+ * Browsers only offer their install prompt to an app that has a service worker,
+ * so skipping registration in development made installation impossible to test
+ * and left the UI with nothing to show but a generic hint. In development we
+ * register `/sw.js?dev=1`, which installs the worker but caches nothing.
+ */
 function registerServiceWorker() {
   if (swRegistered) return;
   swRegistered = true;
-  if ("serviceWorker" in navigator && process.env.NODE_ENV !== "development") {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
-  }
+  if (!("serviceWorker" in navigator)) return;
+  const url = process.env.NODE_ENV === "development" ? "/sw.js?dev=1" : "/sw.js";
+  navigator.serviceWorker.register(url).catch(() => {});
+}
+
+/** In-app browsers can't install — the guardian must open a real browser first. */
+function isInAppBrowser(ua: string): boolean {
+  return /(FBAN|FBAV|FB_IAB|Instagram|Line\/|WhatsApp|MicroMessenger|Twitter|GSA\/|; wv\))/i.test(ua);
+}
+
+/**
+ * The Android shells append this to their user agent (see each app's
+ * MainActivity.java under android/, all built on the shared android/shell
+ * module). Inside them there is nothing to install
+ * — being asked to install the app from inside the app is exactly the confusion
+ * this check prevents.
+ */
+export const NATIVE_SHELL_UA = /AmarESchool(Parents|Teachers)/i;
+
+export function isNativeShell(): boolean {
+  return typeof navigator !== "undefined" && NATIVE_SHELL_UA.test(navigator.userAgent);
 }
 
 /** Shared installability logic + one-time service-worker registration. */
@@ -39,6 +72,8 @@ export function useInstallPrompt(): InstallPrompt {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [inAppBrowser, setInAppBrowser] = useState(false);
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     registerServiceWorker();
@@ -47,18 +82,26 @@ export function useInstallPrompt(): InstallPrompt {
       window.matchMedia("(display-mode: standalone)").matches ||
       // Safari 16.4+ exposes installed PWAs through display-mode; older iPhones use this:
       (window.navigator as any).standalone === true;
-    setInstalled(standalone);
+    setInstalled(standalone || isNativeShell());
     setIsIOS(/iphone|ipad|ipod/i.test(navigator.userAgent));
+    setInAppBrowser(isInAppBrowser(navigator.userAgent));
 
     const onBeforeInstall = (e: Event) => {
       e.preventDefault();
       setDeferred(e as BeforeInstallPromptEvent);
+      setSettled(true);
     };
     const onInstalled = () => setInstalled(true);
 
     window.addEventListener("beforeinstallprompt", onBeforeInstall);
     window.addEventListener("appinstalled", onInstalled);
+
+    // The prompt can arrive a moment after load; give it a fair chance before
+    // the UI concludes it isn't coming.
+    const timer = window.setTimeout(() => setSettled(true), 3000);
+
     return () => {
+      window.clearTimeout(timer);
       window.removeEventListener("beforeinstallprompt", onBeforeInstall);
       window.removeEventListener("appinstalled", onInstalled);
     };
@@ -73,7 +116,7 @@ export function useInstallPrompt(): InstallPrompt {
     return outcome === "accepted";
   }, [deferred]);
 
-  return { installed, canPrompt: !!deferred, isIOS, promptInstall };
+  return { installed, canPrompt: !!deferred, isIOS, inAppBrowser, settled, promptInstall };
 }
 
 /**
@@ -86,13 +129,20 @@ export function InstallBanner() {
   const [showIOSHelp, setShowIOSHelp] = useState(false);
   const pathname = usePathname();
 
-  if (installed || dismissed || pathname?.startsWith("/print")) return null;
+  // Hidden on print pages, and on a school's Parents App entry (/s/<slug>),
+  // which has its own install step and its own per-school manifest — a generic
+  // "Install Amar E School" banner there would offer the wrong app.
+  if (installed || dismissed || pathname?.startsWith("/print") || pathname?.startsWith("/s/")) return null;
 
   const installable = canPrompt || isIOS;
 
+  // The wrapper spans the full width of the viewport, so it must not swallow
+  // clicks — only the card itself is interactive. Otherwise the whole bottom
+  // band of every page becomes dead space (a control under it, like the last
+  // demo-account card on the sign-in screen, cannot be clicked at all).
   return (
-    <div className="no-print fixed inset-x-0 bottom-4 z-[60] flex justify-center px-4">
-      <div className="flex w-full max-w-md items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-900/10 fade-up">
+    <div className="no-print pointer-events-none fixed inset-x-0 bottom-4 z-[60] flex justify-center px-4">
+      <div className="pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-900/10 fade-up">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white">
           <MonitorSmartphone size={18} />
         </div>
@@ -125,7 +175,7 @@ export function InstallBanner() {
         </button>
       </div>
       {showIOSHelp && (
-        <div className="absolute bottom-16 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-xl fade-up">
+        <div className="pointer-events-auto absolute bottom-16 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-xl fade-up">
           <p className="text-[12px] leading-relaxed text-slate-600">
             On iPhone/iPad: tap the <b>Share</b> button in Safari, then choose{" "}
             <b>&quot;Add to Home Screen&quot;</b>. The app icon will appear on your home screen.

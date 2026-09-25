@@ -164,6 +164,10 @@ export async function POST(req: NextRequest) {
       data: {
         schoolId: school.id,
         name: body?.branchName || "Main Campus",
+        code: body?.branchCode || null,
+        address: body?.address || null,
+        enabled: true,
+        createdAt: new Date(),
       },
     }).catch(() => undefined);
 

@@ -19,6 +19,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
   if (!teacher) return NextResponse.json({ error: "Teacher not found" }, { status: 404 });
+  // Tenant isolation: a school session may only read its own teachers
+  // (SUPER_ADMIN is cross-school by design).
+  if (session.role !== "SUPER_ADMIN" && teacher.schoolId !== session.schoolId) {
+    return NextResponse.json({ error: "Teacher not found" }, { status: 404 });
+  }
   return NextResponse.json({ data: teacher });
 }
 
@@ -31,7 +36,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => null);
 
   const teacher = await prisma.teacher.findUnique({ where: { id }, include: { user: true } });
-  if (!teacher) return NextResponse.json({ error: "Teacher not found" }, { status: 404 });
+  if (!teacher || teacher.schoolId !== session.schoolId) {
+    return NextResponse.json({ error: "Teacher not found" }, { status: 404 });
+  }
 
   const data: any = {};
   for (const key of ["designation", "qualification", "phone", "address", "joinDate"]) {
@@ -52,7 +59,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const locked = await writeGuard(session.schoolId);
   if (locked) return locked;
   const teacher = await prisma.teacher.findUnique({ where: { id } });
-  if (!teacher) return NextResponse.json({ error: "Teacher not found" }, { status: 404 });
+  if (!teacher || teacher.schoolId !== session.schoolId) {
+    return NextResponse.json({ error: "Teacher not found" }, { status: 404 });
+  }
   await audit("TEACHER_DELETE", "teacher", id);
   await prisma.$transaction([
     prisma.classAssignment.deleteMany({ where: { teacherId: id } }),

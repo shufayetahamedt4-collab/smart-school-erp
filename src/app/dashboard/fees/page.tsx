@@ -23,11 +23,20 @@ export default function FeesPage() {
   const [payMethod, setPayMethod] = useState("CASH");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
 
-  const load = (filters = { status: status || undefined, q: q || undefined }) =>
+  const load = (filters = { status: status || undefined, q: q || undefined, branchId: branchId || undefined }) =>
     api<{ fees: FeeRow[]; settings: any }>(`/api/fees${qs(filters)}`).then((d) => { setFees(d.fees); setSettings(d.settings); }).finally(() => setLoading(false));
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    // Deep link from the branch monitoring panel (?branchId=…).
+    const b = new URLSearchParams(window.location.search).get("branchId") || "";
+    setBranchId(b);
+    load({ status: "", q: "", branchId: b || undefined });
+    // Branch filter only resolves for the main admin.
+    api<{ id: string; name: string }[]>("/api/branches").then(setBranches).catch(() => null);
+  }, []);
 
   const apply = () => { setLoading(true); load(); };
 
@@ -56,6 +65,27 @@ export default function FeesPage() {
         subtitle={`${fmtMoney(collected)} collected · ${fmtMoney(dueTotal)} outstanding`}
         actions={<button className="btn btn-secondary btn-sm" onClick={() => setSettingsOpen(true)}><Save size={14} /> Fee settings</button>}
       />
+
+      {branches.length > 0 && (
+        <Card className="mb-4 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Branch</span>
+            <Select
+              className="max-w-xs"
+              value={branchId}
+              onChange={(e) => {
+                const v = e.target.value;
+                setBranchId(v);
+                setLoading(true);
+                load({ status: status || undefined, q: q || undefined, branchId: v || undefined });
+              }}
+            >
+              <option value="">All branches (whole school)</option>
+              {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
+            </Select>
+          </div>
+        </Card>
+      )}
 
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 

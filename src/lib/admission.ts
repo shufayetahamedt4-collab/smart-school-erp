@@ -48,9 +48,17 @@ export function suggestClassIndex(prevClassName: string | undefined | null, clas
   return partial?.id || null;
 }
 
-/** Sibling auto-suggest (§4.2/§5.4): match students by guardian phone or email. */
-export async function findSiblingCandidates(schoolId: string, guardianPhone?: string | null, guardianEmail?: string | null) {
-  if (!guardianPhone && !guardianEmail) return [];
+/**
+ * Sibling auto-suggest (§4.2/§5.4): match students by guardian phone, guardian
+ * email (or the account that email belongs to), or — when the desk types a name
+ * or admission number — by the student themselves.
+ */
+export async function findSiblingCandidates(
+  schoolId: string,
+  guardianPhone?: string | null,
+  guardianEmail?: string | null,
+  q?: string | null
+) {
   const conditions: any[] = [];
   if (guardianPhone) conditions.push({ guardianPhone });
   if (guardianEmail) {
@@ -58,9 +66,23 @@ export async function findSiblingCandidates(schoolId: string, guardianPhone?: st
     const gUser = await prisma.user.findUnique({ where: { email: guardianEmail.toLowerCase() } });
     if (gUser) conditions.push({ guardianUserId: gUser.id });
   }
+  const term = String(q || "").trim();
+  if (term) conditions.push({ name: { contains: term } }, { admissionNo: { contains: term } });
+  if (!conditions.length) return [];
   return prisma.student.findMany({
     where: { schoolId, OR: conditions },
-    select: { id: true, name: true, classRoom: { select: { name: true } }, section: { select: { name: true } }, guardianUserId: true, familyId: true },
+    select: {
+      id: true,
+      name: true,
+      admissionNo: true,
+      status: true,
+      classRoom: { select: { id: true, name: true } },
+      section: { select: { name: true } },
+      guardianUserId: true,
+      guardianName: true,
+      guardianPhone: true,
+      familyId: true,
+    },
     take: 10,
   });
 }
@@ -137,23 +159,13 @@ export async function payAdmissionFeeAndEnroll(
     }
     guardianUserId = gUser.id;
     await prisma.student.update({ where: { id: student.id }, data: { guardianUserId } });
+  }
 
-    // Sibling auto-link via familyId
-    const siblings = await prisma.student.findMany({
-      where: {
-        schoolId: admission.schoolId,
-        id: { not: student.id },
-        OR: [
-          { guardianUserId: guardianUserId },
-          ...(admission.guardianPhone ? [{ guardianPhone: admission.guardianPhone }] : []),
-        ],
-        familyId: { not: null },
-      },
-      select: { familyId: true },
-      take: 1,
-    });
-    const familyId = siblings[0]?.familyId || `fam_${student.id.slice(0, 10)}`;
-    await prisma.student.update({ where: { id: student.id }, data: { familyId } });
+  // Sibling link (§5.4) through the shared helper, so an enrolled child and a
+  // walk-in admitted at the desk end up in the same family with one login.
+  const sibling = await findExistingSibling(admission.schoolId, student.id, guardianUserId, admission.guardianPhone);
+  if (sibling) {
+    await linkSiblingFamily({ schoolId: admission.schoolId, studentId: student.id, siblingId: sibling.id, guardianUserId });
   }
 
   // 3) Fees: admission fee (with discount applied) + first monthly fee
@@ -231,4 +243,212 @@ export async function payAdmissionFeeAndEnroll(
   });
 
   return { student, guardianUserId, admissionFeeId: admissionFee.id };
+}
+
+/* ============================================================================
+ * Intake helpers — shared by the walk-in intake (/api/admissions/intake) and the
+ * enquiry pipeline's enrollment, so both paths link families and hand out kit by
+ * exactly the same rules.
+ * ==========================================================================*/
+
+/** The nearest already-enrolled child to link a new student to, or null. */
+export async function findExistingSibling(
+  schoolId: string,
+  studentId: string,
+  guardianUserId: string | null,
+  guardianPhone?: string | null
+) {
+  // The guardian ACCOUNT is the strongest signal (a family that already signed
+  // in shares it); the phone number is the fallback the enquiry form implies.
+  const byUser = guardianUserId
+    ? await prisma.student.findFirst({ where: { schoolId, id: { not: studentId }, guardianUserId } })
+    : null;
+  if (byUser) return byUser;
+  if (!guardianPhone) return null;
+  return prisma.student.findFirst({ where: { schoolId, id: { not: studentId }, guardianPhone } });
+}
+
+/**
+ * Put a new student in the same family as a sibling (§5.4).
+ *
+ * The sibling's family id wins when it has one; otherwise a new one is minted and
+ * stamped on BOTH children, which is what makes the guardian portal list them
+ * together (see /api/parent/siblings). The family also shares one login: whichever
+ * of the two already has a guardian account keeps it for both.
+ */
+export async function linkSiblingFamily(opts: {
+  schoolId: string;
+  studentId: string;
+  siblingId: string;
+  guardianUserId?: string | null;
+}): Promise<{ familyId: string; siblingName: string; guardianUserId: string | null }> {
+  const sibling = await prisma.student.findUnique({ where: { id: opts.siblingId } });
+  if (!sibling || sibling.schoolId !== opts.schoolId) throw new Error("Sibling not found in this school.");
+  if (sibling.id === opts.studentId) throw new Error("A student cannot be their own sibling.");
+
+  const familyId = sibling.familyId || `fam_${opts.studentId.slice(0, 10)}`;
+  if (!sibling.familyId) await prisma.student.update({ where: { id: sibling.id }, data: { familyId } });
+  await prisma.student.update({ where: { id: opts.studentId }, data: { familyId } });
+
+  const familyGuardian = sibling.guardianUserId || opts.guardianUserId || null;
+  if (familyGuardian && !sibling.guardianUserId) {
+    await prisma.student.update({ where: { id: sibling.id }, data: { guardianUserId: familyGuardian } });
+  }
+  if (familyGuardian && !opts.guardianUserId) {
+    await prisma.student.update({ where: { id: opts.studentId }, data: { guardianUserId: familyGuardian } });
+  }
+  return { familyId, siblingName: sibling.name, guardianUserId: familyGuardian };
+}
+
+/** One catalogue item with what is actually on the shelf right now. */
+export interface KitItem {
+  id: string;
+  title: string;
+  code: string | null;
+  type: string;
+  classId: string | null;
+  className: string | null;
+  price: number;
+  total: number;
+  issued: number;
+  available: number;
+}
+
+/**
+ * The school's catalogue with live availability. `available` is the app's existing
+ * convention — copies bought minus copies currently ISSUED — so returning an item
+ * (or recording one lost) frees a unit again without any extra bookkeeping.
+ */
+export async function kitAvailability(schoolId: string): Promise<KitItem[]> {
+  const [books, stocks, active] = await Promise.all([
+    prisma.bookCatalog.findMany({ where: { schoolId }, orderBy: { title: "asc" } }),
+    prisma.bookStock.findMany({ where: { schoolId } }),
+    prisma.bookIssue.findMany({ where: { schoolId, status: "ISSUED" }, select: { bookId: true } }),
+  ]);
+  const stockBy = new Map(stocks.map((s: any) => [s.bookId as string, s]));
+  const issuedBy = new Map<string, number>();
+  for (const issue of active) issuedBy.set((issue as any).bookId, (issuedBy.get((issue as any).bookId) || 0) + 1);
+
+  return books.map((b: any) => {
+    const total = Number(stockBy.get(b.id)?.total) || 0;
+    const issued = issuedBy.get(b.id) || 0;
+    return {
+      id: b.id,
+      title: b.title,
+      code: b.code || null,
+      type: b.type,
+      classId: b.classId || null,
+      className: b.className || null,
+      price: Number(b.price) || 0,
+      total,
+      issued,
+      available: Math.max(0, total - issued),
+    };
+  });
+}
+
+/** What a hand-out actually did — nothing is dropped silently. */
+export interface KitResult {
+  issued: { bookId: string; title: string; type: string }[];
+  unavailable: { bookId: string; title: string; available: number }[];
+  unknown: string[];
+}
+
+/**
+ * Hand out kit to a student, refusing anything that is not on the shelf.
+ *
+ * Availability is re-checked here rather than trusted from the form: two desks
+ * (or two tabs) can both see "1 left". Whatever cannot be issued comes back in
+ * `unavailable` / `unknown` so the caller can tell the operator instead of
+ * pretending the hand-out succeeded.
+ */
+export async function issueKitAtAdmission(opts: {
+  schoolId: string;
+  studentId: string;
+  issuedById?: string | null;
+  items: string[];
+  note?: string;
+}): Promise<KitResult> {
+  const result: KitResult = { issued: [], unavailable: [], unknown: [] };
+  const wanted = [...new Set((opts.items || []).filter(Boolean))];
+  if (!wanted.length) return result;
+
+  const catalogue = new Map((await kitAvailability(opts.schoolId)).map((k) => [k.id, k]));
+  const takenNow = new Map<string, number>();
+
+  for (const id of wanted) {
+    const item = catalogue.get(id);
+    if (!item) {
+      result.unknown.push(id);
+      continue;
+    }
+    const taken = takenNow.get(id) || 0;
+    if (item.available - taken <= 0) {
+      result.unavailable.push({ bookId: id, title: item.title, available: item.available });
+      continue;
+    }
+    await prisma.bookIssue.create({
+      data: {
+        schoolId: opts.schoolId,
+        bookId: id,
+        studentId: opts.studentId,
+        issuedById: opts.issuedById || null,
+        issuedAt: new Date(),
+        status: "ISSUED",
+        fineAmount: 0,
+        note: opts.note || "ADMISSION",
+      },
+    });
+    takenNow.set(id, taken + 1);
+    result.issued.push({ bookId: id, title: item.title, type: item.type });
+  }
+  return result;
+}
+
+/** Where an admission fee defaults from, and the class's other fee lines. */
+export interface FeeDefaults {
+  admissionFee: number;
+  monthlyFee: number;
+  /** "class-template" → a Fee Template for this class; "school-settings" → Fee Settings. */
+  source: "class-template" | "school-settings" | "app-default";
+  templateName?: string;
+  /** Every other line on the class's template (exam, transport…), to bill as-is. */
+  extraLines: { title: string; type: string; amount: number }[];
+}
+
+const APP_DEFAULT_ADMISSION_FEE = 5000;
+const APP_DEFAULT_MONTHLY_FEE = 1500;
+
+/**
+ * Resolve what a new admission should be charged (§4.2/§10.3): the class's Fee
+ * Template when one exists, else the school's Fee Settings, else the app default.
+ * The desk may still override either number on the form.
+ */
+export async function admissionFeeDefaults(schoolId: string, classId?: string | null): Promise<FeeDefaults> {
+  const setting = await prisma.feeSetting.findUnique({ where: { schoolId } });
+  const base: FeeDefaults = {
+    admissionFee: Number(setting?.admissionFee ?? APP_DEFAULT_ADMISSION_FEE),
+    monthlyFee: Number(setting?.monthlyFee ?? APP_DEFAULT_MONTHLY_FEE),
+    source: setting ? "school-settings" : "app-default",
+    extraLines: [],
+  };
+  if (!classId) return base;
+
+  const templates: any[] = await prisma.feeTemplate.findMany({ where: { schoolId } });
+  const template = templates.find((t) => t.classId === classId);
+  if (!template) return base;
+  const items: any[] = await prisma.feeTemplateItem.findMany({ where: { templateId: template.id } });
+  if (!items.length) return base;
+
+  const admission = items.find((i) => i.type === "ADMISSION");
+  const tuition = items.find((i) => i.type === "TUITION");
+  return {
+    admissionFee: Number(admission?.amount ?? base.admissionFee),
+    monthlyFee: Number(tuition?.amount ?? base.monthlyFee),
+    source: "class-template",
+    templateName: template.name,
+    extraLines: items
+      .filter((i) => i.type !== "ADMISSION" && i.type !== "TUITION")
+      .map((i) => ({ title: String(i.title), type: String(i.type), amount: Number(i.amount) || 0 })),
+  };
 }

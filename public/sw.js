@@ -11,6 +11,17 @@
 const CACHE_NAME = "amar-e-school-v1";
 const STATIC_PREFIXES = ["/_next/static/", "/icons/", "/manifest.json"];
 
+/**
+ * Dev mode: registered as `/sw.js?dev=1` by a dev server.
+ *
+ * The worker still installs and still registers a fetch handler — which is what
+ * the browser's installability check looks for — but it never caches anything,
+ * so a dev server can never serve stale chunks. Registering it in development
+ * is what makes the install prompt testable locally instead of only on a
+ * deployed HTTPS origin.
+ */
+const DEV = new URL(self.location.href).searchParams.get("dev") === "1";
+
 // Routes that can contain personal data — never cached by this SW.
 const PRIVATE_PREFIXES = ["/admin", "/dashboard", "/teacher", "/parent", "/student", "/print", "/qr"];
 
@@ -51,10 +62,9 @@ self.addEventListener("notificationclick", (event) => {
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(["/offline.html"]))
-      .then(() => self.skipWaiting())
+    (DEV ? Promise.resolve() : caches.open(CACHE_NAME).then((cache) => cache.addAll(["/offline.html"]))).then(() =>
+      self.skipWaiting()
+    )
   );
 });
 
@@ -68,6 +78,9 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  // Dev: let every request hit the network untouched.
+  if (DEV) return;
+
   const req = event.request;
   if (req.method !== "GET") return;
 

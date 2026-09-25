@@ -1,22 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, resolveActingStudent } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 
 /**
- * PRD §7.2 — quiz taking (student) with server-side auto-grading.
+ * PRD §7.2 — quiz taking with server-side auto-grading.
  * GET  → quiz questions WITHOUT the answer key (published quizzes, own class)
  * POST → submit answers → graded here → score stored in quizAttempt
+ *
+ * Taken in the Parents App: a GUARDIAN session resolves to their own child
+ * (resolveActingStudent), a STUDENT session to themselves. Grading and the
+ * attempt record stay keyed to the child, so the answer key never leaves the
+ * server and one attempt is recorded per child.
  */
+const FAMILY_ROLES = ["STUDENT", "GUARDIAN"];
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
-  if (!session || session.role !== "STUDENT") {
+  if (!session || !FAMILY_ROLES.includes(session.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const { id } = await params;
-  const student = await prisma.student.findFirst({ where: { userId: session.id } });
-  if (!student) return NextResponse.json({ error: "Student profile not linked." }, { status: 404 });
+  const student = await resolveActingStudent(session);
+  if (!student) return NextResponse.json({ error: "No student record linked to this account." }, { status: 404 });
 
   const quiz = await prisma.quiz.findUnique({
     where: { id },
@@ -60,12 +66,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
-  if (!session || session.role !== "STUDENT") {
+  if (!session || !FAMILY_ROLES.includes(session.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const { id } = await params;
-  const student = await prisma.student.findFirst({ where: { userId: session.id } });
-  if (!student) return NextResponse.json({ error: "Student profile not linked." }, { status: 404 });
+  const student = await resolveActingStudent(session);
+  if (!student) return NextResponse.json({ error: "No student record linked to this account." }, { status: 404 });
 
   const quiz = await prisma.quiz.findUnique({ where: { id }, include: { questions: { orderBy: { seq: "asc" } } } });
   if (!quiz || quiz.schoolId !== student.schoolId) return NextResponse.json({ error: "Not found" }, { status: 404 });

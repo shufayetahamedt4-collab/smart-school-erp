@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, schoolReference, userNamesFor } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianChildId } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { notifyUsers } from "@/lib/notify";
 
@@ -25,10 +25,11 @@ export async function GET() {
       schoolReference("student", schoolId),
       prisma.meetingBooking.findMany({ where: { schoolId } }),
     ]);
-    const student =
-      session.studentId
-        ? students.find((s: any) => s.id === session.studentId)
-        : students.find((s: any) => s.guardianUserId === session.id);
+    // The family's own child in lib/auth's stable order — an inline
+    // `find(guardianUserId)` used to answer with whichever child the store
+    // returned first, so this page could disagree with the rest of the portal.
+    const childId = await guardianChildId(session);
+    const student = childId ? students.find((s: any) => s.id === childId) : undefined;
     const teacherById = new Map(teacherRows.map((t) => [t.id, t]));
     const bookedSlotIds = new Set(
       student ? bookingRows.filter((b: any) => b.studentId === student.id).map((b: any) => b.slotId) : []
@@ -122,9 +123,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ data: slot }, { status: 201 });
   }
 
-  // Guardian books a slot
+  // Guardian books a slot — for the child they name (when it is theirs) or the
+  // family's stable default child.
   const slotId = String(body?.slotId || "");
-  const studentId = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
+  const studentId = await guardianChildId(session, body?.studentId ? String(body.studentId) : null);
   if (!slotId || !studentId) return NextResponse.json({ error: "slotId and a linked student are required." }, { status: 400 });
 
   const slot = await prisma.meetingSlot.findUnique({ where: { id: slotId }, include: { bookings: true } });

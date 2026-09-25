@@ -1,31 +1,17 @@
-export interface GradeInfo {
-  grade: string;
-  gpa: number;
-}
-
-/** Bangladesh-style grading scale (configurable full marks). */
-export function gradeFor(obtained: number, full = 100): GradeInfo {
-  const pct = (obtained / full) * 100;
-  if (pct >= 80) return { grade: "A+", gpa: 5.0 };
-  if (pct >= 70) return { grade: "A", gpa: 4.0 };
-  if (pct >= 60) return { grade: "A-", gpa: 3.5 };
-  if (pct >= 50) return { grade: "B", gpa: 3.0 };
-  if (pct >= 40) return { grade: "C", gpa: 2.0 };
-  if (pct >= 33) return { grade: "D", gpa: 1.0 };
-  return { grade: "F", gpa: 0.0 };
-}
-
-export function gpaOf(points: number[]): number {
-  if (!points.length) return 0;
-  const sum = points.reduce((a, b) => a + b, 0);
-  return Math.round((sum / points.length) * 100) / 100;
-}
+/**
+ * Ranking helpers — deliberately NOT grading policy.
+ *
+ * The letter/GPA scale used to be hardcoded here. It now lives in
+ * `src/lib/grading.ts` as the school's own editable scheme (bands, grade
+ * points, pass mark, GPA scale), so no grade is decided in this file: keeping
+ * two scales would let a report card disagree with a marks sheet.
+ */
 
 export function totalOf(marks: number[]): number {
   return marks.reduce((a, b) => a + b, 0);
 }
 
-/** Returns 1-based positions ranked by total marks. */
+/** Returns 1-based positions ranked by total marks (ties share a position). */
 export function positions(totals: number[]): Map<number, number> {
   const sorted = [...totals].sort((a, b) => b - a);
   const map = new Map<number, number>();

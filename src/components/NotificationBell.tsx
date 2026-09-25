@@ -26,7 +26,8 @@ export function NotificationBell() {
 
   const load = useCallback(async () => {
     try {
-      const data = await api<{ items: NotificationItem[]; unread: number }>("/api/notifications?take=15");
+      // no-store: the bell is an explicit freshness read (opened on demand).
+      const data = await api<{ items: NotificationItem[]; unread: number }>("/api/notifications?take=15", { cache: "no-store" });
       setItems(data.items);
       setUnread(data.unread);
     } catch {
@@ -36,7 +37,8 @@ export function NotificationBell() {
 
   const loadCount = useCallback(async () => {
     try {
-      const data = await api<{ unread: number }>('/api/notifications?countOnly=1');
+      // no-store: the 30s poll must observe a new notification immediately.
+      const data = await api<{ unread: number }>('/api/notifications?countOnly=1', { cache: "no-store" });
       setUnread(data.unread);
     } catch {
       /* silent — bell is non-critical */

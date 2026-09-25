@@ -39,25 +39,28 @@ export default function ParentDashboard() {
         }
       />
 
-      {/* student banner */}
+      {/* student banner — stacked on phones, one row from sm up */}
       <Card className="mb-6 overflow-hidden">
-        <div className="flex flex-wrap items-center gap-5 bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white">
-          {student?.photoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={student.photoUrl} alt="" className="h-16 w-16 rounded-2xl object-cover ring-4 ring-white/20" />
-          ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/15 text-xl font-black">{student ? initials(student.name) : "?"}</div>
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="text-xs font-bold uppercase tracking-widest text-indigo-200">Today&apos;s status</div>
-            <h2 className="text-xl font-black">{student?.name || "Your child"}</h2>
-            <div className="mt-0.5 text-xs text-indigo-200">
-              {student?.admissionNo} · {stats.attendance.total ? `${stats.attendance.rate}% attendance · ${stats.attendance.present}/${stats.attendance.total} days present` : "No attendance recorded yet"}
+        <div className="flex flex-col gap-4 bg-gradient-to-r from-indigo-600 to-violet-600 p-5 text-white sm:flex-row sm:items-center sm:gap-5 sm:p-6">
+          <div className="flex min-w-0 items-center gap-4">
+            {student?.photoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={student.photoUrl} alt="" className="h-14 w-14 shrink-0 rounded-2xl object-cover ring-4 ring-white/20 sm:h-16 sm:w-16" />
+            ) : (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-xl font-black sm:h-16 sm:w-16">{student ? initials(student.name) : "?"}</div>
+            )}
+            <div className="min-w-0">
+              <div className="text-xs font-bold uppercase tracking-widest text-indigo-200">Today&apos;s status</div>
+              <h2 className="truncate text-xl font-black">{student?.name || "Your child"}</h2>
+              <div className="mt-0.5 text-xs leading-relaxed text-indigo-200">
+                <span className="font-semibold text-white/90">{student?.admissionNo}</span>
+                {stats.attendance.total ? ` · ${stats.attendance.rate}% attendance · ${stats.attendance.present}/${stats.attendance.total} days present` : " · No attendance recorded yet"}
+              </div>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Link href="/parent/homework" className="btn bg-white/15 text-white hover:bg-white/25"><BookOpen size={15} /> Homework</Link>
-            <Link href="/parent/fees" className="btn bg-white/15 text-white hover:bg-white/25"><Wallet size={15} /> Fees</Link>
+          <div className="flex gap-2 sm:ml-auto">
+            <Link href="/parent/homework" className="btn flex-1 bg-white/15 text-white hover:bg-white/25 sm:flex-none"><BookOpen size={15} /> Homework</Link>
+            <Link href="/parent/fees" className="btn flex-1 bg-white/15 text-white hover:bg-white/25 sm:flex-none"><Wallet size={15} /> Fees</Link>
           </div>
         </div>
       </Card>

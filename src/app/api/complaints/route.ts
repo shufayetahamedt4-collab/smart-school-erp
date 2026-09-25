@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianChildId } from "@/lib/auth";
 import { notifyUsers } from "@/lib/notify";
 
 /** PRD §7.1 — Complaint/Feedback Box with tracking status. */
@@ -41,7 +41,10 @@ export async function POST(req: NextRequest) {
   const message = String(body?.message || "").trim();
   if (!subject || !message) return NextResponse.json({ error: "Subject and message are required." }, { status: 400 });
 
-  const studentId: string | null = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id || null;
+  // Attach the complaint to the child it is about — the one the guardian names
+  // (when it is theirs) or the portal's stable default child, never an
+  // arbitrary sibling.
+  const studentId: string | null = await guardianChildId(session, body?.studentId ? String(body.studentId) : null);
   const complaint = await prisma.complaint.create({
     data: { schoolId: session.schoolId!, guardianUserId: session.id, studentId, subject, message, category: body?.category || "GENERAL", status: "OPEN" },
   });

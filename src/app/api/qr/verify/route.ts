@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { signSession, SESSION_COOKIE } from "@/lib/auth";
+import { sectorHostFor, stripPort, requestHost } from "@/lib/sectors";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -39,7 +40,15 @@ export async function POST(req: NextRequest) {
     data: { action: "QR_LOGIN", schoolId: student.schoolId, entity: "student", entityId: student.id },
   });
 
-  const res = NextResponse.json({ data: { ok: true, redirect: "/parent" } });
+  // Land in the Parents App. The cookie is host-only, so the QR entry point is
+  // served on the guardian host (middleware redirects /qr there); if this
+  // deployment has no guardian host configured we stay on the current one.
+  const host = requestHost(req.headers);
+  const target = sectorHostFor(host, "guardian");
+  const redirect =
+    target && target !== stripPort(host) ? `${new URL(req.url).protocol}//${target}/parent` : "/parent";
+
+  const res = NextResponse.json({ data: { ok: true, redirect } });
   res.cookies.set(SESSION_COOKIE, session, {
     httpOnly: true,
     sameSite: "lax",

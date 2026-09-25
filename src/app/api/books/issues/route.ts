@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianChildId, resolveActingStudent } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
 import { postToLedger } from "@/lib/ledger";
@@ -24,14 +24,14 @@ export async function GET(req: NextRequest) {
   const studentId = sp.get("studentId") || undefined;
   const status = sp.get("status") || undefined; // ISSUED | RETURNED | LOST
 
-  // Guardians may only see their own child's issues.
+  // Guardians may only see their own child's issues — the child they name when
+  // it is theirs, otherwise the family's stable default child.
   let scopedStudentId = studentId;
   if (session.role === "GUARDIAN") {
-    scopedStudentId =
-      session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
+    scopedStudentId = (await guardianChildId(session, studentId)) || undefined;
     if (!scopedStudentId) return NextResponse.json({ data: [] });
   } else if (session.role === "STUDENT") {
-    scopedStudentId = (await prisma.student.findFirst({ where: { userId: session.id } }))?.id;
+    scopedStudentId = (await resolveActingStudent(session))?.id;
     if (!scopedStudentId) return NextResponse.json({ data: [] });
   }
 

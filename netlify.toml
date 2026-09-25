@@ -1,0 +1,34 @@
+# Netlify deployment for the Next.js app.
+#
+# This is a full Next.js App Router project — server components, route handlers
+# (/api/*) and src/middleware.ts all run server-side — so it needs Netlify's
+# Next.js Runtime. Netlify installs that runtime automatically for Next sites;
+# a [[plugins]] entry is only needed to pin a specific plugin version.
+#
+# Deploy from this folder, no git required:
+#
+#   npx netlify-cli login                 # once, opens the browser
+#   npx netlify-cli deploy --build --prod # builds here, uploads, prints the URL
+#
+# Environment variables (Site configuration → Environment variables, or
+# `netlify env:set NAME value`) — REQUIRED here, unlike on Firebase App Hosting
+# where the runtime's default credentials cover it:
+#
+#   FIREBASE_PROJECT_ID      amar-e-school
+#   FIREBASE_CLIENT_EMAIL    from .env (service-account email)
+#   FIREBASE_PRIVATE_KEY     from .env (keep the \n escapes — the app un-escapes)
+#   FIREBASE_STORAGE_BUCKET  amar-e-school.firebasestorage.app
+#   JWT_SECRET               from .env (same value everywhere, or sessions break)
+#   APP_URL                  the Netlify URL — used for invite QR + file URLs
+#
+# Netlify has no Application Default Credentials, so without the three Firebase
+# credentials the Admin SDK cannot reach Firestore at all.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  # Next 15 needs >= 18.18; 22 is the LTS this build is verified on. The local
+  # machine's Node version is irrelevant here — Netlify builds in its own image.
+  NODE_VERSION = "22"

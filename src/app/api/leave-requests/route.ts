@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianChildId, guardianChildIds } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { notifyUsers } from "@/lib/notify";
 
@@ -21,9 +21,11 @@ export async function GET(req: NextRequest) {
     const teacher = await prisma.teacher.findUnique({ where: { userId: session.id } });
     if (teacher) where.teacherId = teacher.id;
   } else if (session.role === "GUARDIAN") {
-    const studentId = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
-    if (!studentId) return NextResponse.json({ data: [] });
-    where.studentId = studentId;
+    // Every child of this family: each row carries the student's name, so
+    // listing all of them is unambiguous (and no child's leave disappears).
+    const childIds = await guardianChildIds(session);
+    if (!childIds.length) return NextResponse.json({ data: [] });
+    where.studentId = { in: childIds };
   } else if (!can(session.role, "studentTeacherInfo", "full")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -53,7 +55,9 @@ export async function POST(req: NextRequest) {
 
   // Guardian applies for their child (§9.2 student leave via guardian).
   if (session.role === "GUARDIAN") {
-    const studentId = session.studentId || (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id;
+    // Apply for the child the guardian names — when it is theirs — else the
+    // family's stable default child.
+    const studentId = await guardianChildId(session, body?.studentId ? String(body.studentId) : null);
     if (!studentId) return NextResponse.json({ error: "No linked student." }, { status: 400 });
     const leave = await prisma.leaveRequest.create({
       data: { schoolId, studentId, fromDate, toDate, reason, status: "PENDING", type: "STUDENT" },

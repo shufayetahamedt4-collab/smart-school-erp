@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, QrCode, IdCard, FileText, Pencil, Trash2, Save, X, KeyRound } from "lucide-react";
+import { ArrowLeft, QrCode, IdCard, FileText, FileSpreadsheet, Pencil, Trash2, Save, X, KeyRound } from "lucide-react";
 import { api } from "@/lib/client";
 import { Card, CardHeader, Badge, Field, TextInput, Select, PageHeader, LoadingScreen, ErrorNote, Modal, statusTone, prettyStatus } from "@/components/ui";
 import { initials, fmtMoney, fmtDate } from "@/lib/utils";
@@ -67,6 +67,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           <>
             <Link href="/dashboard/students" className="btn btn-secondary btn-sm"><ArrowLeft size={14} /> Students</Link>
             {!edit && <button className="btn btn-secondary btn-sm" onClick={() => setEdit(true)}><Pencil size={14} /> Edit</button>}
+            <Link href={`/print/marksheet/${s.id}`} className="btn btn-secondary btn-sm"><FileSpreadsheet size={14} /> Marksheet</Link>
             <Link href={`/print/id-card/${s.id}`} className="btn btn-primary btn-sm"><IdCard size={14} /> ID Card</Link>
           </>
         }

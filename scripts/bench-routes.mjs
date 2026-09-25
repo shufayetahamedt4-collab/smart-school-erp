@@ -13,9 +13,9 @@ const ROLES = [
 ];
 
 const ROUTES = {
-  admin: ["/api/stats", "/api/notices?limit=5", "/api/classes", "/api/students", "/api/teachers", "/api/fees", "/api/exams", "/api/attendance?classId=__C1__&date=__TODAY__", "/api/admissions", "/api/ledger", "/api/meetings", "/api/notifications?countOnly=1", "/api/leaves", "/api/routines", "/api/subjects", "/api/sections", "/api/fee-templates", "/api/gallery", "/api/complaints", "/api/resources"],
-  teacher: ["/api/stats", "/api/notifications?countOnly=1", "/api/attendance?classId=__C1__&date=__TODAY__", "/api/homework", "/api/remarks", "/api/classes", "/api/students", "/api/exams", "/api/leaves", "/api/meetings", "/api/resources"],
-  guardian: ["/api/stats", "/api/notifications?countOnly=1", "/api/attendance?studentId=__ME__", "/api/homework", "/api/fees", "/api/remarks", "/api/exams", "/api/meetings", "/api/results?studentId=__ME__", "/api/parent/siblings"],
+  admin: ["/api/stats", "/api/notices?limit=5", "/api/classes", "/api/students", "/api/teachers", "/api/fees", "/api/exams", "/api/attendance?classId=__C1__&date=__TODAY__", "/api/admissions", "/api/ledger", "/api/meetings", "/api/notifications?countOnly=1", "/api/leave-requests", "/api/routines", "/api/subjects", "/api/sections", "/api/fee-templates", "/api/gallery", "/api/complaints", "/api/resources"],
+  teacher: ["/api/stats", "/api/notifications?countOnly=1", "/api/attendance?classId=__C1__&date=__TODAY__", "/api/homework", "/api/remarks", "/api/classes", "/api/students", "/api/exams", "/api/leave-requests", "/api/meetings", "/api/resources"],
+  guardian: ["/api/stats", "/api/notifications?countOnly=1", "/api/homework", "/api/fees", "/api/remarks", "/api/exams", "/api/meetings", "/api/leave-requests", "/api/parent/siblings"],
 };
 
 async function login(email, password) {
@@ -57,14 +57,19 @@ for (const role of ROLES) {
   }
   console.log(`\n### ${role.label}`);
   const routes = [...ROUTES[role.label]];
-  // resolve per-role placeholders using a stats/classes probe
+  // Resolve per-role placeholders (a real class id + today's date) so the
+  // harness measures the route instead of a 404/400. `/api/classes` is the one
+  // source every role that has a class filter can read.
   for (let i = 0; i < routes.length; i++) {
     let r = routes[i].replace("__TODAY__", TODAY);
-    if (r.includes("__C1__") || r.includes("__ME__")) {
+    if (r.includes("__C1__")) {
       const st = await (await fetch(`${BASE}/api/stats`, { headers: { cookie } })).json();
-      const c1 = st?.data?.myClasses?.[0]?.id || st?.data?.assignments?.[0]?.classId || "";
+      let c1 = st?.data?.myClasses?.[0]?.id || st?.data?.assignments?.[0]?.classId || "";
+      if (!c1) {
+        const cls = await (await fetch(`${BASE}/api/classes`, { headers: { cookie } })).json().catch(() => null);
+        c1 = cls?.data?.[0]?.id || "";
+      }
       r = r.replace("__C1__", c1);
-      r = r.replace("__ME__", cookie.includes("qr-") ? "" : "");
     }
     routes[i] = r;
   }

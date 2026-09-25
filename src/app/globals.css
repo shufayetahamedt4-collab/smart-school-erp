@@ -71,7 +71,10 @@ body {
 }
 
 body {
-  background-color: var(--color-slate-50);
+  /* White, not slate-50: a tinted page made every white card look grey and
+     every muted label harder to read. Definition comes from the card border
+     and shadow instead of from a darker page behind them. */
+  background-color: #fff;
   color: var(--color-slate-900);
   -webkit-font-smoothing: antialiased;
 }
@@ -115,7 +118,7 @@ body {
     border: 1px solid var(--color-slate-300);
   }
   .btn-secondary:hover:not(:disabled) {
-    background: var(--color-slate-50);
+    background: var(--color-slate-100);
   }
   .btn-danger {
     background: var(--color-rose-600);
@@ -126,7 +129,7 @@ body {
   }
   .btn-ghost {
     background: transparent;
-    color: var(--color-slate-600);
+    color: var(--color-slate-700);
   }
   .btn-ghost:hover:not(:disabled) {
     background: var(--color-slate-100);
@@ -147,7 +150,7 @@ body {
     transition: all 0.15s ease;
   }
   .input::placeholder {
-    color: var(--color-slate-400);
+    color: var(--color-slate-500);
   }
   .input:focus {
     outline: none;
@@ -158,7 +161,7 @@ body {
     display: block;
     font-size: 0.8rem;
     font-weight: 600;
-    color: var(--color-slate-600);
+    color: var(--color-slate-800);
     margin-bottom: 0.35rem;
   }
   .badge {
@@ -174,10 +177,10 @@ body {
   .th {
     text-align: left;
     font-size: 0.72rem;
-    font-weight: 600;
+    font-weight: 700;
     letter-spacing: 0.03em;
     text-transform: uppercase;
-    color: var(--color-slate-500);
+    color: var(--color-slate-600);
     padding: 0.6rem 0.9rem;
     border-bottom: 1px solid var(--color-slate-200);
     white-space: nowrap;
@@ -185,12 +188,12 @@ body {
   .td {
     padding: 0.7rem 0.9rem;
     font-size: 0.85rem;
-    color: var(--color-slate-700);
-    border-bottom: 1px solid var(--color-slate-100);
+    color: var(--color-slate-800);
+    border-bottom: 1px solid var(--color-slate-200);
     vertical-align: middle;
   }
   .tr-hover:hover {
-    background: var(--color-slate-50);
+    background: var(--color-slate-100);
   }
 }
 

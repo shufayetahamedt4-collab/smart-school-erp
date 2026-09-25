@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianChildId, resolveActingStudent } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 
 /**
@@ -23,18 +23,14 @@ export async function GET(req: NextRequest) {
   if (sp.get("semester")) where.semester = sp.get("semester");
 
   // §6.2 auto-filter: guardians/students only see their own class's materials.
-  if (session.role === "GUARDIAN") {
-    const student = await prisma.student.findFirst({
-      where: { id: session.studentId || undefined, guardianUserId: session.id },
-    }) || await prisma.student.findFirst({ where: { guardianUserId: session.id } });
-    if (student) {
-      where.classId = student.classId;
-      if (student.sectionId) where.sectionId = student.sectionId;
-    } else {
-      return NextResponse.json({ data: [] });
-    }
-  } else if (session.role === "STUDENT") {
-    const student = await prisma.student.findFirst({ where: { userId: session.id } });
+  // The child comes from lib/auth so a multi-child family always resolves to
+  // the same one as every other screen.
+  if (session.role === "GUARDIAN" || session.role === "STUDENT") {
+    const childId =
+      session.role === "GUARDIAN" ? await guardianChildId(session) : (await resolveActingStudent(session))?.id ?? null;
+    const student = childId
+      ? await prisma.student.findUnique({ where: { id: childId }, select: { classId: true, sectionId: true } })
+      : null;
     if (student) {
       where.classId = student.classId;
       if (student.sectionId) where.sectionId = student.sectionId;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianChildId } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { notifyUsers } from "@/lib/notify";
 
@@ -12,12 +12,6 @@ import { notifyUsers } from "@/lib/notify";
 
 function partyKey(teacherUserId: string, guardianUserId: string, studentId: string | null): string {
   return [teacherUserId, guardianUserId, studentId || "-"].join("__");
-}
-
-async function resolveStudentForGuardian(session: any): Promise<string | null> {
-  if (session.studentId) return session.studentId;
-  const s = await prisma.student.findFirst({ where: { guardianUserId: session.id }, select: { id: true } });
-  return s?.id || null;
 }
 
 /** GET: list my conversations (with last message + unread count). */
@@ -108,7 +102,10 @@ export async function POST(req: NextRequest) {
   let studentId: string | null = body?.studentId ? String(body.studentId) : null;
 
   if (session.role === "GUARDIAN") {
-    studentId = studentId || (await resolveStudentForGuardian(session));
+    // Only the guardian's own child can be the subject of a conversation: a
+    // body-supplied studentId used to be accepted whenever it belonged to the
+    // same school, so one parent could open a thread as another family's child.
+    studentId = await guardianChildId(session, studentId);
     const sid = studentId || "";
     const student = sid ? await prisma.student.findUnique({ where: { id: sid } }) : null;
     if (!student || student.schoolId !== schoolId) {

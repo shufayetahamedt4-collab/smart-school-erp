@@ -53,6 +53,11 @@ App Hosting reads `apphosting.yaml`, which references these **secrets** (stored 
 | `FIREBASE_CLIENT_EMAIL` | from `.env` (service account email) |
 | `FIREBASE_PRIVATE_KEY` | from `.env` — the full PEM key (see note) |
 | `JWT_SECRET` | from `.env` — your long random string |
+| `FIREBASE_STORAGE_BUCKET` | `amar-e-school.firebasestorage.app` — **not a secret**, it is already in `apphosting.yaml` |
+
+> **Bucket name matters.** The Admin SDK assumes `<projectId>.appspot.com` when this is unset, and that
+> bucket does **not** exist for this project (verified: only `amar-e-school.firebasestorage.app` exists).
+> Without it, uploads write nowhere and every photo/ID-card/attachment URL 404s in production.
 
 **To view the values locally** (run in your terminal — never paste the key into a chat):
 ```bash
@@ -118,3 +123,113 @@ git push
 ---
 
 *Generated 2026-08-04. Keep this file updated if the deploy flow changes.*
+
+---
+
+## Alternative — Netlify (test live without git)
+
+Use this when you want the current folder live now, without pushing to GitHub. Netlify deploys the
+**local directory** with its own Next.js Runtime: no git, no Cloud Functions API, no Node-version
+matching (Netlify builds in its own image), and `netlify.toml` already pins the build.
+
+### 0. Diagnose before you guess — `GET /api/health`
+
+Every data route needs Firestore, so a deployment with no environment fails in the same way
+regardless of which screen you try: the API answers a **bare 500 with an empty body**, and the
+sign-in form can only report it as *"Request failed"*. `GET /api/health` says what is actually
+wrong, and it needs no auth (it reports which variables are *present*, never their values):
+
+```bash
+curl -s https://<your-site>.netlify.app/api/health | python -m json.tool
+```
+
+```json
+{ "ok": false,
+  "problems": ["FIREBASE_PROJECT_ID is not set", "…",
+               "This server has no Firebase credentials … Set them in the deployment's environment variables (and redeploy)"],
+  "env": { "FIREBASE_PROJECT_ID": false, "JWT_SECRET": false, "storageBucket": null },
+  "firestore": { "ok": false, "error": "Unable to detect a Project Id in the current environment." } }
+```
+
+`503` means something is missing (the `problems` array lists all of it); `200` means every variable is
+present *and* a real Firestore read succeeded (`firestore.readMs`). Sign-in itself now returns that same
+explanation as JSON instead of an empty 500, so the form shows the reason rather than "Request failed".
+
+Two things worth knowing: adding or changing a variable **only takes effect on the next deploy**, so
+set them and redeploy in that order; and `JWT_SECRET` must be one stable value, because changing it
+signs every user out.
+
+### 1. Environment variables (this is the part that must not be skipped)
+
+Netlify has no Application Default Credentials, so unlike App Hosting the Firebase credentials are
+**mandatory** — without them the Admin SDK cannot reach Firestore at all, every screen is empty, and
+sign-in answers `Request failed` (see step 0).
+
+The least error-prone way is to import them straight out of your working `.env` — no copying a
+private key by hand, which is the single most common way this step fails (a wrapped or partially
+pasted `FIREBASE_PRIVATE_KEY` gives `DECODER routines::unsupported` later):
+
+```bash
+npx netlify-cli login
+npx netlify-cli link                  # pick the site you deployed to
+npx netlify-cli env:import .env       # FIREBASE_* + JWT_SECRET, straight from disk
+npx netlify-cli env:set APP_URL "https://<your-site>.netlify.app"   # .env says localhost
+npx netlify-cli deploy --build --prod # and a new deploy is what makes them take effect
+```
+
+Or set them one at a time:
+
+```bash
+npx netlify-cli env:set FIREBASE_PROJECT_ID "amar-e-school"
+npx netlify-cli env:set FIREBASE_CLIENT_EMAIL "<from .env>"
+npx netlify-cli env:set FIREBASE_PRIVATE_KEY "<from .env — keep the \n escapes>"
+npx netlify-cli env:set FIREBASE_STORAGE_BUCKET "amar-e-school.firebasestorage.app"
+npx netlify-cli env:set JWT_SECRET "<from .env>"
+npx netlify-cli env:set APP_URL "https://<your-site>.netlify.app"
+```
+
+`APP_URL` is the public origin used for the guardian invite QR and file URLs — set it to the real
+site URL, not localhost. `JWT_SECRET` must be one stable value or every session is invalidated.
+
+### 2. Deploy
+
+```bash
+npx netlify-cli login                  # once, opens the browser
+npx netlify-cli deploy --build --prod  # builds locally, uploads, prints the live URL
+```
+
+The first run offers to create/link a site — let it. Later runs are one command. `netlify-cli`
+`deploy --build` runs the same `npm run build`, so the `netlify.toml` `NODE_VERSION` applies.
+
+### 3. Verify it live
+
+```bash
+SMOKE_ORIGIN=https://<your-site>.netlify.app node scripts/smoke-all.mjs
+```
+
+That sweeps every page and GET API for all four roles against the deployed URL. Then open the site in
+one browser tab per role — the harness sees HTTP statuses only, so a client-side crash needs the
+browser console (the `/admin/billing` crash found earlier was exactly that kind).
+
+### 4. One URL first, subdomain apps later
+
+The deployed URL is the **hub**: on a bare/unknown host the app is host-agnostic, so signing in as the
+Super Admin, school admin, teacher or guardian each lands in that role's own area of the same site.
+To give the four apps their own hostnames, add `school.`, `parents.`, `teacher.`, `admin.` as domain
+aliases of the same Netlify site and set `APP_DOMAIN` to the registrable domain — sector routing keys
+off the first label of the hostname (`src/lib/sectors.ts`), and `requestHost()` already prefers
+`x-forwarded-host`, which is what Netlify's proxy sends in front of a serverless function.
+
+### Netlify-specific notes
+
+- Function instances are ephemeral and can run several at once: the in-process read cache
+  (`DB_READ_CACHE_MS`/`DB_READ_GRACE_MS`) can serve a stale read after a write. Set both to `0` for
+  correctness, or accept the short window.
+- The Firestore round trip (~0.5–1.25s, first call after a cold start ~3.6s) is unchanged; a cold
+  function adds to that on the first request. Netlify caps a synchronous function at 10s, so the very
+  first hit after an idle period (cold function **and** cold Firestore) is the one request that can
+  brush that ceiling — warm requests are 25–46ms of server time. If you see a timeout on the first
+  click of the day, that is why, and a paid instance-warming setting or a shared read cache is the
+  fix rather than an app change.
+- The seeded Android shells point at the app origins; if the testing domain changes, update their
+  WebView URL and the `ANDROID_*` asset-links env vars.

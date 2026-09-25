@@ -7,8 +7,10 @@ import {
   canTransition,
   suggestClassIndex,
   findSiblingCandidates,
+  issueKitAtAdmission,
   payAdmissionFeeAndEnroll,
 } from "@/lib/admission";
+import { notifyUsers } from "@/lib/notify";
 
 /**
  * PRD §4 — Admissions API.
@@ -85,34 +87,40 @@ export async function POST(req: NextRequest) {
     }
     const body = await req.json().catch(() => null);
     const admissionId = String(body?.admissionId || "");
+    const enrAdmission = await prisma.admission.findUnique({ where: { id: admissionId } });
+    if (!enrAdmission || enrAdmission.schoolId !== session.schoolId) {
+      return NextResponse.json({ error: "Admission not found" }, { status: 404 });
+    }
+    if (session.scope === "BRANCH" && enrAdmission.branchId !== session.branchId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const method = (body?.method || "CASH") as "CASH" | "BANK" | "BKASH" | "NAGAD" | "ROCKET" | "CARD";
     try {
       const result = await payAdmissionFeeAndEnroll(admissionId, { method, refNo: body?.refNo, actorId: session.id });
 
-      // PRD §8.1 — Book/Uniform receipt checklist at admission time: issued
-      // items become bookIssue records (stock decremented) and the checklist
-      // is archived on the admission record.
+      // PRD §8.1 — Book/Uniform receipt checklist at admission time. Issuing goes
+      // through the shared helper so this path and the desk intake agree on what
+      // "available" means, and so nothing is dropped without being reported.
       const checklist: { bookId: string }[] = Array.isArray(body?.checklist) ? body.checklist.filter((c: any) => c?.bookId) : [];
-      const issuedItems: string[] = [];
-      for (const item of checklist) {
-        const book = await prisma.bookCatalog.findUnique({ where: { id: String(item.bookId) } });
-        if (!book || book.schoolId !== schoolId) continue;
-        const stock = await prisma.bookStock.findFirst({ where: { bookId: book.id } });
-        const issuedCount = await prisma.bookIssue.count({ where: { bookId: book.id, status: "ISSUED" } });
-        if (!stock || (Number(stock.total) || 0) - issuedCount <= 0) continue; // skip out-of-stock silently
-        await prisma.bookIssue.create({
-          data: {
-            schoolId,
-            bookId: book.id,
-            studentId: result.student.id,
-            issuedById: session.id,
-            issuedAt: new Date(),
-            status: "ISSUED",
-            fineAmount: 0,
-            note: "ADMISSION",
-          },
+      const kit = await issueKitAtAdmission({
+        schoolId,
+        studentId: result.student.id,
+        issuedById: session.id,
+        items: checklist.map((c) => String(c.bookId)),
+        note: "ADMISSION",
+      });
+      const issuedItems = kit.issued.map((k) => k.title);
+      if (kit.unavailable.length) {
+        // Tell the operator which items there were no copies of, instead of the
+        // old behaviour of quietly handing out less than the checklist said.
+        await notifyUsers({
+          schoolId,
+          userIds: [session.id],
+          event: "NOTICE_PUBLISHED",
+          title: "Items not handed over — out of stock",
+          body: `${kit.unavailable.map((u) => u.title).join(", ")} could not be issued to ${result.student.name}: no copies on the shelf.`,
+          link: "/dashboard/library",
         });
-        issuedItems.push(book.title);
       }
       if (issuedItems.length || body?.uniformSize || body?.idCardIssued !== undefined) {
         await prisma.admission.update({
@@ -125,13 +133,18 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      await audit("ADMISSION_ENROLL", "admission", admissionId, { studentId: result.student.id, issuedItems });
+      await audit("ADMISSION_ENROLL", "admission", admissionId, {
+        studentId: result.student.id,
+        issuedItems,
+        outOfStock: kit.unavailable.map((u) => u.title),
+      });
       return NextResponse.json({
         data: {
           studentId: result.student.id,
           admissionNo: result.student.admissionNo,
           qrToken: result.student.qrToken,
           issuedItems,
+          outOfStock: kit.unavailable,
         },
       });
     } catch (e: any) {
@@ -191,6 +204,10 @@ export async function POST(req: NextRequest) {
     if (!admission || admission.schoolId !== schoolId) {
       return NextResponse.json({ error: "Admission not found" }, { status: 404 });
     }
+    // PRD §12.3 — branch confinement: branch staff only transition their own branch's pipeline.
+    if (session.scope === "BRANCH" && admission.branchId !== session.branchId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     if (!canTransition(admission.status, to)) {
       return NextResponse.json({ error: `Cannot move from ${admission.status} to ${to}.` }, { status: 400 });
     }
@@ -227,6 +244,11 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
 
   const where: any = { schoolId };
+  // Branch scoping (PRD §12.3): branch admins/registrars only see their branch's pipeline.
+  // The main admin may drill into any branch via ?branchId= (monitoring).
+  if (session.scope === "BRANCH" && session.branchId) where.branchId = session.branchId;
+  const drill = sp.get("branchId");
+  if (drill && (session.role === "SCHOOL_ADMIN" || session.role === "SUPER_ADMIN")) where.branchId = drill;
   if (sp.get("status")) where.status = sp.get("status");
   if (sp.get("q")) {
     where.OR = [
@@ -291,17 +313,21 @@ export async function PATCH(req: NextRequest) {
     if (!admission || admission.schoolId !== session.schoolId) {
       return NextResponse.json({ error: "Admission not found" }, { status: 404 });
     }
+    if (session.scope === "BRANCH" && admission.branchId !== session.branchId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const decision = body?.decision === "APPROVED" ? "APPROVED" : "REJECTED";
     const discount = await prisma.discount.update({
       where: { id: String(body?.discountId || "") },
       data: { status: decision, approvedById: session.id, approvedAt: new Date() },
     });
-    // Recompute payable on approval: fee − discount
-    if (decision === "APPROVED") {
-      const gross = Number(admission.admissionFee || 0);
-      const payable = Math.max(0, gross - Number(discount.amount));
-      await prisma.admission.update({ where: { id: admissionId }, data: { payableAmount: payable } });
-    }
+    // Recompute payable on a change of decision: fee − EVERY approved discount.
+    // Using only the discount just decided would forget an earlier approved one
+    // (and would leave a rejected one subtracted).
+    const approved = await prisma.discount.findMany({ where: { admissionId, status: "APPROVED" } });
+    const gross = Number(admission.admissionFee || 0);
+    const payable = Math.max(0, gross - approved.reduce((sum, d) => sum + Number(d.amount || 0), 0));
+    await prisma.admission.update({ where: { id: admissionId }, data: { payableAmount: payable } });
     await audit(`DISCOUNT_${decision}`, "discount", discount.id, { admissionId });
     return NextResponse.json({ data: discount });
   }
@@ -314,6 +340,9 @@ export async function PATCH(req: NextRequest) {
   const admission = await prisma.admission.findUnique({ where: { id } });
   if (!admission || admission.schoolId !== session.schoolId) {
     return NextResponse.json({ error: "Admission not found" }, { status: 404 });
+  }
+  if (session.scope === "BRANCH" && admission.branchId !== session.branchId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const editable = ["fullName", "fullNameBn", "guardianName", "guardianPhone", "guardianEmail", "previousSchoolName", "previousClass", "leavingReason", "photoUrl", "dob", "gender", "bloodGroup", "religion", "birthCertificateNo", "permanentAddress", "currentAddress"] as const;
   const data: Record<string, unknown> = {};

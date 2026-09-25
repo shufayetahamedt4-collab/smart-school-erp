@@ -39,7 +39,11 @@ export default function TeacherResultsPage() {
               <div className="text-xs text-slate-400">{e.classRoom.name}{e.section ? ` · Section ${e.section.name}` : ""} · {e._count.marks} marks entered</div>
             </div>
             <div className="flex gap-2">
-              <Link href={`/dashboard/exams/${e.id}`} className="btn btn-secondary btn-sm"><Eye size={14} /> View</Link>
+              {/* This app is its own host: the admin exam sheet lives at
+                  /dashboard/…, which the teacher host refuses (and which
+                  prefetched as a cross-origin redirect, so the button did
+                  nothing). Open the teacher's own sheet for this exam. */}
+              <Link href={`/teacher/marks?examId=${e.id}`} className="btn btn-secondary btn-sm"><Eye size={14} /> Open sheet</Link>
               <button
                 onClick={() => togglePublish(e)}
                 disabled={e._count.marks === 0}

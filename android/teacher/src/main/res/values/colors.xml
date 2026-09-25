@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Matches the Teacher App accent in src/lib/sectors.ts. -->
+  <color name="brand">#0D9488</color>
+  <color name="background">#F8FAFC</color>
+</resources>

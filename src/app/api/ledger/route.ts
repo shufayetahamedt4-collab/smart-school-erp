@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { getSession, resolveActingStudent } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { ledgerForSchool, ledgerForStudent } from "@/lib/ledger";
 
@@ -13,11 +12,11 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams;
 
-  // Guardians/students see their own ledger only (§2.1: View).
+  // Guardians/students see their own ledger only (§2.1: View). The child is
+  // resolved by lib/auth — a guardian with two children no longer gets an
+  // arbitrary one, and a student gets their own ledger (was always empty).
   if (session.role === "GUARDIAN" || session.role === "STUDENT") {
-    const studentId =
-      session.studentId ||
-      (session.role === "GUARDIAN" ? (await prisma.student.findFirst({ where: { guardianUserId: session.id } }))?.id : undefined);
+    const studentId = (await resolveActingStudent(session))?.id;
     if (!studentId) return NextResponse.json({ data: [] });
     const entries = await ledgerForStudent(schoolId, studentId);
     return NextResponse.json({ data: entries });

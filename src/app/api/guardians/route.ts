@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
+import { isBranchScoped } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
 
 export async function GET() {
   const session = await getSession();
-  if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!session || !["SCHOOL_ADMIN", "BRANCH_ADMIN"].includes(session.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const schoolId = session.schoolId!;
 
   const guardians = await prisma.user.findMany({
@@ -18,6 +19,7 @@ export async function GET() {
           name: true,
           admissionNo: true,
           roll: true,
+          branchId: true,
           classRoom: { select: { name: true } },
           section: { select: { name: true } },
         },
@@ -25,12 +27,16 @@ export async function GET() {
     },
     orderBy: { createdAt: "desc" },
   });
-  return NextResponse.json({ data: guardians });
+  // Branch scoping (PRD §12.3): branch admins only see guardians of their branch's students.
+  const data = isBranchScoped(session)
+    ? guardians.filter((g: any) => (g.studentOf || []).some((s: any) => s.branchId === session.branchId))
+    : guardians;
+  return NextResponse.json({ data });
 }
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!session || session.role !== "SCHOOL_ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!session || !["SCHOOL_ADMIN", "BRANCH_ADMIN"].includes(session.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const schoolId = session.schoolId!;
   const locked = await writeGuard(schoolId);
   if (locked) return locked;
@@ -42,6 +48,10 @@ export async function POST(req: NextRequest) {
 
   const student = await prisma.student.findFirst({ where: { id: studentId, schoolId } });
   if (!student) return NextResponse.json({ error: "Student not found." }, { status: 404 });
+  // PRD §12.3 — a branch admin can only create guardian accounts for their branch's students.
+  if (isBranchScoped(session) && student.branchId !== session.branchId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   if (student.guardianUserId) {
     return NextResponse.json({ error: "This student already has a guardian account." }, { status: 400 });
   }

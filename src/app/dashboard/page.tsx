@@ -7,6 +7,7 @@ import {
   ArrowRight, ArrowUpRight, ClipboardList,
 } from "lucide-react";
 import { api } from "@/lib/client";
+import { useMe } from "@/components/Shell";
 import { StatCard, Card, CardHeader, Badge, LoadingScreen, PageHeader } from "@/components/ui";
 import { fmtMoney, fmtDate } from "@/lib/utils";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
@@ -26,16 +27,32 @@ export default function SchoolDashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [loading, setLoading] = useState(true);
+  const { me } = useMe();
+  const role = me?.user?.role || "";
 
   useEffect(() => {
-    Promise.all([api<Stats>("/api/stats"), api<Notice[]>("/api/notices?limit=5")])
-      .then(([s, n]) => { setStats(s); setNotices(n); })
+    // Notices are optional for back-office roles (the permission matrix gives
+    // e.g. the accountant no communication access) — the dashboard must still
+    // render, so a 403 on notices degrades to an empty board.
+    const noticesP = api<Notice[]>("/api/notices?limit=5").catch(() => [] as Notice[]);
+    Promise.all([api<Stats>("/api/stats"), noticesP])
+      .then(([s, n]) => { setStats(s); setNotices(Array.isArray(n) ? n : []); })
       .finally(() => setLoading(false));
   }, []);
 
   if (loading || !stats) return <LoadingScreen label="Loading dashboard…" />;
 
   const attPct = stats.attendanceToday.total ? Math.round((stats.attendanceToday.present / stats.attendanceToday.total) * 100) : 0;
+
+  // Quick actions follow the session's permissions (PRD §2.1) — sub-roles only
+  // get shortcuts to modules they can actually open.
+  const adminOnly = !role || role === "SCHOOL_ADMIN" || role === "BRANCH_ADMIN";
+  const quickActions = [
+    { href: "/dashboard/students", icon: GraduationCap, label: "New Admission", tone: "from-indigo-500 to-indigo-600", show: adminOnly },
+    { href: "/dashboard/exams", icon: FileText, label: "Exams & Results", tone: "from-violet-500 to-violet-600", show: adminOnly },
+    { href: "/dashboard/fees", icon: Wallet, label: "Fee Collection", tone: "from-emerald-500 to-emerald-600", show: adminOnly || role === "ACCOUNTANT" || role === "REGISTRAR" },
+    { href: "/dashboard/id-cards", icon: BookOpen, label: "Print ID Cards", tone: "from-amber-500 to-amber-600", show: adminOnly },
+  ].filter((q) => q.show);
 
   return (
     <div>
@@ -96,12 +113,7 @@ export default function SchoolDashboard() {
 
       {/* quick actions */}
       <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[
-          { href: "/dashboard/students", icon: GraduationCap, label: "New Admission", tone: "from-indigo-500 to-indigo-600" },
-          { href: "/dashboard/exams", icon: FileText, label: "Exams & Results", tone: "from-violet-500 to-violet-600" },
-          { href: "/dashboard/fees", icon: Wallet, label: "Fee Collection", tone: "from-emerald-500 to-emerald-600" },
-          { href: "/dashboard/id-cards", icon: BookOpen, label: "Print ID Cards", tone: "from-amber-500 to-amber-600" },
-        ].map((q) => (
+        {quickActions.map((q) => (
           <Link key={q.href} href={q.href} className={`group flex items-center gap-3 rounded-2xl bg-gradient-to-br ${q.tone} px-4 py-4 text-white shadow-lg transition hover:-translate-y-0.5`}>
             <q.icon size={20} />
             <div className="text-sm font-bold">{q.label}</div>

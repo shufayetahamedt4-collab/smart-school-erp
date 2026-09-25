@@ -53,7 +53,8 @@ export function ChatPanel() {
 
   const loadList = useCallback(async () => {
     try {
-      const data = await api<ConvSummary[]>("/api/chat");
+      // no-store: this list is polled every 15s and must show new messages.
+      const data = await api<ConvSummary[]>("/api/chat", { cache: "no-store" });
       setConvs(data);
       setError("");
     } catch (e: any) {
@@ -65,7 +66,8 @@ export function ChatPanel() {
 
   const loadThread = useCallback(async (id: string) => {
     try {
-      const data = await api<ConvDetail>(`/api/chat?conversationId=${encodeURIComponent(id)}`);
+      // no-store: a live thread is polled every 8s.
+      const data = await api<ConvDetail>(`/api/chat?conversationId=${encodeURIComponent(id)}`, { cache: "no-store" });
       setDetail(data);
     } catch (e: any) {
       setError(e?.message || "Failed to load thread");

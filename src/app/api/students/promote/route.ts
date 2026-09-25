@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, invalidateReferenceCache } from "@/lib/db";
+import { prisma, invalidateReferenceCache, ON_ROLL_STUDENT } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { invalidateStats } from "@/lib/stats-cache";
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   const target = classes[idx + 1] || null; // null = graduating (top class)
 
   const students = await prisma.student.findMany({
-    where: { schoolId, classId: fromClassId, status: "ACTIVE" },
+    where: { schoolId, classId: fromClassId, ...ON_ROLL_STUDENT },
     select: { id: true, name: true, roll: true, section: { select: { name: true } } },
     orderBy: { roll: "asc" },
   });
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   const target = classes[idx + 1] || null;
 
   const students = await prisma.student.findMany({
-    where: { schoolId, classId: fromClassId, status: "ACTIVE", id: { notIn: excludeIds } },
+    where: { schoolId, classId: fromClassId, ...ON_ROLL_STUDENT, id: { notIn: excludeIds } },
     select: { id: true },
   });
 

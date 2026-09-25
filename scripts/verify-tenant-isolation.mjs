@@ -7,14 +7,14 @@
  *   2. NO name or id belonging to any other school in the DB appears in any
  *      payload (names/ids collected from Firestore across all other schools).
  *
- * Usage: node scripts/verify-tenant-isolation.mjs [BASE=http://localhost:58497]
+ * Usage: node scripts/verify-tenant-isolation.mjs   (BASE, default http://localhost:3000)
  * Cleanup afterwards: node scripts/isolation-fixture.mjs clean
  */
 import { initializeApp, applicationDefault, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { readFileSync, existsSync } from "node:fs";
 
-const BASE = process.env.BASE || "http://localhost:58497";
+const BASE = process.env.BASE || "http://localhost:3000";
 const P = "zziso-";
 
 /** Fixture credentials live ONLY in the untracked track file — never committed. */

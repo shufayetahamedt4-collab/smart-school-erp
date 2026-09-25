@@ -4,7 +4,7 @@ import { getSession, audit } from "@/lib/auth";
 
 export async function GET() {
   const session = await getSession();
-  if (!session || !["SCHOOL_ADMIN", "TEACHER", "GUARDIAN"].includes(session.role)) {
+  if (!session || !["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR", "TEACHER", "GUARDIAN"].includes(session.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const schoolId = session.schoolId!;
@@ -30,7 +30,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!session || !["SCHOOL_ADMIN", "TEACHER", "GUARDIAN"].includes(session.role)) {
+  if (!session || !["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR", "TEACHER", "GUARDIAN"].includes(session.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const schoolId = session.schoolId!;

@@ -25,16 +25,25 @@ export default function TeachersPage() {
   const [error, setError] = useState("");
   const [form, setForm] = useState({ name: "", email: "", designation: "", qualification: "", phone: "", password: "Teacher@123" });
   const [assignForm, setAssignForm] = useState({ classId: "", sectionId: "", subjectId: "" });
+  const [branchId, setBranchId] = useState("");
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
 
-  const load = () => {
-    api<Teacher[]>("/api/teachers")
+  const load = (branch = branchId) => {
+    api<Teacher[]>(`/api/teachers${branch ? `?branchId=${branch}` : ""}`)
       .then(setTeachers)
       .finally(() => setLoading(false));
     api<ClassRow[]>("/api/classes").then(setClasses).catch(() => null);
     api<SubjectRow[]>("/api/subjects").then(setSubjects).catch(() => null);
+    // Branch filter only resolves for the main admin.
+    api<{ id: string; name: string }[]>("/api/branches").then(setBranches).catch(() => null);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    // Deep link from the branch monitoring panel (?branchId=…).
+    const b = new URLSearchParams(window.location.search).get("branchId") || "";
+    setBranchId(b);
+    load(b);
+  }, []);
 
   const create = async () => {
     setError("");
@@ -71,6 +80,18 @@ export default function TeachersPage() {
   return (
     <div>
       <PageHeader title="Teachers" subtitle={`${teachers.length} teachers on staff`} actions={<button className="btn btn-primary" onClick={() => setOpen(true)}><Plus size={16} /> Add Teacher</button>} />
+
+      {branches.length > 0 && (
+        <Card className="mb-4 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Branch</span>
+            <Select className="max-w-xs" value={branchId} onChange={(e) => { setBranchId(e.target.value); setLoading(true); load(e.target.value); }}>
+              <option value="">All branches (whole school)</option>
+              {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
+            </Select>
+          </div>
+        </Card>
+      )}
 
       <Card>
         {teachers.length === 0 ? (

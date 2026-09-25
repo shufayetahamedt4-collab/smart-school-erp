@@ -3,7 +3,7 @@ import { prisma } from "./db";
 /**
  * Notification & messaging service (PRD §13, §10.4).
  * - In-app notifications for every role (notification center).
- * - Email (dev mode logs; production SMTP can be plugged in).
+ * - Email via a transactional HTTP provider (dev console fallback).
  * - SMS fallback via a provider interface (BD bulk-SMS adapter stub).
  */
 
@@ -98,10 +98,129 @@ export async function pushToUsers(userIds: string[], payload: { title: string; b
 
 /* ------------------------------------------------------------------ Email */
 
-export async function sendOtpEmail(to: string, code: string): Promise<void> {
-  // Production: plug SMTP / transactional email here.
-  // Dev/mock: log to server console (visible in `npm run dev` output).
-  console.info(`[notify] OTP email → ${to}: ${code}`);
+export interface EmailMessage {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+}
+
+export interface EmailProvider {
+  /** Human label (used in diagnostics). */
+  label: string;
+  /** True when the adapter can actually deliver (credentials present). */
+  live: boolean;
+  send(msg: EmailMessage): Promise<{ ok: boolean; ref?: string; error?: string }>;
+}
+
+/**
+ * Dependency-free HTTP transactional-email adapter (Resend-compatible REST
+ * shape; point EMAIL_API_URL at SendGrid/Mailgun/Postmark gateways instead).
+ * Mirrors the SmsProvider / ProviderAdapter convention used in this codebase.
+ *
+ * Env: EMAIL_API_KEY (or RESEND_API_KEY), EMAIL_FROM,
+ *      EMAIL_API_URL (default https://api.resend.com/emails),
+ *      EMAIL_PROVIDER=resend|http|console (default: auto by key presence).
+ */
+class HttpEmailProvider implements EmailProvider {
+  label = "http";
+  live = true;
+  constructor(private apiKey: string, private endpoint: string, private from: string) {}
+
+  async send(msg: EmailMessage) {
+    try {
+      const res = await fetch(this.endpoint, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: this.from,
+          to: [msg.to],
+          subject: msg.subject,
+          text: msg.text,
+          ...(msg.html ? { html: msg.html } : {}),
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) {
+        const detail = (await res.text().catch(() => "")).slice(0, 200);
+        console.error(`[notify] email rejected for ${msg.to}: HTTP ${res.status} ${detail}`);
+        return { ok: false, error: `HTTP ${res.status}` };
+      }
+      const body: any = await res.json().catch(() => null);
+      return { ok: true, ref: body?.id };
+    } catch (e: any) {
+      console.error(`[notify] email failed for ${msg.to}: ${e?.message || e}`);
+      return { ok: false, error: e?.message || "send failed" };
+    }
+  }
+}
+
+/**
+ * Fallback adapter. Outside production it logs the message (including OTPs) to
+ * the dev console; in production it refuses to print codes and raises the
+ * misconfiguration instead, so OTPs never land in production logs.
+ */
+class ConsoleEmailProvider implements EmailProvider {
+  label = "console";
+  live = process.env.NODE_ENV !== "production";
+
+  async send(msg: EmailMessage) {
+    if (process.env.NODE_ENV === "production") {
+      console.error(`[notify] no email provider configured (set EMAIL_API_KEY) — dropped "${msg.subject}" to ${msg.to}`);
+      return { ok: false, error: "email provider not configured" };
+    }
+    console.info(`[notify:dev-email] → ${msg.to} | ${msg.subject}\n${msg.text}`);
+    return { ok: true, ref: `dev_${Date.now()}` };
+  }
+}
+
+/** Pick a provider from env (no provider configured → dev console adapter). */
+function resolveEmailProvider(): EmailProvider {
+  const explicit = (process.env.EMAIL_PROVIDER || "").trim().toLowerCase();
+  const apiKey = process.env.EMAIL_API_KEY || process.env.RESEND_API_KEY || "";
+  const from = process.env.EMAIL_FROM || "Amar E School <no-reply@amare.school>";
+  const endpoint = process.env.EMAIL_API_URL || "https://api.resend.com/emails";
+
+  if (explicit === "console") return new ConsoleEmailProvider();
+  if (explicit && !apiKey) {
+    console.warn(`[notify] EMAIL_PROVIDER=${explicit} but no EMAIL_API_KEY — falling back to the dev console adapter.`);
+    return new ConsoleEmailProvider();
+  }
+  if (explicit === "resend" || explicit === "http" || (!explicit && apiKey)) {
+    return new HttpEmailProvider(apiKey, endpoint, from);
+  }
+  return new ConsoleEmailProvider();
+}
+
+let emailProvider: EmailProvider | null = null;
+export function getEmailProvider(): EmailProvider {
+  if (!emailProvider) emailProvider = resolveEmailProvider();
+  return emailProvider;
+}
+/** Test / DI hook — mirrors setSmsProvider. */
+export function setEmailProvider(p: EmailProvider | null) {
+  emailProvider = p;
+}
+
+/** Send one transactional email. Never throws; returns the delivery result. */
+export async function sendEmail(msg: EmailMessage) {
+  return getEmailProvider().send(msg);
+}
+
+/** PRD §3.2 — password-reset OTP. Real provider when configured, dev console otherwise. */
+export async function sendOtpEmail(to: string, code: string, ttlMinutes = 10): Promise<void> {
+  const result = await sendEmail({
+    to,
+    subject: "Your Amar E School password reset code",
+    text:
+      `Your password reset code is ${code}.\n\n` +
+      `It expires in ${ttlMinutes} minutes. If you did not request a reset, ignore this email — your password is unchanged.`,
+    html:
+      `<p>Your Amar E School password reset code is:</p>` +
+      `<p style="font-size:22px;font-weight:700;letter-spacing:4px">${code}</p>` +
+      `<p>It expires in ${ttlMinutes} minutes. If you did not request a reset, ignore this email — your password is unchanged.</p>`,
+  });
+  if (!result.ok) throw new Error(result.error || "email delivery failed");
 }
 
 /* ------------------------------------------------------------------ SMS (§13) */

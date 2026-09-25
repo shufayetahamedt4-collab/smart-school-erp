@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { getSession, guardianChildId } from "@/lib/auth";
+import { isBranchScoped } from "@/lib/permissions";
 import { statsCacheGet, statsCachePut } from "@/lib/stats-cache";
 
 /**
@@ -24,25 +25,52 @@ export async function GET(req: NextRequest) {
   const trendStart = new Date(today);
   trendStart.setDate(trendStart.getDate() - 6); // 7-day window start (00:00)
 
-  // ---- SCHOOL ADMIN / SUPER ADMIN (super admin passes schoolId)
-  if (session.role === "SCHOOL_ADMIN" || session.role === "SUPER_ADMIN") {
+  // ---- SCHOOL ADMIN / BRANCH ADMIN / BACK-OFFICE STAFF / SUPER ADMIN
+  // (sub-roles like registrar/accountant share this branch of the dashboard;
+  // branch-scoped sessions see their branch's numbers only — PRD §12.3)
+  if (["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR", "ACCOUNTANT", "LIBRARIAN", "FRONT_DESK", "SUPER_ADMIN"].includes(session.role)) {
     const sid = session.role === "SUPER_ADMIN" ? req.nextUrl.searchParams.get("schoolId") || undefined : schoolId;
     if (!sid) return NextResponse.json({ error: "No school context" }, { status: 400 });
 
-    const cacheKey = `admin|${session.id}|${sid}`;
+    // PRD §12.3 — a branch-scoped session's dashboard reflects their branch only.
+    const branchId = session.role !== "SUPER_ADMIN" && isBranchScoped(session) ? session.branchId || "" : null;
+
+    const cacheKey = `admin|${session.id}|${sid}|${branchId || ""}`;
     const cached = statsCacheGet(cacheKey);
     if (cached) return NextResponse.json(cached);
 
-    const [students, teachers, classes, exams, notices, fees, attendanceRows, marksCount] = await Promise.all([
-      prisma.student.count({ where: { schoolId: sid, active: true } }),
-      prisma.teacher.count({ where: { schoolId: sid } }),
-      prisma.classRoom.count({ where: { schoolId: sid } }),
-      prisma.exam.count({ where: { schoolId: sid } }),
+    const scope = branchId ? { schoolId: sid, branchId } : { schoolId: sid };
+    const [students, teachers, classes, examRows, notices, feeRows, attendanceAll, markRows] = await Promise.all([
+      prisma.student.count({ where: { ...scope, active: true } }),
+      prisma.teacher.count({ where: scope }),
+      prisma.classRoom.count({ where: scope }),
+      prisma.exam.findMany({ where: { schoolId: sid }, select: { id: true, classId: true } }),
       prisma.notice.count({ where: { schoolId: sid } }),
-      prisma.fee.findMany({ where: { schoolId: sid }, select: { amount: true, paidAmount: true, status: true } }),
-      prisma.attendance.findMany({ where: { schoolId: sid, date: { gte: trendStart } }, select: { status: true, date: true } }),
-      prisma.examMark.count({ where: { exam: { schoolId: sid } } }),
+      prisma.fee.findMany({ where: { schoolId: sid }, select: { amount: true, paidAmount: true, status: true, studentId: true } }),
+      prisma.attendance.findMany({ where: { schoolId: sid, date: { gte: trendStart } }, select: { status: true, date: true, studentId: true } }),
+      prisma.examMark.findMany({ where: { exam: { schoolId: sid } }, select: { id: true, examId: true, studentId: true } }),
     ]);
+
+    // Branch filter — the same school-wide arrays, narrowed in memory to the
+    // branch's students/classes so counts, fees and the attendance trend stay
+    // consistent with what the branch admin manages (PRD §12.3).
+    let exams = examRows.length;
+    let fees = feeRows;
+    let attendanceRows = attendanceAll;
+    let marksCount = markRows.length;
+    if (branchId) {
+      const [bStudents, bClasses] = await Promise.all([
+        prisma.student.findMany({ where: { schoolId: sid, branchId }, select: { id: true } }),
+        prisma.classRoom.findMany({ where: { schoolId: sid, branchId }, select: { id: true } }),
+      ]);
+      const studentIds = new Set(bStudents.map((s) => s.id));
+      const classIds = new Set(bClasses.map((c) => c.id));
+      const branchExamIds = new Set(examRows.filter((e) => classIds.has(e.classId)).map((e) => e.id));
+      exams = branchExamIds.size;
+      fees = feeRows.filter((f) => studentIds.has(f.studentId));
+      attendanceRows = attendanceAll.filter((r) => studentIds.has(r.studentId));
+      marksCount = markRows.filter((m) => studentIds.has(m.studentId) && branchExamIds.has(m.examId)).length;
+    }
 
     const totalFees = fees.reduce((a, f) => a + Number(f.amount), 0);
     const paidFees = fees.reduce((a, f) => a + Number(f.paidAmount), 0);
@@ -159,7 +187,10 @@ export async function GET(req: NextRequest) {
     // Single parallel batch when session.studentId is known (the normal
     // case): every student-scoped pull keys off it directly. The fallback
     // re-pulls in a second stage when the session carries no studentId.
-    const sid0 = session.studentId;
+    // The one child this dashboard speaks for — resolved through lib/auth so a
+    // two-child family always lands on the same child as every other screen
+    // (a bare findFirst answered with whichever document came back first).
+    const sid0 = session.studentId || (await guardianChildId(session)) || undefined;
     const [student, attendance0, fees, remarks, marks0, examRows, subjectRows, schoolHomeworks] = await Promise.all([
       sid0 ? prisma.student.findUnique({ where: { id: sid0 } }) : prisma.student.findFirst({ where: { guardianUserId: session.id } }),
       sid0 ? prisma.attendance.findMany({ where: { studentId: sid0 }, select: { status: true, date: true } }) : Promise.resolve([] as any[]),

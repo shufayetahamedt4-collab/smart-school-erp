@@ -25,13 +25,14 @@ interface PlanRow {
 }
 interface SubRow {
   id: string; status: string; cycle: string; currentPeriodEnd: string | null; startedAt: string;
-  school: { id: string; name: string; slug: string; status: string };
+  /** null for a subscription whose school was deleted — the row still bills history. */
+  school: { id: string; name: string; slug: string; status: string } | null;
   plan: { id: string; name: string; price: string | number; maxStudents: number | null } | null;
 }
 interface InvoiceRow {
   id: string; invoiceNo: string; amount: string | number; status: string; issueDate: string;
   dueDate: string; method?: string | null; refNo?: string | null;
-  school: { id: string; name: string };
+  school: { id: string; name: string } | null;
 }
 
 const CYCLES = ["MONTHLY", "YEARLY"];
@@ -182,7 +183,13 @@ export default function AdminBillingPage() {
               {subs.map((s) => (
                 <tr key={s.id} className="tr-hover">
                   <td className="td">
-                    <Link href={`/admin/schools/${s.school.id}`} className="font-bold text-slate-800 hover:text-indigo-600">{s.school.name}</Link>
+                    {/* A subscription can outlive its school; reading `.id` off a null
+                        school used to crash this whole console. */}
+                    {s.school ? (
+                      <Link href={`/admin/schools/${s.school.id}`} className="font-bold text-slate-800 hover:text-indigo-600">{s.school.name}</Link>
+                    ) : (
+                      <span className="text-slate-400" title="This school record no longer exists">Deleted school</span>
+                    )}
                   </td>
                   <td className="td">{s.plan?.name || "—"} <span className="text-xs text-slate-400">({fmtMoney(s.plan?.price || 0)})</span></td>
                   <td className="td"><Badge tone={statusTone(s.status)}>{prettyStatus(s.status)}</Badge></td>
@@ -190,8 +197,24 @@ export default function AdminBillingPage() {
                   <td className="td">{s.currentPeriodEnd ? fmtDate(s.currentPeriodEnd) : "—"}</td>
                   <td className="td">
                     <div className="flex justify-end gap-1.5">
-                      <button className="btn btn-secondary btn-sm" onClick={() => renew(s.school.id)}><RefreshCw size={12} /> Renew</button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => { setAssignForm({ schoolId: s.school.id, planId: s.plan?.id || "", cycle: s.cycle || "MONTHLY" }); setAssignOpen({}); }}>Switch</button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={!s.school}
+                        onClick={() => s.school && renew(s.school.id)}
+                      >
+                        <RefreshCw size={12} /> Renew
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={!s.school}
+                        onClick={() => {
+                          if (!s.school) return;
+                          setAssignForm({ schoolId: s.school.id, planId: s.plan?.id || "", cycle: s.cycle || "MONTHLY" });
+                          setAssignOpen({});
+                        }}
+                      >
+                        Switch
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -219,7 +242,7 @@ export default function AdminBillingPage() {
               {invoices.map((inv) => (
                 <tr key={inv.id} className="tr-hover">
                   <td className="td font-mono text-xs font-bold">{inv.invoiceNo}</td>
-                  <td className="td">{inv.school?.name}</td>
+                  <td className="td">{inv.school?.name || <span className="text-slate-400">Deleted school</span>}</td>
                   <td className="td font-semibold">{fmtMoney(inv.amount)}</td>
                   <td className="td">{fmtDate(inv.issueDate)}</td>
                   <td className="td">{fmtDate(inv.dueDate)}</td>

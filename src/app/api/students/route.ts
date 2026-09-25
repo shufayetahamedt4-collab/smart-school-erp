@@ -3,12 +3,14 @@ import bcrypt from "bcryptjs";
 import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { qrToken, qrPin } from "@/lib/qr";
+import { scopeWhere } from "@/lib/permissions";
+import { resolveBranchId } from "@/lib/branches";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
-  if (!session || !["SCHOOL_ADMIN", "TEACHER", "SUPER_ADMIN"].includes(session.role)) {
+  if (!session || !["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR", "ACCOUNTANT", "TEACHER", "SUPER_ADMIN"].includes(session.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const searchParams = req.nextUrl.searchParams;
@@ -18,11 +20,18 @@ export async function GET(req: NextRequest) {
   const q = searchParams.get("q") || "";
   const classId = searchParams.get("classId") || undefined;
   const sectionId = searchParams.get("sectionId") || undefined;
+  const branchId = searchParams.get("branchId") || undefined;
+
+  // Branch scoping (PRD §12.3): a branch admin only ever sees their own branch.
+  // The main admin may drill into any branch via ?branchId= (monitoring).
+  const base = session.role === "SUPER_ADMIN" ? { schoolId } : scopeWhere(session);
+  const drill = branchId && (session.role === "SUPER_ADMIN" || session.role === "SCHOOL_ADMIN") ? branchId : undefined;
 
   const where = {
-    schoolId,
+    ...base,
     ...(classId ? { classId } : {}),
     ...(sectionId ? { sectionId } : {}),
+    ...(drill ? { branchId: drill } : {}),
     ...(q
       ? {
           OR: [
@@ -38,9 +47,9 @@ export async function GET(req: NextRequest) {
   // relations, so an include here would issue several reads per student.
   const [students, classes, sections, fees] = await Promise.all([
     prisma.student.findMany({ where }),
-    prisma.classRoom.findMany({ where: { schoolId }, select: { id: true, name: true, order: true } }),
-    prisma.section.findMany({ where: { schoolId }, select: { id: true, name: true, classId: true } }),
-    prisma.fee.findMany({ where: { schoolId }, select: { id: true, studentId: true, status: true, amount: true, paidAmount: true, feeType: true, title: true } }),
+    prisma.classRoom.findMany({ where: base, select: { id: true, name: true, order: true } }),
+    prisma.section.findMany({ where: base, select: { id: true, name: true, classId: true } }),
+    prisma.fee.findMany({ where: base, select: { id: true, studentId: true, status: true, amount: true, paidAmount: true, feeType: true, title: true } }),
   ]);
 
   const classById = new Map(classes.map((item: any) => [item.id, item]));
@@ -65,7 +74,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!session || session.role !== "SCHOOL_ADMIN") {
+  if (!session || !["SCHOOL_ADMIN", "BRANCH_ADMIN"].includes(session.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const schoolId = session.schoolId!;
@@ -83,12 +92,14 @@ export async function POST(req: NextRequest) {
 
   const token = qrToken();
   const pin = qrPin();
+  const branchId = await resolveBranchId(session, body?.branchId || null);
 
   try {
     const student = await prisma.$transaction(async (tx) => {
       const s = await tx.student.create({
         data: {
           schoolId,
+          branchId,
           admissionNo: String(body.admissionNo || `STU-${Date.now()}`),
           name: String(body.name),
           dob: body.dob ? new Date(body.dob) : null,
@@ -140,8 +151,8 @@ export async function POST(req: NextRequest) {
       if (setting && body.createFees !== false) {
         await tx.fee.createMany({
           data: [
-            { schoolId, studentId: s.id, feeType: "ADMISSION", title: "Admission Fee", amount: setting.admissionFee, dueDate: new Date() },
-            { schoolId, studentId: s.id, feeType: "MONTHLY", title: "Monthly Fee", amount: setting.monthlyFee, status: "UNPAID", dueDate: new Date(Date.now() + 30 * 86400000) },
+            { schoolId, branchId, studentId: s.id, feeType: "ADMISSION", title: "Admission Fee", amount: setting.admissionFee, dueDate: new Date() },
+            { schoolId, branchId, studentId: s.id, feeType: "MONTHLY", title: "Monthly Fee", amount: setting.monthlyFee, status: "UNPAID", dueDate: new Date(Date.now() + 30 * 86400000) },
           ],
         });
       }

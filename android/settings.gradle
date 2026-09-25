@@ -1,0 +1,18 @@
+// Repositories for project dependencies (aapt2, lint, …). The buildscript
+// classpath repositories are declared separately in the root build.gradle.
+dependencyResolutionManagement {
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+
+rootProject.name = 'AmarESchoolApps'
+
+// One build, one shared shell, one app module per sector:
+//   :shell   → the shared WebView chrome (no app of its own)
+//   :app     → Parents App    (com.amareeschool.parents)
+//   :teacher → Teacher App    (com.amareeschool.teachers)
+include ':shell'
+include ':app'
+include ':teacher'

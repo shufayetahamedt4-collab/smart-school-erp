@@ -1,0 +1,30 @@
+apply plugin: 'com.android.library'
+
+/**
+ * Shared native shell used by every Amar E School app (Parents, Teachers).
+ *
+ * The WebView chrome — fullscreen window, back handling, file uploads, camera
+ * permission plumbing, external-link escape, App Links, offline error screen —
+ * is identical in all of them. Only three things differ per app: the origin it
+ * loads, the user-agent suffix it identifies itself with, and its brand colour.
+ *
+ * Keeping ONE implementation is deliberate: the user-agent suffix is a contract
+ * with the web app (it is what suppresses "install the app" inside the app), and
+ * a duplicated copy of that contract is exactly the kind of thing that silently
+ * drifts apart.
+ *
+ * No third-party dependencies — framework APIs only.
+ */
+android {
+  namespace 'com.amareeschool.shell'
+  compileSdk 35
+
+  defaultConfig {
+    minSdk 24
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}

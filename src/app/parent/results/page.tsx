@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FileText, Download } from "lucide-react";
+import { FileText, FileSpreadsheet, Download } from "lucide-react";
 import { api } from "@/lib/client";
 import { Card, Badge, PageHeader, LoadingScreen, EmptyState } from "@/components/ui";
 import { useMe } from "@/components/Shell";
@@ -26,7 +26,19 @@ export default function ParentResultsPage() {
 
   return (
     <div>
-      <PageHeader title="Exam Results" subtitle="Published results & report cards" />
+      <PageHeader
+        title="Exam Results"
+        subtitle="Published results & report cards"
+        actions={
+          me?.student ? (
+            // The marksheet spans every published term, so it belongs to the
+            // page rather than to one exam's card.
+            <Link href={`/print/marksheet/${me.student.id}`} className="btn btn-secondary btn-sm">
+              <FileSpreadsheet size={14} /> Year marksheet
+            </Link>
+          ) : null
+        }
+      />
 
       <div className="space-y-4">
         {exams.length ? exams.map((e) => (

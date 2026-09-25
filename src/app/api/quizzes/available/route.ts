@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { getSession, resolveActingStudent } from "@/lib/auth";
 
-/** PRD §7.2 — published quizzes for the student's class (with own attempt state). */
+/**
+ * PRD §7.2 — published quizzes for the acting child's class, with their own
+ * attempt state.
+ *
+ * There is no student app: a STUDENT session (kept for the API/permission
+ * layer) and a GUARDIAN session both resolve to the same child through
+ * resolveActingStudent, so families take quizzes in the Parents App.
+ */
 export async function GET() {
   const session = await getSession();
-  if (!session || session.role !== "STUDENT") {
+  if (!session || !["STUDENT", "GUARDIAN"].includes(session.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const student = await prisma.student.findFirst({ where: { userId: session.id } });
+  const student = await resolveActingStudent(session);
   if (!student) return NextResponse.json({ data: [] });
 
   const quizzes = await prisma.quiz.findMany({

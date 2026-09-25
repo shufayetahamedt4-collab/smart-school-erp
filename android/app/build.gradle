@@ -1,0 +1,56 @@
+import java.net.URI
+
+apply plugin: 'com.android.application'
+
+/**
+ * The Parents App origin this build loads.
+ *
+ * One APK serves every school (the product is multi-tenant): which school's app
+ * a guardian sees is decided by the invite link that opened it, or by the
+ * account they sign in with. Point it at your deployment for a real build:
+ *
+ *   gradlew assembleRelease -PparentsOrigin=https://parents.yourdomain.com
+ */
+def parentsOrigin = (project.findProperty('parentsOrigin') ?: 'https://parents.example.com').toString()
+def parentsHost = URI.create(parentsOrigin).getHost() ?: 'parents.example.com'
+
+android {
+  namespace 'com.amareeschool.parents'
+  compileSdk 35
+
+  defaultConfig {
+    applicationId 'com.amareeschool.parents'
+    minSdk 24
+    targetSdk 35
+    versionCode 1
+    versionName '1.0'
+
+    buildConfigField 'String', 'PARENTS_ORIGIN', "\"${parentsOrigin}\""
+    // Consumed by the App Links intent filter, so a school's invite QR opens the app.
+    manifestPlaceholders.parentsHost = parentsHost
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+    }
+  }
+
+}
+
+// Intentionally no third-party runtime dependencies: the shared shell uses
+// framework APIs only, which keeps the APK small and the build reproducible
+// offline. `:shell` is our own code — a project dependency, not a download.
+dependencies {
+  implementation project(':shell')
+}

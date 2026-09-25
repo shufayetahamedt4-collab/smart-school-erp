@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianOwnsStudent } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
-  if (!session || !["SCHOOL_ADMIN", "TEACHER", "SUPER_ADMIN"].includes(session.role)) {
+  if (!session || !["SCHOOL_ADMIN", "TEACHER", "SUPER_ADMIN", "GUARDIAN"].includes(session.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const { id } = await params;
@@ -67,6 +67,24 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  // Tenant isolation: never let one school's session read another school's
+  // student by guessing an id. SUPER_ADMIN is cross-school by design.
+  if (session.role !== "SUPER_ADMIN" && student.schoolId !== session.schoolId) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+  // PRD §7.2 — a guardian may read ONLY their own linked child (this is what
+  // the Attendance, Remarks and Exam Results pages load). Credential fields
+  // (the child's QR token/PIN) are stripped from the response.
+  if (session.role === "GUARDIAN") {
+    // Own child or a sibling the family link put in the same household (§5.4) —
+    // the same rule the printable marksheet/report card/id card pages use.
+    const own = await guardianOwnsStudent(session, student);
+    if (!own || student.schoolId !== session.schoolId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const { qrPin, qrToken, ...safe } = student as any;
+    return NextResponse.json({ data: safe });
+  }
   return NextResponse.json({ data: student });
 }
 

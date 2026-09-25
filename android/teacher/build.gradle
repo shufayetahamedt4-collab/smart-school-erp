@@ -1,0 +1,56 @@
+import java.net.URI
+
+apply plugin: 'com.android.application'
+
+/**
+ * The Teacher App origin this build loads.
+ *
+ * One APK serves every school (the product is multi-tenant): which school's app
+ * a teacher sees is decided by the account they sign in with. Point it at your
+ * deployment for a real build:
+ *
+ *   gradlew assembleRelease -PteacherOrigin=https://teacher.yourdomain.com
+ */
+def teacherOrigin = (project.findProperty('teacherOrigin') ?: 'https://teacher.example.com').toString()
+def teacherHost = URI.create(teacherOrigin).getHost() ?: 'teacher.example.com'
+
+android {
+  namespace 'com.amareeschool.teachers'
+  compileSdk 35
+
+  defaultConfig {
+    // A separate app, not a mode of the Parents App: a teacher installs the
+    // Teacher App and never sees family-only screens.
+    applicationId 'com.amareeschool.teachers'
+    minSdk 24
+    targetSdk 35
+    versionCode 1
+    versionName '1.0'
+
+    buildConfigField 'String', 'TEACHER_ORIGIN', "\"${teacherOrigin}\""
+    // Consumed by the App Links intent filter, so a school's teacher link opens the app.
+    manifestPlaceholders.teacherHost = teacherHost
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+    }
+  }
+}
+
+// Same rationale as the Parents App: framework APIs only, so the APK stays tiny
+// and the build works from a cold, offline Gradle cache.
+dependencies {
+  implementation project(':shell')
+}

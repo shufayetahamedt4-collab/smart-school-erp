@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { ClipboardList, Plus, Search, FileUp, Tag, CheckCircle, XCircle, GraduationCap } from "lucide-react";
 import { api, qs, upload } from "@/lib/client";
 import { Card, Badge, Field, TextInput, Select, Textarea, Modal, PageHeader, LoadingScreen, EmptyState, ErrorNote, statusTone, prettyStatus } from "@/components/ui";
@@ -8,7 +9,11 @@ import { fmtMoney, fmtDate } from "@/lib/utils";
 
 /**
  * PRD §4 — Admission pipeline (Admin + Front Desk + Accountant views).
- * Enquiry → Applied → Docs/Test → Seat confirmed → Fee payment → Enrolled.
+ * Applied → Docs/Test → Seat confirmed → Fee payment → Enrolled; a new admission
+ * is filed by the shared intake form (`/dashboard/admissions/new`), so the desk
+ * no longer keeps a second, smaller enquiry form of its own. Applicants that
+ * arrive from the public online form (`/apply`, §4.1 step 1) still land here at
+ * the enquiry stage and walk the same pipeline in the detail panel.
  * Discounts: propose (Accountant/Front Desk) → approve/reject (Admin) §4.2.
  */
 
@@ -50,8 +55,6 @@ export default function AdmissionsPage() {
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
   const [active, setActive] = useState<AdmissionRow | null>(null);
-  const [newOpen, setNewOpen] = useState(false);
-  const [form, setForm] = useState<any>({});
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docKind, setDocKind] = useState("BIRTH_CERTIFICATE");
   const [discountForm, setDiscountForm] = useState<any>({ type: "PERCENT", value: "", reason: "SIBLING" });
@@ -62,8 +65,10 @@ export default function AdmissionsPage() {
   const [uniformSize, setUniformSize] = useState("");
   const [idCardIssued, setIdCardIssued] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [branchId, setBranchId] = useState("");
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
 
-  const load = useCallback(async (filters?: { status?: string; q?: string }) => {
+  const load = useCallback(async (filters?: { status?: string; q?: string; branchId?: string }) => {
     try {
       const data = await api<AdmissionRow[]>(`/api/admissions${qs(filters || {})}`);
       setItems(data);
@@ -76,13 +81,18 @@ export default function AdmissionsPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    // Deep link from the branch monitoring panel (?branchId=…).
+    const b = new URLSearchParams(window.location.search).get("branchId") || "";
+    setBranchId(b);
+    load({ branchId: b || undefined });
     api<any[]>("/api/classes").then(setClasses).catch(() => null);
     api<any[]>("/api/sections").then(setSections).catch(() => null);
     api<any[]>("/api/books").then(setBooks).catch(() => null); // §8.1 checklist options
+    // Branch filter only resolves for the main admin.
+    api<{ id: string; name: string }[]>("/api/branches").then(setBranches).catch(() => null);
   }, [load]);
 
-  const refresh = () => load({ status: statusFilter || undefined, q: q || undefined });
+  const refresh = () => load({ status: statusFilter || undefined, q: q || undefined, branchId: branchId || undefined });
 
   const openDetail = (a: AdmissionRow) => {
     setActive(a);
@@ -91,21 +101,6 @@ export default function AdmissionsPage() {
       api<any[]>(`/api/admissions/siblings?phone=${encodeURIComponent(a.guardianPhone || "")}&email=${encodeURIComponent(a.guardianEmail || "")}`)
         .then(setSiblings)
         .catch(() => null);
-    }
-  };
-
-  const createEnquiry = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      await api("/api/admissions", { method: "POST", body: JSON.stringify(form) });
-      setNewOpen(false);
-      setForm({});
-      refresh();
-    } catch (e: any) {
-      setError(e?.message || "Failed to create");
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -222,11 +217,34 @@ export default function AdmissionsPage() {
         title="Admissions"
         subtitle="Complete admission workflow (PRD §4) — enquiry to enrollment"
         actions={
-          <button className="btn btn-primary btn-sm" onClick={() => setNewOpen(true)}>
-            <Plus size={14} /> New applicant
-          </button>
+          // §4.2 — the same intake form the Students module uses, so the two
+          // entry points can never ask for different information.
+          <Link href="/dashboard/admissions/new" className="btn btn-primary btn-sm">
+            <Plus size={14} /> New admission
+          </Link>
         }
       />
+
+      {branches.length > 0 && (
+        <Card className="mb-4 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Branch</span>
+            <Select
+              className="max-w-xs"
+              value={branchId}
+              onChange={(e) => {
+                const v = e.target.value;
+                setBranchId(v);
+                setLoading(true);
+                load({ status: statusFilter || undefined, q: q || undefined, branchId: v || undefined });
+              }}
+            >
+              <option value="">All branches (whole school)</option>
+              {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
+            </Select>
+          </div>
+        </Card>
+      )}
 
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 
@@ -290,23 +308,6 @@ export default function AdmissionsPage() {
           <EmptyState icon={ClipboardList} title="No admissions yet" description="New enquiries from the public form and walk-ins appear here." />
         )}
       </Card>
-
-      {/* new applicant / enquiry modal */}
-      <Modal open={newOpen} onClose={() => setNewOpen(false)} title="New applicant (walk-in / enquiry)" wide>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Full name (English) *"><TextInput value={form.fullName || ""} onChange={(e) => setForm({ ...form, fullName: e.target.value })} /></Field>
-          <Field label="Full name (Bangla)"><TextInput value={form.fullNameBn || ""} onChange={(e) => setForm({ ...form, fullNameBn: e.target.value })} /></Field>
-          <Field label="Guardian name"><TextInput value={form.guardianName || ""} onChange={(e) => setForm({ ...form, guardianName: e.target.value })} /></Field>
-          <Field label="Guardian phone *"><TextInput value={form.guardianPhone || ""} onChange={(e) => setForm({ ...form, guardianPhone: e.target.value })} /></Field>
-          <Field label="Guardian email"><TextInput type="email" value={form.guardianEmail || ""} onChange={(e) => setForm({ ...form, guardianEmail: e.target.value })} /></Field>
-          <Field label="Previous school"><TextInput value={form.previousSchoolName || ""} onChange={(e) => setForm({ ...form, previousSchoolName: e.target.value })} /></Field>
-          <Field label="Previous class" hint="Used to auto-suggest admission class (§4.2)"><TextInput value={form.previousClass || ""} onChange={(e) => setForm({ ...form, previousClass: e.target.value })} /></Field>
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <button className="btn btn-secondary" onClick={() => setNewOpen(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={createEnquiry} disabled={busy || !form.fullName || !form.guardianPhone}>Create applicant</button>
-        </div>
-      </Modal>
 
       {/* detail modal */}
       <Modal open={!!active} onClose={() => setActive(null)} title={active ? `Applicant: ${active.fullName}` : ""} wide>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shell library contributes code only. Permissions, the launcher activity
+     and the App Links intent filters are declared by each app module, because
+     they are properties of the app (its origin, its name, its icon), not of the
+     shared shell. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

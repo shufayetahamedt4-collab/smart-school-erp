@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PageSkeleton } from "@/components/PageSkeleton";
 import type { LucideIcon } from "lucide-react";
 
 /* ------------------------------------------------------------------ Card */
@@ -177,11 +178,19 @@ export function Spinner({ className }: { className?: string }) {
   );
 }
 
+/**
+ * The per-page loading state (used by 59 pages).
+ *
+ * It used to be a centred spinner on an empty page, which made every fetch
+ * look like a stalled page. It now lays out the page's shape instead, so the
+ * frame is stable and the numbers settle into place — the difference between
+ * "waiting" and "loading".
+ */
 export function LoadingScreen({ label = "Loading…" }: { label?: string }) {
   return (
-    <div className="flex h-[60vh] flex-col items-center justify-center gap-3 text-slate-500">
-      <Spinner className="h-8 w-8" />
-      <p className="text-sm">{label}</p>
+    <div role="status" aria-live="polite">
+      <PageSkeleton />
+      <span className="sr-only">{label}</span>
     </div>
   );
 }

@@ -5,5 +5,21 @@
   },
   "storage": {
     "rules": "storage.rules"
+  },
+  "hosting": {
+    "source": ".",
+    "ignore": [
+      "firebase.json",
+      "node_modules/**",
+      ".next/**",
+      ".git/**",
+      ".freebuff/**",
+      "dev-server*.log",
+      "service-account.json",
+      "*.tsbuildinfo"
+    ],
+    "frameworksBackend": {
+      "region": "asia-southeast1"
+    }
   }
 }
