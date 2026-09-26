@@ -5,7 +5,53 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** `E:\SmartSchoolERP`
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-26
+
+---
+
+## 🔁 Session — 2026-09-26 (live: Firebase App Hosting)
+
+**Input:** get the project live and verify it truly works, not just that a deploy said "done".
+
+### Live URL (working, verified)
+
+**https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app**
+
+- Backend `smart-school-erp-1`, project `amar-e-school`, region `asia-southeast1`.
+- App Hosting builds **only from GitHub**, so the working tree was committed on a dedicated
+  branch `deploy/app-hosting` (local `main` left untouched) and rolled out from there:
+  `npx firebase apphosting:rollouts:create smart-school-erp-1 --git-branch deploy/app-hosting --force`.
+- Secrets (`FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `JWT_SECRET`)
+  plus the non-secret `FIREBASE_STORAGE_BUCKET=amar-e-school.firebasestorage.app` and
+  `APP_URL` live in `apphosting.yaml`; `runConfig.minInstances: 1` keeps an instance warm
+  (rolling out the branch had briefly regressed it to 0 — fixed in `780ef09`, re-rolled out).
+
+### Verified on the live host, after the final rollout
+
+- `/api/health` → 200 `ok:true`, `problems:[]`, one real Firestore read (~3.3s cold, sub-second warm),
+  `runtime.host="google-cloud"`. Polled for ~5 min through the rollout: **no downtime, no 5xx**.
+- All four demo logins return 200 and land on the right app: super admin → `/admin`,
+  school admin → `/dashboard`, teacher → `/teacher`, guardian → `/parent`.
+- `SMOKE_ORIGIN=https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app node scripts/smoke-all.mjs`
+  → **ALL GREEN** (hub pages, every role's pages + GET APIs, print/marksheet).
+- Routes that used to 404 in the first (stale) build now behave correctly: protected pages 307 →
+  `/login`, `/s/sunrise` 200, `/login` renders `name="identifier"`.
+
+### Why Netlify was dropped
+
+The live Netlify site is an anonymous drop (not in the user's account), and the user's own team has
+**visitor access (SSO) forced on at the account level** — every unauthenticated hit gets a 401
+redirect to `app.netlify.com/edge-access`. That toggle only exists in the Netlify UI, and the API
+refused every attempt to lift it (`updateSite`, `updateAccount`, `createSite` with `sso_login:false`).
+App Hosting has no such gate and needs no extra env-var plumbing.
+
+### Open decisions (not blocking)
+
+- `deploy/app-hosting` is currently **10+ commits behind `origin/main`** (certificate templates,
+  timetable builder, billing enforcement, onboarding wizard, CSV import/export, `FIRESTORE_DB_ID`).
+  13 files overlap with this branch's changes — merge deliberately, do not blind-merge.
+- The 401-protected Netlify site `amar-e-school-demo` can be deleted from the Netlify UI whenever.
+- Live and local share the same Firestore project (`amar-e-school`), so live testing mutates demo data.
 
 ---
 
