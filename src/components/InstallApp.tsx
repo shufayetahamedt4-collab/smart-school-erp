@@ -137,12 +137,15 @@ export function InstallBanner() {
   const installable = canPrompt || isIOS;
 
   // The wrapper spans the full width of the viewport, so it must not swallow
-  // clicks — only the card itself is interactive. Otherwise the whole bottom
-  // band of every page becomes dead space (a control under it, like the last
-  // demo-account card on the sign-in screen, cannot be clicked at all).
+  // clicks. Neither should the card: only the two real controls inside it are
+  // interactive. A card that is `pointer-events-auto` in its entirety makes the
+  // whole band it covers dead space — measured on the live build, it sat over
+  // the demo-account card on the sign-in screen and swallowed every click, so
+  // "click to fill" silently did nothing. Anything visible but not clickable
+  // here must let clicks through to whatever is underneath.
   return (
     <div className="no-print pointer-events-none fixed inset-x-0 bottom-4 z-[60] flex justify-center px-4">
-      <div className="pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-900/10 fade-up">
+      <div className="pointer-events-none flex w-full max-w-md items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-900/10 fade-up">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white">
           <MonitorSmartphone size={18} />
         </div>
@@ -159,7 +162,7 @@ export function InstallBanner() {
                 setShowIOSHelp((v) => !v);
               }
             }}
-            className="btn btn-primary btn-sm shrink-0"
+            className="btn btn-primary btn-sm pointer-events-auto shrink-0"
           >
             <Download size={14} /> Install
           </button>
@@ -168,7 +171,7 @@ export function InstallBanner() {
         )}
         <button
           onClick={() => setDismissed(true)}
-          className="shrink-0 rounded-lg p-1 text-slate-300 transition hover:bg-slate-100 hover:text-slate-500"
+          className="pointer-events-auto shrink-0 rounded-lg p-1 text-slate-300 transition hover:bg-slate-100 hover:text-slate-500"
           aria-label="Dismiss"
         >
           <X size={16} />
