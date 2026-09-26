@@ -30,7 +30,11 @@ env:
     value: https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app
 
 runConfig:
-  minInstances: 0
+  # One instance always warm: measured on this project, a cold instance added
+  # ~150-300ms on top of the Firestore round trip for the first click after an
+  # idle gap. Set by the perf(infra) session on main — kept here so rolling out
+  # this branch does not undo it.
+  minInstances: 1
   maxInstances: 10
   concurrency: 80
   cpu: 1
