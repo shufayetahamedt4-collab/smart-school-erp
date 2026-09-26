@@ -151,8 +151,10 @@ export async function POST(req: NextRequest) {
       if (setting && body.createFees !== false) {
         await tx.fee.createMany({
           data: [
-            { schoolId, branchId, studentId: s.id, feeType: "ADMISSION", title: "Admission Fee", amount: setting.admissionFee, dueDate: new Date() },
-            { schoolId, branchId, studentId: s.id, feeType: "MONTHLY", title: "Monthly Fee", amount: setting.monthlyFee, status: "UNPAID", dueDate: new Date(Date.now() + 30 * 86400000) },
+            // paidAmount is written explicitly: a row without it makes every money
+            // total in the app (fees page, dashboard, student debt) read ৳0.
+            { schoolId, branchId, studentId: s.id, feeType: "ADMISSION", title: "Admission Fee", amount: setting.admissionFee, paidAmount: 0, status: "UNPAID", dueDate: new Date() },
+            { schoolId, branchId, studentId: s.id, feeType: "MONTHLY", title: "Monthly Fee", amount: setting.monthlyFee, paidAmount: 0, status: "UNPAID", dueDate: new Date(Date.now() + 30 * 86400000) },
           ],
         });
       }

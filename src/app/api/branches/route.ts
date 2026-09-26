@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can, canAccessBranch, STAFF_ROLES } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
+import { money } from "@/lib/utils";
 
 /**
  * PRD §12.3 — Multi-branch support.
@@ -75,9 +76,9 @@ export async function GET(req: NextRequest) {
       const bid = branchOfFee(f);
       if (!bid) continue;
       const m = feesByBranch.get(bid) || { total: 0, paid: 0, due: 0, unpaid: 0 };
-      m.total += Number(f.amount);
-      m.paid += Number(f.paidAmount);
-      if (f.status !== "PAID") m.due += Number(f.amount) - Number(f.paidAmount);
+      m.total += money(f.amount);
+      m.paid += money(f.paidAmount);
+      if (f.status !== "PAID") m.due += money(f.amount) - money(f.paidAmount);
       if (f.status === "UNPAID") m.unpaid += 1;
       feesByBranch.set(bid, m);
     }

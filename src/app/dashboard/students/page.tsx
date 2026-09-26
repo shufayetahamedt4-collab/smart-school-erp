@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Plus, Search, GraduationCap, Eye, UserX } from "lucide-react";
 import { api, qs } from "@/lib/client";
 import { Card, Badge, Select, TextInput, EmptyState, LoadingScreen, PageHeader, statusTone, prettyStatus } from "@/components/ui";
-import { initials, fmtMoney, fmtDate } from "@/lib/utils";
+import { initials, fmtMoney, fmtDate, feeDue } from "@/lib/utils";
 
 interface Student {
   id: string; name: string; admissionNo: string; roll: number | null; photoUrl: string | null;
@@ -43,7 +43,7 @@ export default function StudentsPage() {
     load(qs({ q: q || undefined, classId: classId || undefined, sectionId: sectionId || undefined, branchId: branchId || undefined }));
   };
 
-  const debt = (s: Student) => s.fees.reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
+  const debt = (s: Student) => s.fees.reduce((a, f) => a + feeDue(f), 0);
   const selectedClass = useMemo(() => classes.find((c) => c.id === classId), [classes, classId]);
 
   return (

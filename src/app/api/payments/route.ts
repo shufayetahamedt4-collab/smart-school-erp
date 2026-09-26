@@ -4,6 +4,7 @@ import { getSession, audit, guardianChildId, guardianChildIds } from "@/lib/auth
 import { can, PermissionError } from "@/lib/permissions";
 import { createPaymentIntent, markFailed, markConfirmed } from "@/lib/payments";
 import type { PaymentMethod } from "@/lib/db";
+import { money } from "@/lib/utils";
 
 const METHODS: PaymentMethod[] = ["CASH", "BANK", "BKASH", "NAGAD", "ROCKET", "CARD"];
 
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const remaining = Number(fee.amount) - Number(fee.paidAmount);
+  const remaining = money(fee.amount) - money(fee.paidAmount);
   if (remaining <= 0) return NextResponse.json({ error: "This fee is already fully paid." }, { status: 400 });
 
   try {

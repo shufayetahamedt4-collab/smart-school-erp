@@ -9,6 +9,63 @@
 
 ---
 
+## 🔁 Session — 2026-09-26 (fees: a NaN was eating every total)
+
+**Input:** "run the school admin. We have to do works in fees."
+
+### The bug
+
+The School Admin **Fees** page showed `৳0 collected · ৳0 outstanding` above a table of 60 rows
+carrying ৳1,500 / ৳5,000 amounts. The dashboard and the branch monitor said ৳0 too. Nobody could
+trust a single money figure in the app.
+
+Root cause, three layers deep:
+
+1. **Data.** Fee rows existed with `paidAmount` **missing** (key absent), `null`, or **NaN** stored.
+   NaN is a legal Firestore double, and JSON turns it into `null` on the way out, which is why the
+   API looked like it was returning nulls.
+2. **Reader.** `Number(undefined)` is `NaN`, and one `NaN` poisons an entire `reduce` —
+   `0 + 1 + NaN = NaN` — so every total rendered through `fmtMoney(NaN)` = **৳0**. The table looked
+   fine only because each cell was formatted on its own.
+3. **Writer.** `lib/ledger.ts confirmPayment()` computed
+   `Math.min(Number(fee.amount), Number(fee.paidAmount) + paid)` and wrote the result back — so the
+   first payment confirmed against a row without `paidAmount` **stored NaN permanently**.
+   `applyLateFees()` had the same shape for the late-fee amount.
+
+### The fixes
+
+- **`src/lib/utils.ts`** gained `money(v)` (any money field → finite number, also handling `"1,200"`),
+  `feeDue(f)` and `sumMoney(rows, pick)`. They are now used in every place money is summed:
+  `/dashboard/fees`, `/parent/fees`, `/dashboard/students` + `[id]`, `/dashboard/ledger`,
+  `/api/stats` (3 sites), `/api/branches`, `/api/student/me`, `/api/payments`.
+- **`/api/fees` GET** normalises `amount`/`paidAmount` to numbers on the way out, so no consumer can
+  inherit a null again. **POST** now writes `paidAmount: 0, status: "UNPAID"` explicitly.
+- **Writers fixed:** `lib/ledger.ts` (payment confirmation + late fee) uses `money()` on both sides
+  and clamps to the billed amount; fee creation in `lib/admission.ts`, `api/books/issues` (2 sites),
+  `api/students` (createMany) always writes `paidAmount: 0` now.
+- **`scripts/verify-fees-totals.mjs`** (new) — proves it, against a running server: every row finite,
+  `paid + due === billed`, `/api/stats` agrees with the fee list, the guardian view and the ledger
+  stay finite. Supports `SMOKE_PORT` and `SMOKE_ORIGIN`.
+- **`scripts/fix-fee-paidamount.mjs`** (new) — dry-run by default, `--apply` to write. Repairs stored
+  rows by summing the fee's own **payments** (the ledger is the source of truth) and recomputing
+  `status`. Applied to the demo tenant only: 2 rows. One of them was an `Admission Fee` that had a
+  real ৳4,500 payment recorded but a `NaN` in `paidAmount` — that money was invisible; it is now
+  `PARTIAL` with ৳4,500 paid. The other had no payments and became `UNPAID` with ৳0 paid.
+
+### Result on the demo school
+
+`৳95,700 collected · ৳40,000 outstanding` (billed ৳135,700 over 60 fees), the same numbers from
+`/api/stats`, `tsc --noEmit` clean, `verify-fees-totals` and `smoke-all` ALL GREEN.
+
+### Worth remembering
+
+- **Never sum money with raw `Number()`.** It is one missing field away from printing ৳0.
+- Other schools in the project (fixture/QA tenants) still hold malformed rows. The audit script
+  reports them: `node scripts/fix-fee-paidamount.mjs` (scope with `--school <id>`). They were left
+  untouched on purpose — they are not this demo's data.
+
+---
+
 ## 🔁 Session — 2026-09-26 (dark mode removed: "the grey background is back")
 
 **Input:** "The grey background is back again, remove it permanently, it dims the texts."
@@ -634,6 +691,9 @@ npm run seed         # same as setup (alias)
 # harnesses — all expect a running `npx next start -p 3123`; this shell exports PORT=0,
 # so pass the port explicitly and never read process.env.PORT
 SMOKE_PORT=3123 node scripts/smoke-all.mjs                 # every role's pages + GET APIs + print pages
+SMOKE_PORT=3123 node scripts/verify-fees-totals.mjs         # fees add up: finite money, paid+due=billed, stats agrees
+SMOKE_ORIGIN=https://… node scripts/verify-fees-totals.mjs  # same checks against a deployment
+node scripts/fix-fee-paidamount.mjs                         # audit fee rows for a broken paidAmount (add --apply)
 SMOKE_PORT=3123 node scripts/verify-admission-intake.mjs   # desk intake end to end (cleans up after itself)
 SMOKE_PORT=3123 node scripts/verify-guardian-child.mjs     # one family, many children: same child everywhere
 BASE=http://127.0.0.1:3123 node scripts/verify-tenant-isolation.mjs   # cross-school reads (see fixtures below)

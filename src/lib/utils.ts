@@ -19,6 +19,39 @@ export function fmtMoney(n: number | string | null | undefined): string {
   return `৳${num.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
+/**
+ * A money field as a number that is always safe to add up.
+ *
+ * Fee rows written before the field was set (and rows imported from CSV) can
+ * carry `null`, a missing key, `""` or a formatted string. `Number()` turns the
+ * missing ones into `NaN`, and a single `NaN` poisons an entire `reduce` — which
+ * is how a school with ৳91,200 collected ended up reading "৳0 collected" on the
+ * fees page, the dashboard, the branch monitor and every student's debt. Sum
+ * money through this, never through raw `Number()`. It also accepts the padded
+ * shapes real data arrives in ("1,200", " 1200 ") so a legacy row cannot zero a
+ * total. */
+export function money(v: unknown): number {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (typeof v === "string") {
+    const n = Number(v.replace(/[\s,৳]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (v === null || v === undefined) return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Outstanding amount on a fee row: what was billed minus what was paid. */
+export function feeDue(f: { amount?: unknown; paidAmount?: unknown } | null | undefined): number {
+  if (!f) return 0;
+  return money(f.amount) - money(f.paidAmount);
+}
+
+/** Total of a money field across rows. */
+export function sumMoney<T>(rows: T[], pick: (row: T) => unknown): number {
+  return rows.reduce((a, row) => a + money(pick(row)), 0);
+}
+
 export function initials(name: string | null | undefined): string {
   if (!name) return "?";
   return name

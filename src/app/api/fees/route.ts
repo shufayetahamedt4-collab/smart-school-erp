@@ -4,6 +4,7 @@ import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { postToLedger } from "@/lib/ledger";
 import { writeGuard } from "@/lib/subscription";
+import { money } from "@/lib/utils";
 
 /**
  * All payments for the given fees — now a single school-scoped pull filtered
@@ -124,8 +125,14 @@ export async function GET(req: NextRequest) {
       // Shape-parity with the pre-sweep include selects: classRoom/section
       // carry { name } only, and the installments key is omitted (the old
       // db layer dropped that unknown include).
+      // Money leaves this route as numbers. Rows written before paidAmount was
+      // set (and CSV imports) carry null or no key at all; a consumer that sums
+      // them turns the total into NaN and prints ৳0 — on the fees page that read
+      // "৳0 collected" for a school with ৳91,200 in. Normalize once, here.
       const out: any = {
         ...f,
+        amount: money(f.amount),
+        paidAmount: money(f.paidAmount),
         student: s
           ? {
               id: s.id,
@@ -180,6 +187,10 @@ export async function POST(req: NextRequest) {
       branchId: owner?.branchId || null,
       title: String(title),
       amount: Number(amount),
+      // Explicit 0, never absent: a brand-new fee is by definition unpaid, and a
+      // missing key is what made totals across the app read ৳0.
+      paidAmount: 0,
+      status: "UNPAID",
       feeType: feeType || "OTHER",
       dueDate: dueDate ? new Date(dueDate) : null,
       note: body?.note || null,

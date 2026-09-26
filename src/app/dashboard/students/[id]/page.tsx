@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, QrCode, IdCard, FileText, FileSpreadsheet, Pencil, Trash2, Save, X, KeyRound } from "lucide-react";
 import { api } from "@/lib/client";
 import { Card, CardHeader, Badge, Field, TextInput, Select, PageHeader, LoadingScreen, ErrorNote, Modal, statusTone, prettyStatus } from "@/components/ui";
-import { initials, fmtMoney, fmtDate } from "@/lib/utils";
+import { initials, fmtMoney, fmtDate, feeDue } from "@/lib/utils";
 
 export default function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -26,7 +26,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   const attendance = s.attendance || [];
   const presentCount = attendance.filter((a: any) => a.status === "PRESENT" || a.status === "LATE").length;
   const attRate = attendance.length ? Math.round((presentCount / attendance.length) * 100) : 0;
-  const debt = s.fees.reduce((a: number, f: any) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
+  const debt = s.fees.reduce((a: number, f: any) => a + feeDue(f), 0);
 
   const saveEdit = async () => {
     setError("");

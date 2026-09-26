@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { money } from "@/lib/utils";
 
 /**
  * PRD §7.2 — Student self-service data (limited permissions).
@@ -58,7 +59,7 @@ export async function GET(_req: NextRequest) {
   ]);
 
   const present = attendance.filter((a) => a.status === "PRESENT" || a.status === "LATE").length;
-  const due = fees.reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
+  const due = fees.reduce((a, f) => a + (money(f.amount) - money(f.paidAmount)), 0);
 
   return NextResponse.json({
     data: {

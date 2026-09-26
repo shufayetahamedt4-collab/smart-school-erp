@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Scale, TrendingUp } from "lucide-react";
 import { api, qs } from "@/lib/client";
 import { Card, CardHeader, Badge, Select, PageHeader, LoadingScreen, EmptyState, statusTone, prettyStatus } from "@/components/ui";
-import { fmtMoney, fmtDate } from "@/lib/utils";
+import { fmtMoney, fmtDate, money } from "@/lib/utils";
 
 /** PRD §10.1/§10.5 — Central Ledger view: school-wise, method breakdown. */
 export default function LedgerPage() {
@@ -19,14 +19,15 @@ export default function LedgerPage() {
   if (loading) return <LoadingScreen />;
 
   const confirmed = entries.filter((e) => e.status === "CONFIRMED");
-  const inflow = confirmed.filter((e) => ["PAYMENT"].includes(e.kind)).reduce((a, e) => a + Number(e.amount), 0);
-  const discounts = confirmed.filter((e) => e.kind === "DISCOUNT").reduce((a, e) => a + Number(e.amount), 0);
-  const lateFees = confirmed.filter((e) => e.kind === "LATE_FEE").reduce((a, e) => a + Number(e.amount), 0);
+  // money() everywhere: one entry without an amount must not zero the column.
+  const inflow = confirmed.filter((e) => ["PAYMENT"].includes(e.kind)).reduce((a, e) => a + money(e.amount), 0);
+  const discounts = confirmed.filter((e) => e.kind === "DISCOUNT").reduce((a, e) => a + money(e.amount), 0);
+  const lateFees = confirmed.filter((e) => e.kind === "LATE_FEE").reduce((a, e) => a + money(e.amount), 0);
   const byMethod = confirmed
     .filter((e) => e.kind === "PAYMENT")
     .reduce<Record<string, number>>((acc, e) => {
       const m = e.method || "OTHER";
-      acc[m] = (acc[m] || 0) + Number(e.amount);
+      acc[m] = (acc[m] || 0) + money(e.amount);
       return acc;
     }, {});
 

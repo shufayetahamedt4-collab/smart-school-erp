@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Wallet, Plus, Search, Save, Receipt } from "lucide-react";
 import { api, qs } from "@/lib/client";
 import { Card, Badge, Field, TextInput, Select, Modal, PageHeader, LoadingScreen, ErrorNote, statusTone, prettyStatus } from "@/components/ui";
-import { fmtMoney, fmtDate } from "@/lib/utils";
+import { fmtMoney, fmtDate, money, feeDue, sumMoney } from "@/lib/utils";
 
 interface FeeRow {
   id: string; title: string; feeType: string; amount: string; paidAmount: string; status: string; dueDate: string | null;
@@ -54,8 +54,10 @@ export default function FeesPage() {
 
   if (loading) return <LoadingScreen />;
 
-  const dueTotal = fees.reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
-  const collected = fees.reduce((a, f) => a + Number(f.paidAmount), 0);
+  // Sums go through money()/feeDue(): a legacy row with a missing paidAmount is
+  // 0, not NaN. One NaN here used to zero the whole header.
+  const dueTotal = sumMoney(fees, (f) => feeDue(f));
+  const collected = sumMoney(fees, (f) => f.paidAmount);
   const paying = fees.find((f) => f.id === payOpen);
 
   return (
@@ -120,7 +122,7 @@ export default function FeesPage() {
             </thead>
             <tbody>
               {fees.map((f) => {
-                const due = Number(f.amount) - Number(f.paidAmount);
+                const due = feeDue(f);
                 return (
                   <tr key={f.id} className="tr-hover">
                     <td className="td">

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, guardianChildId } from "@/lib/auth";
 import { isBranchScoped } from "@/lib/permissions";
 import { statsCacheGet, statsCachePut } from "@/lib/stats-cache";
+import { money } from "@/lib/utils";
 
 /**
  * PRD §14.2 — dashboard stats for every role.
@@ -72,9 +73,11 @@ export async function GET(req: NextRequest) {
       marksCount = markRows.filter((m) => studentIds.has(m.studentId) && branchExamIds.has(m.examId)).length;
     }
 
-    const totalFees = fees.reduce((a, f) => a + Number(f.amount), 0);
-    const paidFees = fees.reduce((a, f) => a + Number(f.paidAmount), 0);
-    const dueFees = fees.filter((f) => f.status !== "PAID").reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
+    // money(), not Number(): a legacy fee row with a missing paidAmount used to
+    // turn these totals into NaN, which the UI prints as ৳0.
+    const totalFees = fees.reduce((a, f) => a + money(f.amount), 0);
+    const paidFees = fees.reduce((a, f) => a + money(f.paidAmount), 0);
+    const dueFees = fees.filter((f) => f.status !== "PAID").reduce((a, f) => a + (money(f.amount) - money(f.paidAmount)), 0);
 
     // attendance trend (last 7 days including today) — grouped in memory
     const attendanceByDate = new Map<string, { status: string }[]>();
@@ -236,7 +239,7 @@ export async function GET(req: NextRequest) {
         ).length;
 
     const present = attendance.filter((a) => a.status === "PRESENT" || a.status === "LATE").length;
-    const dueFees = fees2.reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
+    const dueFees = fees2.reduce((a, f) => a + (money(f.amount) - money(f.paidAmount)), 0);
 
     // 6-month attendance trend — grouped in memory
     const byMonth = new Map<string, { present: number; total: number }>();

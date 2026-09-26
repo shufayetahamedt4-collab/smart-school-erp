@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import type { PaymentMethod } from "./db";
 import { notifyUsers } from "./notify";
+import { money } from "./utils";
 
 /**
  * PRD §10.1 — Central Ledger System.
@@ -91,9 +92,14 @@ export async function confirmPayment(input: ConfirmPaymentInput) {
   const fee = await prisma.fee.findUnique({ where: { id: input.feeId } });
   if (!fee || fee.schoolId !== input.schoolId) throw new Error("Fee not found");
 
-  const amount = Math.max(0, Number(input.amount));
-  const newPaid = Math.min(Number(fee.amount), Number(fee.paidAmount) + amount);
-  const status = newPaid >= Number(fee.amount) ? "PAID" : "PARTIAL";
+  const amount = Math.max(0, Number(input.amount) || 0);
+  // money() on BOTH sides: a fee row without paidAmount made `Number(undefined)`
+  // NaN, and Firestore happily stored that NaN back as `paidAmount` — the rows
+  // that then read ৳0 everywhere. Clamp to the billed amount so a double-click
+  // can never overpay a fee either.
+  const billed = money(fee.amount);
+  const newPaid = Math.min(billed, money(fee.paidAmount) + amount);
+  const status = newPaid >= billed ? "PAID" : "PARTIAL";
   const receiptNo = `RCP-${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 90 + 10)}`;
 
   await prisma.$transaction(async (tx) => {
@@ -167,7 +173,9 @@ export async function applyLateFees(schoolId: string, lateFeeAmount: number): Pr
       select: { id: true },
     });
     if (existing) continue; // once per fee
-    await prisma.fee.update({ where: { id: fee.id }, data: { amount: Number(fee.amount) + lateFeeAmount } });
+    // money(), not Number(): a late fee on a row with a missing amount would
+    // otherwise write NaN into the fee — the same corruption that zeroed totals.
+    await prisma.fee.update({ where: { id: fee.id }, data: { amount: money(fee.amount) + lateFeeAmount } });
     await postToLedger({
       schoolId,
       kind: "LATE_FEE",

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Wallet, CreditCard, BadgeCheck, Receipt } from "lucide-react";
 import { api } from "@/lib/client";
 import { Card, CardHeader, Badge, Field, TextInput, Select, Modal, PageHeader, LoadingScreen, EmptyState, ErrorNote, statusTone, prettyStatus } from "@/components/ui";
-import { fmtMoney, fmtDate } from "@/lib/utils";
+import { fmtMoney, fmtDate, feeDue, sumMoney } from "@/lib/utils";
 
 /**
  * PRD §2.1 (Guardian: Fee/Payment = View + Pay) + §7.1 Payment History & Live Due.
@@ -39,7 +39,7 @@ export default function ParentFeesPage() {
   useEffect(() => { load(); }, []);
 
   const startPay = (fee: FeeRow) => {
-    const due = Number(fee.amount) - Number(fee.paidAmount);
+    const due = feeDue(fee);
     setPayFor(fee);
     setAmount(String(due));
     setError("");
@@ -73,7 +73,7 @@ export default function ParentFeesPage() {
 
   if (loading) return <LoadingScreen />;
 
-  const due = fees.reduce((a, f) => a + (Number(f.amount) - Number(f.paidAmount)), 0);
+  const due = sumMoney(fees, (f) => feeDue(f));
 
   return (
     <div>
@@ -82,7 +82,7 @@ export default function ParentFeesPage() {
       <div className="mb-4 grid grid-cols-2 gap-4">
         <Card className="p-5">
           <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Total billed</div>
-          <div className="mt-1 text-2xl font-black text-slate-900">{fmtMoney(fees.reduce((a, f) => a + Number(f.amount), 0))}</div>
+          <div className="mt-1 text-2xl font-black text-slate-900">{fmtMoney(sumMoney(fees, (f) => f.amount))}</div>
         </Card>
         <Card className="p-5">
           <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Outstanding due</div>
@@ -107,7 +107,7 @@ export default function ParentFeesPage() {
               </thead>
               <tbody>
                 {fees.map((f) => {
-                  const due = Number(f.amount) - Number(f.paidAmount);
+                  const due = feeDue(f);
                   return (
                     <tr key={f.id} className="tr-hover">
                       <td className="td">
@@ -162,7 +162,7 @@ export default function ParentFeesPage() {
             <div className="rounded-xl bg-slate-50 p-4 text-sm">
               <div className="font-bold text-slate-800">{payFor.title}</div>
               <div className="text-xs text-slate-500">
-                {fmtMoney(payFor.amount)} total · {fmtMoney(payFor.paidAmount)} paid · {fmtMoney(Number(payFor.amount) - Number(payFor.paidAmount))} due
+                {fmtMoney(payFor.amount)} total · {fmtMoney(payFor.paidAmount)} paid · {fmtMoney(feeDue(payFor))} due
               </div>
             </div>
             <Field label="Amount (৳)">
