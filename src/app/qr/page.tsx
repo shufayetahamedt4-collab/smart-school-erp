@@ -3,7 +3,7 @@ import { QrCode, GraduationCap, ShieldCheck, ChevronRight } from "lucide-react";
 
 export default function QrIndexPage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-white px-4">
       <div className="w-full max-w-md fade-up rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-xl shadow-slate-900/5">
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-600/30">
           <QrCode size={28} />

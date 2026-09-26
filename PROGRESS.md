@@ -9,6 +9,45 @@
 
 ---
 
+## 🔁 Session — 2026-09-26 (dark mode removed: "the grey background is back")
+
+**Input:** "The grey background is back again, remove it permanently, it dims the texts."
+
+### Root cause (not the same bug as last time)
+
+The page background was not slate-50 again — it was **dark mode switching itself on**.
+`ThemeToggle` read `prefers-color-scheme` on mount and persisted the result, so any visitor whose
+OS/browser was in dark mode got `html[data-theme="dark"]` → `body { background: #0b1220 }`.
+The dark palette only ever repainted `body` plus `.card`/`.input`/`.btn`/`.th`/`.td`, while every
+screen is written in light-only Tailwind utilities. The result on the live teacher dashboard:
+near-black page with dark-on-dark headings ("My classes", stat values) — literally dimmed text.
+
+### What changed
+
+- **Dark mode is gone**, on purpose. Deleted `src/components/ThemeToggle.tsx` and its only use
+  (the Shell header), removed every `html[data-theme="dark"]` rule from `globals.css`, and left a
+  comment there explaining why it must not be reintroduced by flipping a few tokens back.
+- `:root { color-scheme: light }` is now documented as deliberate: it also stops dark scrollbars
+  and dark form controls for dark-OS visitors.
+- Last page-level grey backgrounds removed: `/qr`, `/qr/<token>` and `/welcome` are `bg-white`
+  now (the print pages keep their slate backdrop — that is a print surface, not an app screen).
+
+### Verified
+
+- With the browser emulating a **dark OS**: `data-theme` is absent, `body` is `rgb(255,255,255)`,
+  `color-scheme: light`, and no dark-mode toggle remains.
+- `tsc --noEmit` clean; `SMOKE_PORT=3123 node scripts/smoke-all.mjs` ALL GREEN.
+- Live App Hosting rollout of the same commit re-verified (`/api/health` + all four logins + smoke).
+
+### Known, left alone deliberately
+
+- Secondary metadata is `text-slate-400` in places (~2.6:1 on white at 12px). Below AA, but it is
+  a deliberate de-emphasis style, not the background bug — sweep it separately if it is wanted.
+- Dark mode is a PRD §14.2 feature. Removing it is a product decision, reversible in git, and cheap
+  to bring back properly (Tailwind `dark:` variants over every screen) if anyone asks for it again.
+
+---
+
 ## 🔁 Session — 2026-09-26 (live: Firebase App Hosting)
 
 **Input:** get the project live and verify it truly works, not just that a deploy said "done".

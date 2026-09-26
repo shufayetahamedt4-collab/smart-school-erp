@@ -47,7 +47,6 @@ import { sectorForRole } from "@/lib/sectors";
 import { dataForRoute, warmListForSector } from "@/lib/route-data";
 import { PageSkeleton } from "./PageSkeleton";
 import { NotificationBell } from "./NotificationBell";
-import { ThemeToggle } from "./ThemeToggle";
 
 export interface Me {
   user: {
@@ -584,7 +583,6 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
 
           {user && (
             <div className="flex items-center gap-2">
-              <ThemeToggle />
               <NotificationBell />
               <AccountMenu me={me} role={effRole} onSignOut={logout} />
             </div>

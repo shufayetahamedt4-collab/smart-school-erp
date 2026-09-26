@@ -57,7 +57,7 @@ export default function QrVerifyPage({ params }: { params: Promise<{ token: stri
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="flex min-h-screen items-center justify-center bg-white">
         <Spinner className="h-8 w-8" />
       </div>
     );
@@ -65,7 +65,7 @@ export default function QrVerifyPage({ params }: { params: Promise<{ token: stri
 
   if (error || !student) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+      <div className="flex min-h-screen items-center justify-center bg-white px-4">
         <div className="w-full max-w-sm rounded-2xl border border-rose-200 bg-white p-8 text-center shadow-lg">
           <AlertCircle className="mx-auto text-rose-500" size={32} />
           <h1 className="mt-4 text-lg font-black text-slate-900">Invalid QR code</h1>
@@ -77,7 +77,7 @@ export default function QrVerifyPage({ params }: { params: Promise<{ token: stri
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
+    <div className="flex min-h-screen items-center justify-center bg-white px-4 py-10">
       <div className="w-full max-w-md fade-up">
         <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-900/5">
           {/* student header */}

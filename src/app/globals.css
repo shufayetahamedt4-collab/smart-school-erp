@@ -5,6 +5,8 @@
 }
 
 :root {
+  /* Pinned to light: also stops the browser painting dark scrollbars and dark
+     form controls for visitors whose OS is in dark mode. */
   color-scheme: light;
 
   /* ---- PRD §14.2 design tokens: role accent colors ---- */
@@ -21,49 +23,20 @@
   --brand: 79 70 229;
 }
 
-/* Dark mode (PRD §14.2) — toggled by ThemeToggle via html[data-theme] */
-html[data-theme="dark"] {
-  color-scheme: dark;
-  --accent-soft: 30 41 59;
-}
-html[data-theme="dark"] body {
-  background-color: #0b1220;
-  color: #e2e8f0;
-}
-html[data-theme="dark"] .card {
-  background: #101a2e;
-  border-color: #1e293b;
-}
-html[data-theme="dark"] .input {
-  background: #0d1626;
-  border-color: #334155;
-  color: #e2e8f0;
-}
-html[data-theme="dark"] .btn-secondary {
-  background: #101a2e;
-  color: #e2e8f0;
-  border-color: #334155;
-}
-html[data-theme="dark"] .btn-secondary:hover:not(:disabled) {
-  background: #16213a;
-}
-html[data-theme="dark"] .btn-ghost {
-  color: #94a3b8;
-}
-html[data-theme="dark"] .btn-ghost:hover:not(:disabled) {
-  background: #1e293b;
-}
-html[data-theme="dark"] .th,
-html[data-theme="dark"] .label {
-  color: #94a3b8;
-}
-html[data-theme="dark"] .td {
-  color: #cbd5e1;
-  border-bottom-color: #1e293b;
-}
-html[data-theme="dark"] .tr-hover:hover {
-  background: #16213a;
-}
+/* PRD §14.2 dark mode is deliberately GONE.
+   It was a half-implemented palette: the tokens below repainted the page and the
+   few `.card`/`.input`/`.btn` classes, but every screen is written in light-only
+   Tailwind utilities, so a dark body left slate-400/500 labels (and half the
+   cards) sitting on a near-black page — exactly the "grey background that dims
+   the text" a demo user reports. It also switched itself on silently whenever
+   the visitor's OS preferred dark, because `ThemeToggle` read
+   `prefers-color-scheme` before the user ever asked for anything.
+
+   So the product is light-only, on purpose: `body` is white, `color-scheme` is
+   pinned to light, nothing sets `data-theme`, and the toggle is gone. If dark
+   mode is ever wanted, it needs a real dark pass over every screen (or Tailwind
+   `dark:` variants) — not a token override that repaints a light UI's canvas.
+   Do not re-introduce it by flipping a few variables back. */
 
 html,
 body {
@@ -239,10 +212,6 @@ body {
   background-size: 400% 100%;
   animation: shimmer 1.2s ease-in-out infinite;
 }
-html[data-theme="dark"] .skeleton {
-  background: linear-gradient(90deg, rgb(30 41 59 / 0.6) 25%, rgb(51 65 85 / 0.9) 37%, rgb(30 41 59 / 0.6) 63%);
-  background-size: 400% 100%;
-}
 .skeleton-text {
   height: 0.75rem;
   margin-bottom: 0.5rem;
@@ -260,9 +229,6 @@ html[data-theme="dark"] .skeleton {
 }
 .accent-soft-bg {
   background: rgb(var(--accent) / 0.08);
-}
-html[data-theme="dark"] .accent-soft-bg {
-  background: rgb(var(--accent) / 0.18);
 }
 
 /* white-label brand helpers (PRD §12.2) */
