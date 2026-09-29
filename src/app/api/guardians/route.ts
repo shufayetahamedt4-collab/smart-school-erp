@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, publicUser } from "@/lib/auth";
 import { isBranchScoped } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
 
@@ -28,9 +28,12 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
   // Branch scoping (PRD §12.3): branch admins only see guardians of their branch's students.
-  const data = isBranchScoped(session)
+  const scoped = isBranchScoped(session)
     ? guardians.filter((g: any) => (g.studentOf || []).some((s: any) => s.branchId === session.branchId))
     : guardians;
+  // The Firestore shim returns whole documents, so the hash has to be taken off
+  // explicitly — without this the browser receives every guardian's bcrypt hash.
+  const data = scoped.map(publicUser);
   return NextResponse.json({ data });
 }
 
@@ -73,5 +76,6 @@ export async function POST(req: NextRequest) {
     return u;
   });
   await audit("GUARDIAN_CREATE", "user", user.id, { email });
-  return NextResponse.json({ data: user }, { status: 201 });
+  const safeUser = publicUser(user);
+  return NextResponse.json({ data: safeUser }, { status: 201 });
 }

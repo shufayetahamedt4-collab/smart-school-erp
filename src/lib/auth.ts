@@ -56,6 +56,28 @@ export function guardRole(session: SessionUser | null, ...roles: Role[]): sessio
   return !!session && roles.includes(session.role);
 }
 
+/** Account fields that must never leave the API in a response body. */
+const USER_SECRET_FIELDS = ["passwordHash", "twoFactorSecret", "totpSecret", "backupCodes", "backupHashes"];
+
+/**
+ * What may leave the API about a user account — the one definition.
+ *
+ * The Firestore shim returns whole documents (it ignores `select`), so any route
+ * that puts a user document straight into a response ships that account's bcrypt
+ * hash to the browser, and the demo shares one password, so a leaked hash is a
+ * leaked account. Routes that return a user must send it through here rather
+ * than spreading the field off by hand at each call site.
+ *
+ * Only /api/settings is exempt in spirit: it stores a platform-wide
+ * `default_guardian_password` setting, which is configuration, not an account
+ * field, and is readable by the super admin alone.
+ */
+export function publicUser<T extends Record<string, any>>(user: T): T {
+  const safe: Record<string, any> = { ...(user as any) };
+  for (const field of USER_SECRET_FIELDS) delete safe[field];
+  return safe as T;
+}
+
 /** Fields every self-service route needs about the child it is scoped to. */
 export interface ActingStudent {
   id: string;

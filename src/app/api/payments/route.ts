@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, audit, guardianChildId, guardianChildIds } from "@/lib/auth";
+import { getSession, audit, guardianChildIds } from "@/lib/auth";
 import { can, PermissionError } from "@/lib/permissions";
 import { createPaymentIntent, markFailed, markConfirmed } from "@/lib/payments";
 import type { PaymentMethod } from "@/lib/db";
@@ -25,9 +25,12 @@ export async function GET(req: NextRequest) {
   const where: any = { schoolId };
   if (status) where.status = status;
   if (session.role === "GUARDIAN") {
-    const studentId = await guardianChildId(session);
-    if (!studentId) return NextResponse.json({ data: [] });
-    where.studentId = studentId;
+    // Every child of the household (§5.4): a guardian's own payment history must
+    // not hide the payments they made for their second child — the same family
+    // definition /api/fees and the POST below already use.
+    const childIds = await guardianChildIds(session);
+    if (!childIds.length) return NextResponse.json({ data: [] });
+    where.studentId = { in: childIds };
   }
 
   const intents = await prisma.paymentIntent.findMany({
@@ -70,8 +73,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // A guardian may part-pay (৳200 against a ৳500 fee) but never over-pay: this
+  // used to be a silent `Math.min(amount, remaining)`, which quietly charged a
+  // different figure from the one on the screen. Say no instead.
   const remaining = money(fee.amount) - money(fee.paidAmount);
   if (remaining <= 0) return NextResponse.json({ error: "This fee is already fully paid." }, { status: 400 });
+  if (amount > remaining) {
+    return NextResponse.json({ error: `That is more than the ${remaining} still due on this fee.` }, { status: 400 });
+  }
 
   try {
     const intent = await createPaymentIntent(
@@ -79,7 +88,7 @@ export async function POST(req: NextRequest) {
         schoolId: fee.schoolId,
         studentId: fee.studentId,
         feeId: fee.id,
-        amount: Math.min(amount, remaining),
+        amount,
         method: method as PaymentMethod,
       },
       session.id

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, guardianChildId } from "@/lib/auth";
+import { getSession, guardianChildren } from "@/lib/auth";
 import { isBranchScoped } from "@/lib/permissions";
 import { statsCacheGet, statsCachePut } from "@/lib/stats-cache";
 import { money } from "@/lib/utils";
@@ -193,11 +193,21 @@ export async function GET(req: NextRequest) {
     // The one child this dashboard speaks for — resolved through lib/auth so a
     // two-child family always lands on the same child as every other screen
     // (a bare findFirst answered with whichever document came back first).
-    const sid0 = session.studentId || (await guardianChildId(session)) || undefined;
+    // The acting child (attendance, homework, remarks) is the stable first child
+    // of the family, resolved through lib/auth so a two-child household always
+    // lands on the same child as every other screen (a bare findFirst answered
+    // with whichever document came back first). `childIds` is the WHOLE family:
+    // the dues card below and the Fees page must be the same money, so both
+    // count every child of the household (§5.4) — a second child's dues used to
+    // be invisible here and on the Fees page while /api/payments would still
+    // accept the money for that same child.
+    const family = await guardianChildren(session);
+    const childIds = family.map((c) => c.id);
+    const sid0 = session.studentId || childIds[0] || undefined;
     const [student, attendance0, fees, remarks, marks0, examRows, subjectRows, schoolHomeworks] = await Promise.all([
       sid0 ? prisma.student.findUnique({ where: { id: sid0 } }) : prisma.student.findFirst({ where: { guardianUserId: session.id } }),
       sid0 ? prisma.attendance.findMany({ where: { studentId: sid0 }, select: { status: true, date: true } }) : Promise.resolve([] as any[]),
-      sid0 ? prisma.fee.findMany({ where: { studentId: sid0 }, select: { amount: true, paidAmount: true, status: true } }) : Promise.resolve([] as any[]),
+      childIds.length ? prisma.fee.findMany({ where: { studentId: { in: childIds } }, select: { amount: true, paidAmount: true, status: true } }) : Promise.resolve([] as any[]),
       sid0 ? prisma.dailyRemark.count({ where: { studentId: sid0 } }) : Promise.resolve(0),
       sid0 ? prisma.examMark.findMany({ where: { studentId: sid0 } }) : Promise.resolve([] as any[]),
       prisma.exam.findMany({ where: { schoolId }, select: { id: true, name: true, published: true } }),

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, publicUser } from "@/lib/auth";
 import { can, MANAGEMENT_ROLES, STAFF_ROLES, isBranchScoped } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
 import type { Role } from "@/lib/db";
@@ -37,7 +37,10 @@ export async function GET(req: NextRequest) {
     include: { branch: { select: { id: true, name: true, code: true } } },
     orderBy: { name: "asc" },
   });
-  return NextResponse.json({ data: staff });
+  // Strip the bcrypt hash: the shim hands back whole documents, so without this
+  // an admin's browser (and anything reading its responses) gets every staff
+  // password hash.
+  return NextResponse.json({ data: staff.map(publicUser) });
 }
 
 async function resolveTargetUser(session: any, id: string, schoolId: string) {
@@ -125,7 +128,8 @@ export async function POST(req: NextRequest) {
     },
   });
   await audit("STAFF_CREATE", "user", user.id, { name, email, role, scope, branchId });
-  return NextResponse.json({ data: user }, { status: 201 });
+  const safeUser = publicUser(user);
+  return NextResponse.json({ data: safeUser }, { status: 201 });
 }
 export async function PATCH(req: NextRequest) {
   const session = await getSession();
@@ -199,7 +203,8 @@ export async function PATCH(req: NextRequest) {
 
   const updated = await prisma.user.update({ where: { id }, data });
   await audit("STAFF_UPDATE", "user", id, { schoolId, data: Object.keys(data) });
-  return NextResponse.json({ data: updated });
+  const safeUpdated = publicUser(updated);
+  return NextResponse.json({ data: safeUpdated });
 }
 
 export async function DELETE(req: NextRequest) {

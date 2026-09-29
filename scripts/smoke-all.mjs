@@ -44,7 +44,8 @@ const PAGES = {
   "super-admin": ["/admin", "/admin/schools", "/admin/billing", "/admin/settings"],
   "school-admin": [
     "/dashboard", "/dashboard/admissions", "/dashboard/admissions/new", "/dashboard/branches", "/dashboard/classes",
-    "/dashboard/complaints", "/dashboard/exams", "/dashboard/fees", "/dashboard/gallery",
+    "/dashboard/complaints", "/dashboard/exams", "/dashboard/fees", "/dashboard/fees/structure",
+    "/dashboard/fees/payments", "/dashboard/gallery",
     "/dashboard/grades",
     "/dashboard/guardian-app", "/dashboard/guardians", "/dashboard/id-cards", "/dashboard/leaves",
     "/dashboard/ledger", "/dashboard/library", "/dashboard/meetings", "/dashboard/messages",
@@ -69,7 +70,7 @@ const PAGES = {
 const APIS = {
   "super-admin": ["/api/schools", "/api/stats", "/api/settings"],
   "school-admin": ["/api/students", "/api/teachers", "/api/classes", "/api/sections", "/api/subjects",
-    "/api/fees", "/api/exams", "/api/homework", "/api/attendance", "/api/notices",
+    "/api/fees", "/api/fee-categories", "/api/fees/settings", "/api/exams", "/api/homework", "/api/attendance", "/api/notices",
     "/api/meetings", "/api/guardians", "/api/messages", "/api/chat", "/api/stats", "/api/settings"],
   teacher: ["/api/students", "/api/classes", "/api/sections", "/api/subjects", "/api/fees",
     "/api/exams", "/api/homework", "/api/attendance", "/api/notices", "/api/meetings",
@@ -137,7 +138,16 @@ if (su) { ROLES[0].id = su; ROLES[0].pw = sp; }
 console.log("=== hub ===");
 for (const p of HUB_PAGES) {
   const r = await get(`localhost:${PORT}`, p, "");
-  if (r.status !== 200) bad("hub", p, `HTTP ${r.status}${r.location ? " → " + r.location : ""}`);
+  // /qr (a child's ID-card code) and /s/<slug> (a school's printed invite link)
+  // are the credential-free entries into the Parents App. On a host that HAS a
+  // guardian address — localhost in development, or APP_DOMAIN on a deployment —
+  // the middleware deliberately hands them to that address, so a 307 to
+  // parents.<host> is the CORRECT answer there; a single-address deployment with
+  // no subdomains serves them directly (200). Both are a pass.
+  const guardianHandoff =
+    ["/qr", "/s/sunrise"].includes(p) && [307, 308].includes(r.status) && /\/\/parents\./.test(r.location);
+  if (r.status !== 200 && !guardianHandoff) bad("hub", p, `HTTP ${r.status}${r.location ? " → " + r.location : ""}`);
+  else if (guardianHandoff) console.log(`  ✅ ${p} (handed to the Parents App → ${r.location})`);
   else if (!["/qr", "/s/sunrise"].includes(p) && ERROR_MARKERS.some((m) => r.body.includes(m))) bad("hub", p, "error marker in HTML");
   else console.log(`  ✅ ${p}`);
 }

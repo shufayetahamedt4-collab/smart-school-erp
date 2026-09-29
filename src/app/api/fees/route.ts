@@ -1,31 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, schoolReference } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, guardianChildren } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { postToLedger } from "@/lib/ledger";
 import { writeGuard } from "@/lib/subscription";
 import { money } from "@/lib/utils";
-
-/**
- * All payments for the given fees — now a single school-scoped pull filtered
- * in memory by the caller (kept as a named helper for readability).
- */
-async function paymentRowsFor(fees: any[]): Promise<any[]> {
-  if (!fees.length) return [];
-  const schoolId = fees[0].schoolId;
-  const rows = await prisma.payment.findMany({ where: { schoolId } });
-  const feeIds = new Set(fees.map((f) => f.id));
-  return rows.filter((p: any) => feeIds.has(p.feeId));
-}
-
-/** All installments for the given fees — one school-scoped pull (see above). */
-async function installmentRowsFor(fees: any[]): Promise<any[]> {
-  if (!fees.length) return [];
-  const schoolId = fees[0].schoolId;
-  const rows = await prisma.installment.findMany({ where: { schoolId } });
-  const feeIds = new Set(fees.map((f) => f.id));
-  return rows.filter((i: any) => feeIds.has(i.feeId));
-}
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -44,16 +23,32 @@ export async function GET(req: NextRequest) {
   if (session.scope === "BRANCH" && session.branchId) {
     where.branchId = session.branchId;
   }
+  /**
+   * Self-service scoping. A guardian speaks for EVERY child of the household
+   * (§5.4 sibling/family link), not just one: resolving a single child here is
+   * what hid a second child's dues from the Fees page while /api/payments would
+   * happily accept the money for that same child. `guardianChildren` is the one
+   * definition of "this family's children" used everywhere else (auth/me,
+   * payments, leave-requests, the print pages), so the Fees screen can no longer
+   * disagree with the rest of the portal about which children exist.
+   * `?studentId=` narrows the list to one child — but only when that child is
+   * really this session's (a guessed id can neither widen nor redirect it), and
+   * a QR session (session.studentId) is inherently one child.
+   */
+  let allowedStudentIds: Set<string> | null = null;
   if (session.role === "GUARDIAN" || session.role === "STUDENT") {
     const students = await schoolReference("student", schoolId);
-    const student =
-      session.role === "GUARDIAN"
-        ? session.studentId
-          ? students.find((s: any) => s.id === session.studentId)
-          : students.find((s: any) => s.guardianUserId === session.id)
-        : students.find((s: any) => s.userId === session.id);
-    if (!student) return NextResponse.json({ data: { fees: [], settings: null } });
-    where.studentId = student.id;
+    if (session.role === "GUARDIAN") {
+      const family = await guardianChildren(session);
+      const requested = sp.get("studentId");
+      const visible = requested ? family.filter((c) => c.id === requested) : family;
+      allowedStudentIds = new Set(visible.map((c) => c.id));
+    } else {
+      const student = students.find((s: any) => s.userId === session.id);
+      if (!student) return NextResponse.json({ data: { fees: [], settings: null } });
+      allowedStudentIds = new Set([student.id]);
+    }
+    if (!allowedStudentIds.size) return NextResponse.json({ data: { fees: [], settings: null } });
   } else {
     if (sp.get("status")) where.status = sp.get("status");
     if (sp.get("studentId")) where.studentId = sp.get("studentId");
@@ -93,6 +88,8 @@ export async function GET(req: NextRequest) {
   const q = (sp.get("q") || "").toLowerCase();
   const fees = feesRaw.filter((f: any) => {
     if (where.studentId && f.studentId !== where.studentId) return false;
+    // Self-service scoping — the whole family, or the one child asked for.
+    if (allowedStudentIds && !allowedStudentIds.has(f.studentId)) return false;
     if (where.status && f.status !== where.status) return false;
     // Branch scoping (PRD §12.3) — with the same legacy fallback as the
     // drill-down: a fee belongs to the branch if it is tagged to it or its

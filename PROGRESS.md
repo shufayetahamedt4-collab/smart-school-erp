@@ -5,7 +5,404 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** `E:\SmartSchoolERP`
-**Last updated:** 2026-09-26
+**Last updated:** 2026-09-29
+
+---
+
+## 🔁 Session — 2026-09-29 (fees part 7: the whole household's dues — and a sweep that proves no secret leaks)
+
+**Input:** "Go through the whole project. We have works to do," → a plan was approved: close the two
+open fees defects from part 5 (multi-child `/api/fees`, the un-swept `prisma.user.*` call sites),
+verify with the harnesses, commit, no deploy.
+
+### 1. A family with two children only saw one child's fees — fixed at the source
+
+`GET /api/fees` was the **last** self-service route still resolving "the" child with its own inline
+`students.find(s => s.guardianUserId === session.id)` instead of lib/auth's family resolver, so
+`guardian1@demo.com` (Ayan + Ayesha Rahman) was served one child's rows: the other child's dues were
+invisible *and* looked unpayable on `/parent/fees`, while `/api/payments` would have taken the money.
+
+- **`api/fees`** — the GUARDIAN branch now scopes by `guardianChildren(session)`, the one definition of
+  "this family's children" (§5.4). `?studentId=` narrows the list to one child and is honoured **only**
+  when that child really is this session's (a guessed id can neither widen nor redirect the list); a QR
+  session still resolves to its one child. The STUDENT branch is unchanged.
+- **`api/stats`** — the guardian's dues figure is family-wide too, so the dashboard and the Fees page
+  are the same money. Attendance/homework/remarks stay the acting child's.
+- **`parent/fees`** — every row is labelled with its child, a chip per child shows what that child owes
+  (All children · Ayan ৳4,400 · Ayesha ৳1,100), the table gains a Student column when there is more than
+  one child, the two header cards say what they are scoped to, and the pay dialog names the child.
+- **`api/payments`** GET (a guardian's own intent list) is family-wide for the same reason.
+- Two dead helpers at the top of `api/fees` (`paymentRowsFor`, `installmentRowsFor` — the GET body has
+  its own pulls) were removed.
+
+Verified live on `next start -p 3000` as `guardian1@demo.com`: `/api/fees` returns **12 rows over both
+children** (Ayesha 5 fees · ৳8,600 billed · ৳1,100 due + Ayan 7 fees · ৳10,900 · ৳4,400), `/api/stats`
+= `{due: 5500, total: 12}` — the same ৳5,500 the page shows — `?studentId=<Ayesha>` narrows to her 5
+rows, and `?studentId=<another family's child>` returns nothing. In the browser Ayan's ৳4,400 now has
+Pay / Pay-half buttons (the exact "invisible and unpayable" complaint), the chips filter the table, and
+the dialog reads *Exam Fee · Ayan Rahman · ৳800 due · Send to: bKash · 01711-000000*.
+
+### 2. The `passwordHash` sweep is now a harness, not a manual review
+
+`/api/guardians` and `/api/staff` were patched by hand last session; the other `prisma.user.*` call
+sites had never been audited. There are 40 today.
+
+- **`publicUser()`** (`lib/auth.ts`) is now the single definition of what may leave the API about a user
+  account (it strips `passwordHash`, `twoFactorSecret`, `totpSecret`, `backupCodes`/`backupHashes`).
+  `api/staff` (GET/POST/PATCH) and `api/guardians` (GET/POST) use it instead of four hand-written
+  spreads. A blanket strip inside `lib/db.ts conv()` was rejected on purpose: `auth/login` and the 2FA
+  verify path legitimately need `passwordHash`/`twoFactorSecret` out of that same read funnel.
+- **`scripts/verify-user-secrets.mjs`** (new) — signs in as each demo role on its own host, deep-scans
+  every API response for a forbidden key or a bcrypt `$2a$` **value**, requires a guardian to never
+  receive `qrPin`/`qrToken` (staff legitimately may — the student page prints the QR identity), and
+  **write-probes** the create/update responses: it creates a staff account, resets its password,
+  soft-deletes it, then removes the probe document and reads it back. It self-tests its scanner first,
+  because a guard that cannot fail is not a guard.
+
+Result: **ALL GREEN** — super-admin 5/6, school-admin 29/30, teacher 17/19, guardian 19/21 routes
+scanned clean (the rest are param-gated or another role's), including the `api/staff` POST → PATCH →
+DELETE responses and `/api/students/<child>` read as a guardian.
+
+### 3. `smoke-all` was reporting a stale expectation, not a bug
+
+The hub sweep expected 200 on `/qr` and `/s/sunrise`. On a host that *has* a guardian address
+(localhost in development, or a deployment with `APP_DOMAIN`) the middleware deliberately hands both to
+the Parents App — a 307 to `parents.<host>` **is** the correct answer there, and the harness now asserts
+that handoff while keeping 200 as the expectation for a single-address deployment. `ALL GREEN` after.
+
+### 4. Environment — read this before running anything here
+
+This checkout sits on a machine with **no Node.js on PATH**: `npm`, `npx` and `tsc` do not exist. The
+Bun 1.4.2 bundled with the desktop app runs the project fine, so verification here is
+`"$LOCALAPPDATA/Programs/@codebufffreebuff-desktop/resources/bun/bun.exe" node_modules/next/dist/bin/next build`
+(and `node_modules/typescript/bin/tsc --noEmit`), with the `.mjs` harnesses run the same way plus
+`SMOKE_PORT`. `.env` holds the live `amar-e-school` credentials, so a local run and the deployed demo
+share one Firestore — harnesses clean up after themselves by document reference.
+
+### Verified
+- ✅ `tsc --noEmit` 0 errors · ✅ `next build` success (132 pages, under Bun)
+- ✅ `verify-user-secrets.mjs` ALL GREEN — scanner self-test, ~70 routes over four roles, 3 write probes
+- ✅ `verify-fees-totals.mjs` ALL GREEN (guardian now 12 rows · ৳19,500 billed · ৳5,500 due, family-wide)
+- ✅ `verify-guardian-child.mjs` ALL GREEN, new checks included: `/api/fees` spans the family,
+  `?studentId=` narrows/refuses, admin and guardian agree, **dashboard dues === Fees page rows**
+  (13 rows · ৳9,821), roster 16 → 16, fixture removed
+- ✅ `smoke-all.mjs` ALL GREEN · ✅ browser run as the two-child guardian: 0 console errors, all 200s
+
+### Still open
+- The demo tenant has drifted and carries junk fee rows — "maggie — 2026-09", and *Yearly Study Tour
+  2026* billed twice under periods `2026` and `2026-09`. Left alone on purpose; worth a tidy-up session.
+- `/api/stats` is now family-wide for fees while attendance/homework/remarks stay on the acting child.
+  Deliberate (the alternative is two screens disagreeing about money), but a child switcher on the
+  dashboard would be a product decision, not a bug fix.
+- The live Netlify site still serves the pre-session build; deploying is the next step when wanted.
+
+---
+
+## 🚀 Netlify deploy — the whole project is live
+
+**Site:** https://amar-e-school-demo.netlify.app (project `amar-e-school-demo`, id
+`ffc1dfd3-01d5-4cb9-9260-0e98b0e5fe88`, team `shufayetahamed1`).
+
+`netlify.toml` at the repo root is the deploy file for the whole app: `[build] command = "npm run build"`
+with `publish = ".next"`, `NODE_VERSION = "22"`, `NEXT_TELEMETRY_DISABLED = "1"`, an explicit
+`[[plugins]] package = "@netlify/plugin-nextjs"` (the runtime that turns the App Router build into
+Netlify Functions + edge middleware — bare package name only, the CLI rejects `@version` here), and
+CDN `[[headers]]` for `/_next/static/*` (immutable), `/sw.js` and `/manifest.json` (no-cache).
+
+Env vars on the site (all seven already set): `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`,
+`FIREBASE_PRIVATE_KEY`, `FIREBASE_STORAGE_BUCKET`, `JWT_SECRET`, `APP_URL`, `NODE_VERSION`. Netlify
+has no Application Default Credentials, so without these the Admin SDK cannot reach Firestore.
+
+Deployed with `npx netlify deploy --build --prod` (builds locally, uploads `.next`; ~2m30s).
+
+### Verified live
+- `GET /api/health` → `ok:true`, Firestore reachable, every env var present, `appUrl` correct.
+- Login as `principal@sunrise.edu` → 200; `/dashboard`, `/dashboard/fees`,
+  `/dashboard/fees/structure`, `/dashboard/fees/payments` all 200.
+- `GET /api/fee-categories` → `Yearly Study Tour 2026` (YEARLY/OTHER) at ৳1,000 across all 5 classes.
+- Guardian `guardian6@demo.com` → `/parent`, `/parent/fees` 200; `/api/fees` shows 5 rows, billed
+  ৳9,800 / due ৳4,800, including **Yearly Study Tour 2026 — 2026 · ৳1,000 · due 25 Oct 2026 · UNPAID**.
+- `GET /api/stats` → ৳151,700 billed / ৳97,700 paid / ৳54,000 due — identical to local.
+- `SMOKE_ORIGIN=https://amar-e-school-demo.netlify.app node scripts/verify-fees-totals.mjs` → **ALL GREEN**.
+
+Note: `APP_DOMAIN` is unset, so the deployment runs as the host-agnostic hub (all roles sign in on one
+URL and land on their own home). The per-sector subdomains (`school.`/`parents.`/`teacher.`/`admin.`)
+need a real custom domain wired to the site; they are not available on the `*.netlify.app` host.
+
+---
+
+## 🔁 Session — 2026-09-27 (fees, part 6: a school-wide one-off fee, from the catalogue to the guardian's screen)
+
+**Input:** "Create a new fee called Yearly Study Tour 2026. For all classes, 1000 taka, due date
+10-25-2026. Then open the parents sector, I wanna see if both are connected."
+
+Done end to end on the running local server (`npx next start -p 3123`; a build was re-run first, so
+`.next` matches the working tree).
+
+- **Created** category `Yearly Study Tour 2026` (`r_303ded5113a8c75c`, bucket `OTHER`, frequency
+  `YEARLY`, active) with `amounts` = **৳1,000 for all five classes** (Class 1–5).
+- **Billed it once** via `POST /api/fees/generate` with `period: "2026"`, `dueDate: "2026-10-25"`:
+  dry-run `wouldBill: 16 · total ৳16,000`, then wrote **16 fee rows** (one per enrolled student), and
+  a re-run returned `created: 0 · skipped: 16` — idempotency holds. Each row carries `paidAmount: 0`,
+  `status: UNPAID`, `feeType: OTHER`, `categoryId`, `dueDate` and its own `FEE` ledger entry.
+- **Verified the connection in the Parents App** (guardian `guardian6@demo.com` → child Arif Hossain,
+  `parents.localhost:3123/parent/fees`): the dashboard's *Fees due* moved ৳3,800 → **৳4,800 / 5 fee
+  records**, and the Fee records table gained a row **"Yearly Study Tour 2026 — 2026" · ৳1,000 · ৳0
+  paid · due 25 Oct 2026 · Unpaid** with `Pay ৳1,000` and `Pay half (৳500)`. The API agrees (same row,
+  `dueDate` `2026-10-25T00:00:00.000Z`).
+- **Admin side**: `/dashboard/fees/structure` lists the category "Active" with ৳1,000 against each of
+  Class 1–5. `GET /api/fee-categories` matches.
+- **Housekeeping**: the leftover QA accountant is gone (`/api/staff` = the baseline 9 rows, no
+  `passwordHash` on any row); the forward-looking conjunction in the create call was normalised to a
+  plain hyphen in the category note.
+
+This is the first end of the fees chain that started in part 3 — *catalogue → bill → guardian pays* —
+walked with a brand-new fee that nobody hand-wrote into the database.
+
+**Still open (unchanged):** the multi-child `/api/fees` defect from part 5 (a guardian with two
+children sees only one child's dues) — visible again here, since billing covered both Ayan and Ayesha
+Rahman.
+
+---
+
+## 🔁 Session — 2026-09-26 (fees, part 5: opening the Parents App — and two things it exposed)
+
+**Input:** "Open the guardian sector, I wanna see how their payment sector looks now."
+
+Opened the Parents App on `parents.localhost` and verified the part-4 work in the browser: the
+**How to pay** card lists the school's channels (bKash 01711-000000 Merchant, Nagad 01811-111111,
+Dutch-Bangla Bank with A/C + routing, School counter) with the guardian note, and the Pay dialog shows
+`Full ৳1,500 / Half ৳750 / Other amount`, *"Part-payment is allowed — pay what you can now, the rest
+stays due."* and **"Send to: bKash · 01711-000000 · Merchant"**. On a child with dues (Arif Hossain,
+৳3,800 outstanding across three fees) each unpaid row carries `Pay ৳1,500` plus `Pay half (৳750)`.
+The demo channels were re-seeded for this look and are **placeholders** — editable on
+`/dashboard/fees/payments`.
+
+### Two real defects the walkthrough exposed
+
+1. **A family with two children only sees one child's fees.** `guardian1@demo.com` (Kamrul Rahman) has
+   two children — `/api/parent/siblings` returns *Ayan Rahman* and *Ayesha Rahman* — but `/api/fees`
+   resolves the guardian to a **single** student (its own inline `find`, not the shared
+   `guardianChildIds`) and serves only Ayesha's rows. Ayan's ৳2,300 of dues are therefore invisible and
+   unpayable from the Fees page, even though `/api/payments` (which uses `guardianChildIds`) would
+   happily accept a payment for him. `/api/auth/me` and `/api/parent/siblings` then disagree with
+   `/api/fees` about which child the screen is about.
+2. **`/api/guardians` and `/api/staff` shipped every account's bcrypt hash to the browser.** Both read
+   `prisma.user.findMany(...)` with no `select`, and the Firestore shim returns whole documents — so
+   `GET /api/guardians` returned `passwordHash` for 10 guardians and `GET /api/staff` for 9 staff
+   (plus the POST/PATCH responses for the row just created or edited). Since the demo shares one
+   password, a leaked hash is a leaked account. Fixed by stripping the field before the response in
+   both routes (`data.map(({ passwordHash, ...rest }) => rest)` and the same on the create/update
+   returns), which keeps every other key — verified live: hashes gone, `studentOf` and `branch` still
+   present for all rows.
+   *Not yet audited:* the remaining ~30 `prisma.user.*` call sites. Most use an explicit `select`
+   (`/api/teachers`, `/api/auth/me`) or stay server-side, but this is worth a sweep.
+
+### State
+
+`tsc` clean, `npm run build` clean, `verify-fees-totals` and `smoke-all` ALL GREEN after the fix.
+
+---
+
+## 🔁 Session — 2026-09-26 (fees, part 4: where the money goes, and part-payment as a first-class move)
+
+**Input:** "For online payment, School admin can set their Bkash, Nagad, Bank account numbers which
+will be connected to parents… and sometimes some parents give partial fees, it's a BD tradition. In fee
+collection this option should be there — suppose a fee is 500, but parent paid 200, 300 due."
+
+### Part-payment already worked — the numbers were never wrong
+
+`lib/ledger.ts confirmPayment()` already did `newPaid = min(billed, paid + amount)` and set `PARTIAL`
+when `newPaid < billed`, and the guardian's Pay dialog already had an editable amount. It *had* been
+used for real: **৳2,000 collected through the Parents App today** (৳100 + ৳1,400 on a Monthly Fee,
+৳500 on an Admission Fee), leaving the demo at ৳135,700 billed · ৳97,700 paid · ৳38,000 due with the
+fees page and `/api/stats` still agreeing exactly.
+
+What was missing was that nothing about it was *deliberate*: no split button, no "৳X stays due" line,
+and an over-payment was **silently clamped** (`Math.min`), so `confirmPayment` wrote the fee up to the
+billed amount while the payment row and the ledger recorded the larger figure — collected money in the
+ledger that the fee did not account for. `/api/fees/[id]/pay` did not even clamp: it recorded whatever
+was handed to it.
+
+### What was built
+
+- **Payment channels (§10.2)** — `src/lib/fee-channels.ts`: a channel is `{ kind: MOBILE|BANK|CASH,
+  label, methods[], number, accountType, accountName, bankName, branch, routingNumber, instructions,
+  enabled }`. One channel can serve several methods (a bKash merchant account → `BKASH`), and a channel
+  with no method is a valid walk-in counter. `channelDestination()` renders the one line a parent reads.
+  Stored on the existing `feeSetting` doc under `channels` (an array of plain objects — the shim's
+  `clean()` recurses into both), so no new collection.
+- **`/api/fees/settings`** now reads/writes `channels` + `paymentNote` alongside the fee defaults, and a
+  partial write only touches the keys sent. Access widened from `role === "SCHOOL_ADMIN"` to
+  `can(role, "feePayment", "full")` so the sub-school admin and an assigned accountant can maintain
+  them too.
+- **`/dashboard/fees/payments`** — the admin screen: add/edit/remove channels, choose which methods each
+  answers, show/hide, plus a note for guardians. Sidebar entry for SCHOOL_ADMIN, BRANCH_ADMIN, ACCOUNTANT.
+- **Parents App** — a "How to pay" card listing the school's channels (with the note), and the Pay
+  dialog now shows **"Send to: <channel>"** with the destination for the chosen method. The method list
+  is driven by the channels the school published (so no bKash option until a bKash number exists), and
+  falls back to the built-in sandbox list when nothing is configured.
+- **Part-payment made explicit** — parents get `Full ৳500 / Half ৳250 / Other amount` and the line
+  **"Part-payment: ৳200 now, ৳300 stays due on this fee."**; a `Pay half` shortcut sits under each
+  unpaid row. The admin's Collect dialog gained the same buttons, hint and limit.
+- **Over-payment is refused, not silently rewritten** — both `/api/fees/[id]/pay` and `/api/payments`
+  now return `400 "That is more than the ৳N still due on this fee."` instead of clamping.
+
+### Verified end to end
+
+Against `next start -p 3123`, admin on `school.localhost`, guardian on `parents.localhost`:
+four channels configured (bKash merchant, Nagad, Dutch-Bangla Bank, School counter) and visible on the
+admin table and the guardian's "How to pay" card; the Pay dialog rendered
+`Send to: bKash · 01711-000000 · Merchant …` and offered only bKash/Nagad/Bank (the published methods).
+A ৳500 test fee, part-paid **৳200 by the guardian** → fee `PARTIAL`, paid 200, and the row switched to
+**Pay ৳300** — the exact scenario in the request. Over-paying ৳400 against the remaining ৳300 was
+refused with 400 on **both** the guardian path and the admin Collect path, while the counter's own
+৳100 part-collection succeeded (200 bKash + 100 cash = 300 paid, 200 due). All test rows were then
+removed (fee, 2 payments, 2 intents, 3 ledger, 2 audit) and the channels reverted to empty, leaving the
+demo exactly as the user's own data had it. `tsc` clean, `npm run build` clean,
+`verify-fees-totals` and `smoke-all` ALL GREEN — the new page and `/api/fees/settings` are in the sweep.
+
+### Worth remembering
+
+- **A blank channel list is a legitimate state**, not an error: the Pay dialog falls back to the
+  sandbox method list and tells the parent to pay at the office. Don't make the method list depend on
+  configuration existing.
+- `/api/fees` returns `settings` (including `channels`) to every role that can read fees, which is how
+  the Parents App gets them — deliberately, since these are the school's published payment details.
+
+---
+
+## 🔁 Session — 2026-09-26 (fees, part 3: the school defines its own fee heads, class by class)
+
+**Input:** "Who is controlling these fees? There are various types of fees — weekly exam fees, monthly
+monthly exam fees, yearly exam fees… from class to class fees vary. School admin can fully customise
+their fees and add various categories, class-wise. I want they can add options too. These will be
+connected to parents sector, because they will collect the fees from them. And sub school admin has
+the same facilities and anyone assigned to control this part can control."
+
+### What was missing
+
+Fees could be *collected* and (since part 2) one at a time *added*, but there was no way for a school
+to say what its fees **are**. Nothing in the product let an admin define a fee head, price it
+per class, or bill a whole month's fees — so "Weekly Exam Fee", "Monthly Exam Fee", "Yearly Exam
+Fee" and every local variant had to be typed in student by student. `/api/fee-templates` existed
+(per-class line items) but had no UI and no way to turn a template into actual money owed.
+
+### What was built
+
+- **`feeCategory`** — a new shim model (`feeCategories` collection, registered in `lib/db.ts`). A
+  category is a fee head the school invents: `name`, `bucket` (the ledger line — TUITION / ADMISSION
+  / EXAM / TRANSPORT / HOSTEL / LIBRARY_FINE / LATE_FEE / OTHER), `frequency` (WEEKLY / MONTHLY /
+  TERM / YEARLY / ONE_TIME), `optional` (elective, e.g. transport), `active`, an optional `dueDay`,
+  a note, and **`amounts`: a `{ classId: amount }` map** — that map is how one fee head is ৳100 in
+  Class 1 and ৳150 in Class 2. A class with no entry is simply not charged that fee.
+- **`/api/fee-categories`** (GET/POST/PATCH/DELETE) — full CRUD. GET returns the catalogue *and* the
+  class list in one request so the editor can draw one amount box per class (and so an ACCOUNTANT —
+  who is not allowed to read `/api/classes` — still gets the grid). All four verbs sit behind
+  `can(role, "feePayment", "full")`, the same gate as `/api/fee-templates`; the catalogue exposes
+  every class's pricing, so it is staff-only, not guardian-readable.
+- **`/api/fees/generate`** — turns the catalogue into money owed: `{ categoryIds, classIds?, period,
+  dueDate?, dryRun? }`. It walks each chosen category's class amounts, finds the enrolled students in
+  those classes and writes an ordinary `fee` row per student (`UNPAID`, `paidAmount: 0`, plus
+  `categoryId` and `period`), posting a `FEE` entry to the central ledger for each. It is
+  **idempotent** — a `(student, category, period)` triple is billed at most once, so re-running a
+  month tops up late enrolees instead of double-charging. `dryRun` returns the exact plan without
+  writing a row.
+- **`/dashboard/fees/structure`** — the admin screen, with a **New fee** dialog (name, ledger type,
+  how it recurs, optional/active, due day, note, and a per-class amount grid) and a **Bill a month**
+  panel (pick fees, month, due date, optionally limit to some classes → Preview → Bill). Added
+  "Fee structure" to the sidebar for SCHOOL_ADMIN, BRANCH_ADMIN and ACCOUNTANT.
+
+### Why the parents sector needed no work
+
+A generated row is just a `fee`. So it appears in the Fees page, in `/api/fees` for the guardian's
+child, in the student's dues, in reports and in the ledger without a single change to any of them —
+the Parents App already reads fees. Class scoping rides on `resolveBranchId` / `scopeWhere` for
+sub-school (branch) admins, and "anyone assigned to control this" is the existing permission
+matrix, not a new hard-coded role list.
+
+### Verified end to end (against `next start -p 3123`, as the demo school admin)
+
+- Created "Monthly Exam Fee (QA)" priced ৳100 for Class 1 and ৳150 for Class 2. The empty-state
+  page, the dialog, the per-class grid and the catalogue table all rendered.
+- **Preview** (dry run) planned **8 fees · ৳950** — 5 Class-1 students × ৳100 + 3 Class-2 × ৳150 — and
+  wrote nothing (`/api/fees` still 60 rows). The ৳950 total is the proof that the class-wise amounts
+  are actually applied.
+- **Bill** created exactly those 8 rows; **re-running the same month created 0** (8 skipped), while a
+  *different* month previewed a fresh 8 — idempotency confirmed.
+- **Parents App**: signed in as `guardian1@demo.com` on `parents.localhost`; the new fee appears with
+  a Pay button and the guardian's totals moved ৳6,500 → ৳6,600 billed, ৳2,000 → ৳2,100 due.
+- **RBAC**: a guardian gets **403** on the catalogue, on create and on generate (and still sees their
+  own 2 fee rows). A temporary **ACCOUNTANT** account created through Staff & Roles could reach
+  `Fee structure` in the sidebar, GET the catalogue (all 5 classes), POST a category (201), run a
+  dry-run (5 to bill) and delete it (200) — so an assigned staff member really does control this part.
+- All test data was removed afterwards (fees, ledger entries, audit rows, the category, the QA
+  account) and the demo tenant re-checked at baseline: 60 fee rows, billed ৳135,700 · paid ৳95,700 ·
+  due ৳40,000, ledger 19 entries, 0 fee categories.
+- `tsc --noEmit` clean, `npm run build` clean, `verify-fees-totals` and `smoke-all` ALL GREEN. Both
+  the new page and `/api/fee-categories` are now part of the smoke sweep.
+
+### Worth remembering
+
+- **A read can be ~30s stale.** Right after a bulk write, `/api/fees` served a partly-updated snapshot
+  (64 rows) before settling at 68 — the memoized collection pull, not a bug in the writer. Restart the
+  server (or wait out the TTL) before believing a count straight after a bulk change.
+- `/api/classes` still refuses ACCOUNTANT; that is why the catalogue route returns the class list
+  itself rather than making the UI call `/api/classes`.
+- Billing is explicit, never scheduled. If a school wants "bill every month automatically", that is a
+  cron/scheduled-function decision, not something hidden inside this screen.
+
+---
+
+## 🔁 Session — 2026-09-26 (fees, part 2: the fix is live — and admins can finally add a fee)
+
+**Input:** continuation of "run the school admin. We have to do works in fees."
+
+### The live deploy landed
+
+The fees fix (`951f334`) had been pushed and a rollout started when the previous turn was stopped,
+so the rollout result was unknown at session start. It had landed:
+
+- `SMOKE_ORIGIN=<live> node scripts/verify-fees-totals.mjs` → **ALL GREEN** (15 checks), every money
+  field finite, `paid + due === billed`, `/api/stats` agreeing with the fee list.
+- Live demo numbers: **billed ৳135,700 · paid ৳95,700 · due ৳40,000** — the same figures as local.
+- `SMOKE_ORIGIN=<live> node scripts/smoke-all.mjs` → ALL GREEN across every role.
+- On the live School Admin **Fees** screen the header reads `৳95,700 collected · ৳40,000 outstanding`
+  above rows with real values (e.g. Ayesha Rahman: ৳5,000 bill, ৳4,500 paid, ৳500 due, `PARTIAL`).
+
+### What was missing in Fees
+
+The page could *collect* a payment and edit fee settings, but an admin could **not add a fee** to a
+student at all — the only fees that existed came from admission. The API was already ahead of the
+UI: `POST /api/fees` accepted a fee (title, amount, type, due date, optional installment plan) and
+posted a `FEE` entry to the ledger. Tellingly, `dashboard/fees/page.tsx` already imported the `Plus`
+icon and never used it — the button had been planned and never wired.
+
+### The change (one file)
+
+`src/app/dashboard/fees/page.tsx` — an **Add fee** action in the page header opens a dialog with a
+student picker (lazy-loaded from `/api/students`, same pattern as the library page), title, type
+(MONTHLY / ADMISSION / EXAM / TRANSPORT / LIBRARY / OTHER), amount, due date and an installment
+count. Installments split the amount evenly with the rounding remainder on the last row, spaced
+monthly from the due date, so the parts still sum to the whole. The submit button stays disabled
+until a student, a title and an amount above zero are present.
+
+### How it was verified
+
+Against a local `next start -p 3123`, signed in as the school admin: the dialog opened, the student
+list loaded (16 students), the disabled→enabled gate behaved, and submitting created the fee
+(`POST /api/fees` → `201`, then the list reloaded). Reading the record back: amount ৳900, `UNPAID`,
+`paidAmount` 0, with **three installments #1=৳300 (Sep 26) · #2=৳300 (Oct 26) · #3=৳300 (Nov 26)
+summing to exactly ৳900**, plus one `FEE 900` ledger entry.
+
+Local and live share one Firestore project, so the test fee was removed again (fee + installments +
+ledger + audit rows) and the totals were re-checked back to baseline: 60 rows, billed ৳135,700,
+paid ৳95,700, due ৳40,000, ledger 19 entries — `verify-fees-totals` and `smoke-all` ALL GREEN.
+`tsc --noEmit` clean and `npm run build` succeeds.
+
+### State
+
+The change is **uncommitted** (one file). Push it and start an App Hosting rollout to take it live.
 
 ---
 
@@ -688,10 +1085,15 @@ npm run build        # production build
 npm run setup        # idempotent Firestore seed
 npm run seed         # same as setup (alias)
 
-# harnesses — all expect a running `npx next start -p 3123`; this shell exports PORT=0,
-# so pass the port explicitly and never read process.env.PORT
+# harnesses — all expect a running server (`next start -p 3123`, or the port in .env); this shell
+# exports PORT=0, so pass the port explicitly and never read process.env.PORT.
+# On a machine with no Node.js, run them under the bundled Bun instead:
+#   BUN="$LOCALAPPDATA/Programs/@codebufffreebuff-desktop/resources/bun/bun.exe"
+#   "$BUN" node_modules/next/dist/bin/next build && "$BUN" node_modules/next/dist/bin/next start -p 3000
+#   SMOKE_PORT=3000 "$BUN" scripts/smoke-all.mjs
 SMOKE_PORT=3123 node scripts/smoke-all.mjs                 # every role's pages + GET APIs + print pages
 SMOKE_PORT=3123 node scripts/verify-fees-totals.mjs         # fees add up: finite money, paid+due=billed, stats agrees
+SMOKE_PORT=3123 node scripts/verify-user-secrets.mjs        # no bcrypt hash / 2FA secret / QR credential leaves any API response
 SMOKE_ORIGIN=https://… node scripts/verify-fees-totals.mjs  # same checks against a deployment
 node scripts/fix-fee-paidamount.mjs                         # audit fee rows for a broken paidAmount (add --apply)
 SMOKE_PORT=3123 node scripts/verify-admission-intake.mjs   # desk intake end to end (cleans up after itself)

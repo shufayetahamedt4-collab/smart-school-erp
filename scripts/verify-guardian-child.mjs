@@ -10,8 +10,11 @@
  * What is checked, against the demo tenant:
  *   1. every screen that keys off "the" child resolves to the SAME child — the
  *      family's earliest-admitted one — and does so on every request
- *   2. the guardian's stats and identity agree with the admin's view of that
- *      child's data (fees counted for the right child)
+ *   2. the guardian's identity, fee list and dashboard dues all count the SAME
+ *      children: /api/fees spans every child of the family (a second child's
+ *      dues used to be missing from that route entirely, so they were invisible
+ *      and looked unpayable), `?studentId=` narrows to one own child and refuses
+ *      a stranger's, and /api/stats totals exactly the rows the Fees page shows
  *   3. a sibling linked only by family id is reachable (student page,
  *      certificate) — family membership, not just guardianUserId
  *   4. a child who is not this family's is never reachable: student page,
@@ -194,17 +197,67 @@ try {
     [...meIds].join(", ")
   );
 
-  const stats = await req(HOSTS.parents, "/api/stats", { cookie: guardianCookie });
-  const adminFeesDefault = await req(HOSTS.school, `/api/fees?studentId=${defaultChild.id}`, { cookie: adminCookie });
-  const adminFeesSibling = await req(HOSTS.school, `/api/fees?studentId=${siblingId}`, { cookie: adminCookie });
+  /* 2b. the whole family's money on one screen */
   const countOf = (r) => (Array.isArray(r.data?.fees) ? r.data.fees.length : null);
-  const statsFeeTotal = stats.data?.fees?.total;
-  const defaultFeeCount = countOf(adminFeesDefault);
-  const siblingFeeCount = countOf(adminFeesSibling);
+  const familyIds = new Set(siblingList.map((c) => c.id));
+  const rows = (r) => (Array.isArray(r.data?.fees) ? r.data.fees : []);
+  const familyDueOf = (list) => list.reduce((a, f) => a + (Number(f.amount) || 0) - (Number(f.paidAmount) || 0), 0);
+
+  // The probe fee is written straight to Firestore, so the route's memoized pull
+  // can lag it (~30s TTL) — and /api/stats has its own cache, so wait for BOTH
+  // the fee row and the dashboard total to catch up before judging them.
+  let familyFees = [];
+  let stats = { data: null };
+  for (let i = 0; i < 18; i++) {
+    const [feeRes, statsRes] = await Promise.all([
+      req(HOSTS.parents, "/api/fees", { cookie: guardianCookie }),
+      req(HOSTS.parents, "/api/stats", { cookie: guardianCookie }),
+    ]);
+    familyFees = rows(feeRes);
+    stats = statsRes;
+    const hasSiblingFee = familyFees.some((f) => f.id === siblingFeeId);
+    if (hasSiblingFee && stats.data?.fees?.total === familyFees.length) break;
+    await sleep(5000);
+  }
   check(
-    "guardian stats count the same child's fees as the admin view of that child",
-    statsFeeTotal === defaultFeeCount && statsFeeTotal !== siblingFeeCount,
-    `stats=${statsFeeTotal} admin(default)=${defaultFeeCount} admin(sibling)=${siblingFeeCount}`
+    "guardian /api/fees includes the family-linked sibling's fee",
+    familyFees.some((f) => f.id === siblingFeeId),
+    `${familyFees.length} rows for ${[...new Set(familyFees.map((f) => f.studentId))].length} child(ren)`
+  );
+  check(
+    "guardian /api/fees spans both children of the family",
+    new Set(familyFees.map((f) => f.studentId)).size >= 2,
+    [...new Set(familyFees.map((f) => f.studentId))].join(", ")
+  );
+  const strangerFees = familyFees.filter((f) => f.studentId !== defaultChild.id && !familyIds.has(f.studentId));
+  check("guardian /api/fees never returns another family's fee", strangerFees.length === 0, strangerFees.map((f) => f.id).join(", "));
+
+  const narrowed = await req(HOSTS.parents, `/api/fees?studentId=${siblingId}`, { cookie: guardianCookie });
+  const narrowedRows = rows(narrowed);
+  check(
+    "?studentId narrows /api/fees to that child only",
+    narrowedRows.length > 0 && narrowedRows.every((f) => f.studentId === siblingId),
+    `${narrowedRows.length} row(s) for the sibling`
+  );
+  const foreignNarrow = await req(HOSTS.parents, `/api/fees?studentId=${foreignChild.id}`, { cookie: guardianCookie });
+  check(
+    "?studentId=<another family's child> returns nothing",
+    rows(foreignNarrow).length === 0,
+    `${rows(foreignNarrow).length} row(s) leaked`
+  );
+
+  const adminSibFees = await req(HOSTS.school, `/api/fees?studentId=${siblingId}`, { cookie: adminCookie });
+  check(
+    "admin and guardian agree on the sibling's fee rows",
+    countOf(adminSibFees) === familyFees.filter((f) => f.studentId === siblingId).length,
+    `admin=${countOf(adminSibFees)} guardian=${familyFees.filter((f) => f.studentId === siblingId).length}`
+  );
+
+  check(
+    "the dashboard's dues are the Fees page's rows (same children, same money)",
+    stats.data?.fees?.total === familyFees.length &&
+      Math.round(Number(stats.data?.fees?.due) || 0) === Math.round(familyDueOf(familyFees)),
+    `stats=${stats.data?.fees?.total} rows=${familyFees.length} · stats due=${stats.data?.fees?.due} rows due=${familyDueOf(familyFees)}`
   );
 
   /* 3. a family-linked sibling is reachable, a stranger never is */
@@ -256,10 +309,9 @@ try {
 
   const leaveList = await req(HOSTS.parents, "/api/leave-requests", { cookie: guardianCookie });
   const leaveStudentIds = [...new Set((leaveList.data || []).map((r) => r.studentId))];
-  const ownIds = new Set([defaultChild.id, siblingId]);
   check(
     "leave list shows only this family's children",
-    leaveStudentIds.every((id) => ownIds.has(id)),
+    leaveStudentIds.every((id) => familyIds.has(id)),
     leaveStudentIds.join(", ") || "none"
   );
 
@@ -267,7 +319,7 @@ try {
   const paymentStudentIds = [...new Set((payments.data || []).map((p) => p.studentId))];
   check(
     "payment intents list shows only this family's children",
-    paymentStudentIds.every((id) => ownIds.has(id)),
+    paymentStudentIds.every((id) => familyIds.has(id)),
     paymentStudentIds.join(", ") || "none"
   );
 

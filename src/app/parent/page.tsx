@@ -68,7 +68,9 @@ export default function ParentDashboard() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard icon={CalendarCheck} label="Attendance" value={`${stats.attendance.rate}%`} sub={`${stats.attendance.present} of ${stats.attendance.total} days`} tone="emerald" />
         <StatCard icon={BookOpen} label="Homework" value={stats.homeworks} sub="assigned to your child's class" tone="indigo" />
-        <StatCard icon={Wallet} label="Fees due" value={fmtMoney(stats.fees.due)} sub={`${stats.fees.total} fee records`} tone={stats.fees.due > 0 ? "rose" : "emerald"} />
+        {/* One login covers the whole household (§5.4), so this figure is the
+            family's — exactly the rows /parent/fees lists, for every child. */}
+        <StatCard icon={Wallet} label="Fees due" value={fmtMoney(stats.fees.due)} sub={`across all your children · ${stats.fees.total} records`} tone={stats.fees.due > 0 ? "rose" : "emerald"} />
         <StatCard icon={MessageSquare} label="Teacher remarks" value={stats.remarks} sub="daily remarks received" tone="violet" />
       </div>
 
