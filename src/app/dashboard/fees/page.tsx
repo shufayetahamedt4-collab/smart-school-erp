@@ -12,6 +12,10 @@ interface FeeRow {
   payments: { id: string; amount: string; method: string; date: string; receiptNo: string | null }[];
 }
 
+interface StudentLite { id: string; name: string; admissionNo: string; classRoom?: { name: string } | null }
+
+const EMPTY_ADD = { studentId: "", title: "", feeType: "MONTHLY", amount: "", dueDate: "", installments: "1" };
+
 export default function FeesPage() {
   const [fees, setFees] = useState<FeeRow[]>([]);
   const [settings, setSettings] = useState<any>(null);
@@ -25,6 +29,10 @@ export default function FeesPage() {
   const [error, setError] = useState("");
   const [branchId, setBranchId] = useState("");
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState<any>(EMPTY_ADD);
+  const [students, setStudents] = useState<StudentLite[]>([]);
+  const [busy, setBusy] = useState(false);
 
   const load = (filters = { status: status || undefined, q: q || undefined, branchId: branchId || undefined }) =>
     api<{ fees: FeeRow[]; settings: any }>(`/api/fees${qs(filters)}`).then((d) => { setFees(d.fees); setSettings(d.settings); }).finally(() => setLoading(false));
@@ -42,13 +50,72 @@ export default function FeesPage() {
 
   const pay = async () => {
     setError("");
+    const amt = Number(payAmount) || 0;
+    const rowDoc = fees.find((f) => f.id === payOpen);
+    const rowDue = rowDoc ? feeDue(rowDoc) : 0;
+    if (amt <= 0) { setError("Enter the amount collected."); return; }
+    // Part-payment is normal (৳200 against a ৳500 fee); over-paying is not, and
+    // the ledger must never record more than the school billed.
+    if (amt > rowDue) { setError(`That is more than the ${fmtMoney(rowDue)} still due on this fee.`); return; }
     try {
-      await api(`/api/fees/${payOpen}/pay`, { method: "POST", body: JSON.stringify({ amount: Number(payAmount), method: payMethod }) });
+      await api(`/api/fees/${payOpen}/pay`, { method: "POST", body: JSON.stringify({ amount: amt, method: payMethod }) });
       setPayOpen(null);
       setPayAmount("");
       load();
     } catch (e: any) {
       setError(e.message);
+    }
+  };
+
+  // The student list is only needed when the create dialog opens (same lazy
+  // pattern as the library page) so the fees table stays a single request.
+  const openAdd = async () => {
+    setError("");
+    setAddForm(EMPTY_ADD);
+    setAddOpen(true);
+    if (!students.length) {
+      const list = await api<StudentLite[]>("/api/students").catch(() => []);
+      setStudents(list || []);
+    }
+  };
+
+  const createFee = async () => {
+    setError("");
+    const amount = Number(addForm.amount);
+    if (!addForm.studentId || !addForm.title.trim() || !(amount > 0)) {
+      setError("Pick a student, give the fee a title and an amount greater than zero.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const count = Math.max(1, Math.min(24, Math.floor(Number(addForm.installments) || 1)));
+      const body: any = {
+        studentId: addForm.studentId,
+        title: addForm.title.trim(),
+        amount,
+        feeType: addForm.feeType,
+        dueDate: addForm.dueDate || undefined,
+      };
+      if (count > 1) {
+        // Even split with the rounding remainder on the last installment, so
+        // the installment amounts still sum to exactly `amount`.
+        const base = Math.floor(amount / count);
+        const start = addForm.dueDate ? new Date(addForm.dueDate) : new Date();
+        body.installments = Array.from({ length: count }, (_, i) => {
+          const d = new Date(start);
+          d.setMonth(d.getMonth() + i);
+          return { seq: i + 1, amount: i === count - 1 ? amount - base * (count - 1) : base, dueDate: d.toISOString() };
+        });
+      }
+      await api("/api/fees", { method: "POST", body: JSON.stringify(body) });
+      setAddOpen(false);
+      setAddForm(EMPTY_ADD);
+      setLoading(true);
+      load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -59,13 +126,22 @@ export default function FeesPage() {
   const dueTotal = sumMoney(fees, (f) => feeDue(f));
   const collected = sumMoney(fees, (f) => f.paidAmount);
   const paying = fees.find((f) => f.id === payOpen);
+  const payingDue = paying ? feeDue(paying) : 0;
+  const payAmt = Number(payAmount) || 0;
+  const payOver = payAmt > payingDue;
+  const payRemaining = Math.max(0, payingDue - payAmt);
 
   return (
     <div>
       <PageHeader
         title="Fees"
         subtitle={`${fmtMoney(collected)} collected · ${fmtMoney(dueTotal)} outstanding`}
-        actions={<button className="btn btn-secondary btn-sm" onClick={() => setSettingsOpen(true)}><Save size={14} /> Fee settings</button>}
+        actions={
+          <>
+            <button className="btn btn-primary btn-sm" onClick={openAdd}><Plus size={14} /> Add fee</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setSettingsOpen(true)}><Save size={14} /> Fee settings</button>
+          </>
+        }
       />
 
       {branches.length > 0 && (
@@ -160,23 +236,81 @@ export default function FeesPage() {
         {!fees.length && <div className="py-10 text-center text-sm text-slate-400">No fee records.</div>}
       </Card>
 
+      {/* create fee modal */}
+      <Modal open={addOpen} onClose={() => { setAddOpen(false); setError(""); }} title="Add a fee">
+        <div className="space-y-4">
+          {error && <ErrorNote message={error} />}
+          <Field label="Student">
+            <Select value={addForm.studentId} onChange={(e) => setAddForm({ ...addForm, studentId: e.target.value })}>
+              <option value="">Select a student…</option>
+              {students.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}{s.classRoom?.name ? ` — ${s.classRoom.name}` : ""}{s.admissionNo ? ` (${s.admissionNo})` : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Title">
+              <TextInput placeholder="e.g. Monthly Fee — October" value={addForm.title} onChange={(e) => setAddForm({ ...addForm, title: e.target.value })} />
+            </Field>
+            <Field label="Type">
+              <Select value={addForm.feeType} onChange={(e) => setAddForm({ ...addForm, feeType: e.target.value })}>
+                <option>MONTHLY</option><option>ADMISSION</option><option>EXAM</option><option>TRANSPORT</option><option>LIBRARY</option><option>OTHER</option>
+              </Select>
+            </Field>
+            <Field label="Amount (৳)"><TextInput type="number" min="1" value={addForm.amount} onChange={(e) => setAddForm({ ...addForm, amount: e.target.value })} /></Field>
+            <Field label="Due date"><TextInput type="date" value={addForm.dueDate} onChange={(e) => setAddForm({ ...addForm, dueDate: e.target.value })} /></Field>
+          </div>
+          <Field label="Installments" hint="Split the amount into monthly installments. Leave at 1 to bill it in one go.">
+            <TextInput type="number" min="1" max="24" value={addForm.installments} onChange={(e) => setAddForm({ ...addForm, installments: e.target.value })} />
+          </Field>
+          <p className="text-xs text-slate-400">The new fee starts as UNPAID and posts a FEE entry to the central ledger.</p>
+          <div className="flex justify-end gap-2">
+            <button className="btn btn-secondary" onClick={() => { setAddOpen(false); setError(""); }}>Cancel</button>
+            <button className="btn btn-primary" onClick={createFee} disabled={busy || !addForm.studentId || !addForm.title.trim() || !(Number(addForm.amount) > 0)}>
+              {busy ? "Adding…" : "Add fee"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {/* payment modal */}
       <Modal open={!!payOpen} onClose={() => setPayOpen(null)} title="Collect payment">
         {paying && (
           <div className="space-y-4">
+            {error && <ErrorNote message={error} />}
             <div className="rounded-xl bg-slate-50 p-4 text-sm">
               <div className="font-bold text-slate-800">{paying.student.name}</div>
-              <div className="text-xs text-slate-500">{paying.title} · {fmtMoney(paying.amount)} total · {fmtMoney(paying.paidAmount)} paid</div>
+              <div className="text-xs text-slate-500">
+                {paying.title} · {fmtMoney(paying.amount)} total · {fmtMoney(paying.paidAmount)} paid ·{" "}
+                <span className="font-semibold text-slate-700">{fmtMoney(payingDue)} due</span>
+              </div>
             </div>
-            <Field label="Amount (৳)"><TextInput type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} /></Field>
+            <Field label="Amount (৳)" hint="Part-payment is fine — collect what the family hands over; the rest stays due.">
+              <TextInput type="number" min="1" max={payingDue} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              <button className="btn btn-secondary btn-sm" onClick={() => setPayAmount(String(payingDue))}>Full {fmtMoney(payingDue)}</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setPayAmount(String(Math.ceil(payingDue / 2)))}>Half {fmtMoney(Math.ceil(payingDue / 2))}</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setPayAmount("")}>Other amount</button>
+            </div>
             <Field label="Method">
               <Select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
                 <option>CASH</option><option>BANK</option><option>bKASH</option><option>NAGAD</option><option>CARD</option>
               </Select>
             </Field>
+            {payOver && <p className="text-xs font-semibold text-rose-600">That is more than the {fmtMoney(payingDue)} still due.</p>}
+            {payAmt > 0 && !payOver && payRemaining > 0 && (
+              <p className="text-xs font-semibold text-amber-600">
+                Part-payment: {fmtMoney(payAmt)} now, {fmtMoney(payRemaining)} stays due on this fee.
+              </p>
+            )}
             <div className="flex justify-end gap-2">
-              <button className="btn btn-secondary" onClick={() => setPayOpen(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={pay} disabled={!Number(payAmount) || Number(payAmount) <= 0}>Record payment</button>
+              <button className="btn btn-secondary" onClick={() => { setPayOpen(null); setError(""); }}>Cancel</button>
+              <button className="btn btn-primary" onClick={pay} disabled={payAmt <= 0 || payOver}>
+                Record {payAmt > 0 ? fmtMoney(payAmt) : "payment"}
+              </button>
             </div>
           </div>
         )}

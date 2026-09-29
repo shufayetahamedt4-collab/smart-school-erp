@@ -1,18 +1,21 @@
-# Netlify deployment for the Next.js app.
+# Netlify deployment for the whole project.
 #
-# This is a full Next.js App Router project — server components, route handlers
-# (/api/*) and src/middleware.ts all run server-side — so it needs Netlify's
-# Next.js Runtime. Netlify installs that runtime automatically for Next sites;
-# a [[plugins]] entry is only needed to pin a specific plugin version.
+# This is a full Next.js 15 App Router project — server components, every route
+# handler under /api/*, and src/middleware.ts (the host-based sector router) all
+# run server-side. That means it needs Netlify's Next.js Runtime, pinned below.
 #
 # Deploy from this folder, no git required:
 #
 #   npx netlify-cli login                 # once, opens the browser
+#   npx netlify-cli link                  # once, pick/authorise the site
 #   npx netlify-cli deploy --build --prod # builds here, uploads, prints the URL
 #
+# The site is already linked (`.netlify/state.json`): amar-e-school-demo,
+# https://amar-e-school-demo.netlify.app
+#
 # Environment variables (Site configuration → Environment variables, or
-# `netlify env:set NAME value`) — REQUIRED here, unlike on Firebase App Hosting
-# where the runtime's default credentials cover it:
+# `npx netlify-cli env:set NAME value`) — REQUIRED here, unlike on Firebase App
+# Hosting where the runtime's default credentials cover it:
 #
 #   FIREBASE_PROJECT_ID      amar-e-school
 #   FIREBASE_CLIENT_EMAIL    from .env (service-account email)
@@ -22,13 +25,48 @@
 #   APP_URL                  the Netlify URL — used for invite QR + file URLs
 #
 # Netlify has no Application Default Credentials, so without the three Firebase
-# credentials the Admin SDK cannot reach Firestore at all.
+# credentials the Admin SDK cannot reach Firestore at all (every data route then
+# returns an empty 500 — see GET /api/health to confirm the config).
+# All seven of the above are already set on the linked site.
 
 [build]
+  # The whole project builds with one command; no monorepo/base needed because
+  # this folder is the app root.
   command = "npm run build"
+  # Next.js publishes the runtime bundle from .next; @netlify/plugin-nextjs turns
+  # it into Netlify Functions + edge middleware + static assets.
   publish = ".next"
 
 [build.environment]
   # Next 15 needs >= 18.18; 22 is the LTS this build is verified on. The local
   # machine's Node version is irrelevant here — Netlify builds in its own image.
   NODE_VERSION = "22"
+  # Keep the whole build quiet about telemetry in CI logs.
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Declare the Next.js Runtime explicitly. Netlify auto-installs this for Next
+# sites anyway; naming it here keeps the behaviour explicit instead of relying on
+# framework auto-detection. (netlify.toml accepts a bare package name only — to
+# pin an exact version, add "@netlify/plugin-nextjs" to devDependencies.)
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Long-lived caching for the hashed build assets Next.js emits. Everything under
+# /_next/static/ is content-addressed, so it is safe to cache forever.
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Never let a browser or CDN hold a stale service worker or manifest — a stuck
+# sw.js is what serves an old app after a deploy. next.config.mjs sets the same
+# headers; this repeats them at the CDN edge so they hold before the app answers.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "no-cache"

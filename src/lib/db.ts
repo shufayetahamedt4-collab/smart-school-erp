@@ -108,6 +108,7 @@ const COLS: Record<string, string> = {
   healthRecord: "healthRecords",
   feeTemplate: "feeTemplates",
   feeTemplateItem: "feeTemplateItems",
+  feeCategory: "feeCategories",
   installment: "installments",
   ledgerEntry: "ledger",
   paymentIntent: "paymentIntents",
@@ -453,6 +454,10 @@ const RELS: Record<string, Record<string, Rel>> = {
     items: { to: "feeTemplateItem", via: "templateId", kind: "many" },
   },
   feeTemplateItem: { template: { to: "feeTemplate", fk: "templateId", kind: "one" } },
+  // School-defined fee heads ("Monthly Exam Fee", "Transport"…). The amount
+  // varies per class, so the per-class money lives in a `amounts` map keyed by
+  // classId rather than in its own collection.
+  feeCategory: { school: { to: "school", fk: "schoolId", kind: "one" } },
   installment: {
     school: { to: "school", fk: "schoolId", kind: "one" },
     fee: { to: "fee", fk: "feeId", kind: "one" },
@@ -1484,6 +1489,7 @@ export const prisma = {
   healthRecord: model("healthRecord"),
   feeTemplate: model("feeTemplate"),
   feeTemplateItem: model("feeTemplateItem"),
+  feeCategory: model("feeCategory"),
   installment: model("installment"),
   ledgerEntry: model("ledgerEntry"),
   paymentIntent: model("paymentIntent"),
