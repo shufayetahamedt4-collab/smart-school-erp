@@ -29,7 +29,7 @@ const SECTOR_ICON: Record<SectorKey, LucideIcon> = {
 export default function PortalChooser({ host, protocol = "http" }: { host: string; protocol?: string }) {
   const apps = SECTOR_LIST.map((s) => {
     const target = sectorHostFor(host, s.key);
-    return { sector: s, target, href: target ? `${protocol}://${target}` : null };
+    return { sector: s, target, href: target ? `${protocol}://${target}/login` : null };
   });
 
   return (

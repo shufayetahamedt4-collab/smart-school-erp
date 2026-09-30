@@ -117,10 +117,11 @@ function sectorRouting(req: NextRequest, pathname: string, search: string, role:
   }
 
   if (isSharedPath(pathname)) {
-    // Already signed in to this app? /login goes to the app home.
-    if (pathname === "/login" && role && sector.roles.includes(role)) {
-      return NextResponse.redirect(new URL(sector.home, req.url));
-    }
+    // The sign-in screen is always reachable, even for a visitor who already
+    // holds a valid session: the portal directory and every "sign in" entry
+    // point at /login, and an app entry must always show the credential step
+    // rather than silently bouncing to the signed-in panel. The role guards on
+    // each app's own area (below) are what actually protect the panel.
     return NextResponse.next();
   }
 
