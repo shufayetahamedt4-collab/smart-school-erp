@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { notifyUsers } from "@/lib/notify";
+import { queryId } from "@/lib/utils";
 
 /**
  * PRD §9.2 — Timetable slots + Teacher-Substitution Automation.
@@ -16,8 +17,8 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
 
   const where: any = { schoolId };
-  if (sp.get("classId")) where.classId = sp.get("classId");
-  if (sp.get("sectionId")) where.sectionId = sp.get("sectionId");
+  if (queryId(sp, "classId")) where.classId = queryId(sp, "classId");
+  if (queryId(sp, "sectionId")) where.sectionId = queryId(sp, "sectionId");
   if (sp.get("day")) where.dayOfWeek = Number(sp.get("day"));
 
   if (session.role === "TEACHER") {

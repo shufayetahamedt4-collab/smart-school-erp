@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, schoolReference, userNamesFor, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
+import { queryId } from "@/lib/utils";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 
@@ -46,8 +47,8 @@ export async function GET(req: NextRequest) {
     scopedStudentId = student.id;
   }
 
-  if (sp.get("classId")) where.classId = sp.get("classId");
-  if (sp.get("subjectId")) where.subjectId = sp.get("subjectId");
+  if (queryId(sp, "classId")) where.classId = queryId(sp, "classId");
+  if (queryId(sp, "subjectId")) where.subjectId = queryId(sp, "subjectId");
 
   // Stage 2 — single parallel wave: homework + all submissions (grouped in
   // memory, was one child query per homework) + reference maps + teacher

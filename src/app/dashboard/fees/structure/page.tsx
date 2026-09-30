@@ -356,6 +356,12 @@ export default function FeeStructurePage() {
                     {preview.skipped > 0 && (
                       <div className="text-xs text-slate-500">{preview.skipped} already billed — will be skipped</div>
                     )}
+                  {!!preview.mismatched?.length && (
+                    <div className="mt-1 text-xs text-amber-700">
+                      Not billed for {preview.period}:{" "}
+                      {preview.mismatched.map((m: any) => m.name).join(", ")} — a {preview.mismatched[0].frequency.toLowerCase()} fee is billed for a {preview.mismatched[0].frequency === "YEARLY" ? "year (e.g. 2026)" : "whole cadence"}, not for {preview.period}.
+                    </div>
+                  )}
                   </div>
                   {preview.plan?.length ? (
                     <div className="mt-3 max-h-56 overflow-y-auto">
@@ -379,7 +385,11 @@ export default function FeeStructurePage() {
                       )}
                     </div>
                   ) : (
-                    <p className="mt-2 text-xs text-slate-500">Nobody to bill — every priced student is already billed for {preview.period}.</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      {preview.mismatched?.length && !preview.wouldBill
+                        ? `Nothing to bill — the selected fee${preview.mismatched.length === 1 ? "" : "s"} do${preview.mismatched.length === 1 ? "es" : ""} not bill for ${preview.period}.`
+                        : `Nobody to bill — every priced student is already billed for ${preview.period}.`}
+                    </p>
                   )}
                 </div>
               )}
@@ -390,6 +400,11 @@ export default function FeeStructurePage() {
                   <div>
                     Billed <strong>{result.created}</strong> fee{result.created === 1 ? "" : "s"} for {result.period}
                     {result.skipped > 0 && <> · {result.skipped} skipped (already billed)</>}. Guardians can see them now.
+                    {!!result.mismatched?.length && (
+                      <div className="mt-1 text-xs text-amber-700">
+                        Not billed: {result.mismatched.map((m: any) => m.name).join(", ")} — their cadence does not match the period {result.mismatched[0].frequency === "YEARLY" ? "(a yearly fee is billed for a year, e.g. 2026)" : "shape"}.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

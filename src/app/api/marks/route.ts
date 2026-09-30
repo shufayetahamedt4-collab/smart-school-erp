@@ -42,12 +42,17 @@ export async function POST(req: NextRequest) {
   // marked and what each is out of (src/lib/grading.ts).
   const scheme = await loadScheme(schoolId);
   const declared: any[] = Array.isArray((exam as any).columns) ? (exam as any).columns : [];
+  // The school's own catalogue is always the outer bound of what may be marked.
+  // With declared columns the sheet fixes the subjects; without them, a row for
+  // a subject this school never offered (or a fabricated id) must not be
+  // written onto the exam — it would surface on that exam's report cards.
+  const subjects = await prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } });
+  const schoolSubjectIds = new Set(subjects.map((s) => s.id));
   let fullBySubject = new Map<string, number>();
   if (declared.length) {
-    const subjects = await prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } });
     fullBySubject = new Map(resolveExamColumns(declared, subjects).map((c) => [c.id, c.fullMarks]));
   }
-  const onSheet = (subjectId: string) => (declared.length ? fullBySubject.has(subjectId) : true);
+  const onSheet = (subjectId: string) => (declared.length ? fullBySubject.has(subjectId) : schoolSubjectIds.has(subjectId));
   const fullFor = (r: any) => (Number(r.fullMarks) > 0 ? Number(r.fullMarks) : fullBySubject.get(String(r.subjectId)) ?? 100);
 
   const incoming = rows.filter(
@@ -60,9 +65,18 @@ export async function POST(req: NextRequest) {
       onSheet(String(r.subjectId)) &&
       (!allowedStudentIds || allowedStudentIds.has(r.studentId))
   );
+  // Every marked pupil must be on this school's roster — otherwise a mark for
+  // another school's student would be written into this school's exam and leak
+  // onto that pupil's report card.
+  const incomingIds = Array.from(new Set(incoming.map((r: any) => String(r.studentId))));
+  const roster = incomingIds.length
+    ? await prisma.student.findMany({ where: { id: { in: incomingIds }, schoolId }, select: { id: true } })
+    : [];
+  const onRoster = new Set(roster.map((s) => s.id));
+  const valid = incoming.filter((r: any) => onRoster.has(String(r.studentId)));
   // A mark above its column's full marks would grade as an impossible
   // percentage and quietly inflate a GPA, so refuse the whole save and say so.
-  const overFull = incoming.filter((r: any) => Number(r.obtained) > fullFor(r));
+  const overFull = valid.filter((r: any) => Number(r.obtained) > fullFor(r));
   if (overFull.length) {
     return NextResponse.json(
       { error: `${overFull.length} mark(s) are above their column's full marks — correct them before saving.` },
@@ -72,7 +86,7 @@ export async function POST(req: NextRequest) {
 
   let count = 0;
   await prisma.$transaction(
-    incoming
+    valid
       .map((r: any) => {
         count++;
         const full = fullFor(r);

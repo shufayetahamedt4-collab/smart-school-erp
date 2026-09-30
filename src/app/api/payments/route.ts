@@ -61,6 +61,15 @@ export async function POST(req: NextRequest) {
   const fee = await prisma.fee.findUnique({ where: { id: String(feeId) } });
   if (!fee) return NextResponse.json({ error: "Fee not found" }, { status: 404 });
 
+  // Tenant first: the intent is created in the FEE's school (`schoolId: fee.schoolId`
+  // below) and confirmed against it, so without this line a school admin could
+  // record payments into another school's ledger just by naming one of its fee
+  // ids. The PATCH half of this route has always checked `intent.schoolId`; the
+  // create half did not.
+  if (fee.schoolId !== session.schoolId) {
+    return NextResponse.json({ error: "Fee not found" }, { status: 404 });
+  }
+
   // Authorization per §2.1 matrix: guardians pay any of their own children's
   // fees (the second child used to be refused as if it were a stranger's);
   // accountant/admin record on behalf of any student.

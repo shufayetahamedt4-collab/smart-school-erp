@@ -100,11 +100,32 @@ export async function PATCH(req: NextRequest) {
   }
   const body = await req.json().catch(() => null);
   const id = String(body?.id || "");
+
+  // Ask for the decision explicitly. The comment used to read
+  // `decision === "APPROVED" ? APPROVED : REJECTED`, so a missing or mistyped
+  // `decision` silently REJECTED a leave — the one outcome the applicant cannot
+  // appeal if nobody notices.
+  const decision = String(body?.decision || "").trim().toUpperCase();
+  if (decision !== "APPROVED" && decision !== "REJECTED") {
+    return NextResponse.json({ error: "decision must be APPROVED or REJECTED." }, { status: 400 });
+  }
+
   const leave = await prisma.leaveRequest.findUnique({ where: { id } });
   if (!leave || leave.schoolId !== session.schoolId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  const status = body?.decision === "APPROVED" ? "APPROVED" : "REJECTED";
+  // A decision is terminal. Without this the endpoint happily re-decided a
+  // closed request — flipping APPROVED back to REJECTED (reversing an approved
+  // absence, and with teacher leave, the substitution plan built on it), or
+  // resetting approvedAt so the record no longer showed when it was signed off.
+  if (leave.status !== "PENDING") {
+    return NextResponse.json(
+      { error: `This request was already ${String(leave.status).toLowerCase()}.` },
+      { status: 409 }
+    );
+  }
+
+  const status = decision as "APPROVED" | "REJECTED";
   const updated = await prisma.leaveRequest.update({
     where: { id },
     data: { status, approvedById: session.id, approvedAt: new Date() },

@@ -4,6 +4,7 @@ import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { qrToken, qrPin } from "@/lib/qr";
 import { scopeWhere } from "@/lib/permissions";
+import { queryId } from "@/lib/utils";
 import { resolveBranchId } from "@/lib/branches";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
@@ -18,9 +19,9 @@ export async function GET(req: NextRequest) {
   if (!schoolId) return NextResponse.json({ error: "No school context" }, { status: 400 });
 
   const q = searchParams.get("q") || "";
-  const classId = searchParams.get("classId") || undefined;
-  const sectionId = searchParams.get("sectionId") || undefined;
-  const branchId = searchParams.get("branchId") || undefined;
+  const classId = queryId(searchParams, "classId");
+  const sectionId = queryId(searchParams, "sectionId");
+  const branchId = queryId(searchParams, "branchId");
 
   // Branch scoping (PRD §12.3): a branch admin only ever sees their own branch.
   // The main admin may drill into any branch via ?branchId= (monitoring).

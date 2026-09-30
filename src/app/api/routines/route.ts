@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, schoolReference, userNamesFor } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
+import { queryId } from "@/lib/utils";
 import { writeGuard } from "@/lib/subscription";
 
 export async function GET(req: NextRequest) {
@@ -9,7 +10,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const schoolId = session.schoolId!;
-  const classId = req.nextUrl.searchParams.get("classId") || undefined;
+  const classId = queryId(req.nextUrl.searchParams, "classId");
   // Bulk-parallel: routines + all reference data in one wave, names mapped
   // in memory (was per-include document gets per routine row). Teachers come
   // from the memoized reference pull first so the display-name lookup can

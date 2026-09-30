@@ -68,6 +68,12 @@ export async function POST(req: NextRequest) {
   const book = await prisma.bookCatalog.findUnique({ where: { id: bookId } });
   if (!book || book.schoolId !== schoolId) return NextResponse.json({ error: "Book not found" }, { status: 404 });
 
+  // The borrower is validated too. The book was tenant-checked but the student
+  // was not, so an issued copy could be attached to another school's pupil —
+  // who would then see the school's book (and any fine) on their own account.
+  const borrower = await prisma.student.findUnique({ where: { id: studentId } });
+  if (!borrower || borrower.schoolId !== schoolId) return NextResponse.json({ error: "Student not found" }, { status: 404 });
+
   // No stock relation on bookCatalog — read the side collection directly.
   const stock = await prisma.bookStock.findFirst({ where: { bookId } });
   const issued = await prisma.bookIssue.count({ where: { bookId, status: "ISSUED" } });

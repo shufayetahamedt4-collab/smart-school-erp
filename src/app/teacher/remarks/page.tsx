@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MessageSquare, Save, Check } from "lucide-react";
-import { api } from "@/lib/client";
+import { api, qs } from "@/lib/client";
 import { Card, Select, PageHeader, LoadingScreen, ErrorNote } from "@/components/ui";
 import { todayISO, initials } from "@/lib/utils";
 
@@ -34,7 +34,11 @@ export default function RemarksPage() {
   const loadRoster = async () => {
     if (!classId || !date) return;
     setLoading(true);
-    const data = await api<Row[]>(`/api/remarks?classId=${classId}&sectionId=${sectionId || undefined}&date=${date}`);
+    // qs() drops the section filter entirely when "All" is selected — the old
+    // template literal sent the literal string "sectionId=undefined", which
+    // the server (rightly) treated as a section named "undefined": zero rows,
+    // an empty sheet until a section was hand-picked.
+    const data = await api<Row[]>(`/api/remarks${qs({ classId, sectionId: sectionId || undefined, date })}`);
     setRows(data);
     setLoading(false);
   };

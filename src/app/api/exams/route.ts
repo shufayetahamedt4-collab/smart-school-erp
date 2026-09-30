@@ -4,6 +4,7 @@ import { getSession, audit, guardianChildId } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 import { isBranchScoped } from "@/lib/permissions";
+import { queryId } from "@/lib/utils";
 import { examsCacheGet, examsCachePut, invalidateExamsCache } from "@/lib/exams-cache";
 
 export async function GET(req: NextRequest) {
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const schoolId = session.schoolId!;
-  const classId = req.nextUrl.searchParams.get("classId") || undefined;
+  const classId = queryId(req.nextUrl.searchParams, "classId");
 
   // PRD §7.2 — a guardian's Exam Results page lists only PUBLISHED exams for
   // their own child's class (unpublished drafts and other classes never leak).

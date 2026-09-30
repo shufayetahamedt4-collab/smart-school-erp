@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { queryId } from "@/lib/utils";
 
 /** PRD §7.1 — Photo/Video Gallery (school events, class activities). */
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const classId = req.nextUrl.searchParams.get("classId") || undefined;
+  const classId = queryId(req.nextUrl.searchParams, "classId");
   const items = await prisma.galleryItem.findMany({
     where: { schoolId: session.schoolId!, ...(classId ? { classId } : {}) },
     orderBy: { date: "desc" },

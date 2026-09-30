@@ -104,3 +104,17 @@ export function classOf(schoolName: string): string {
     .join("")
     .slice(0, 3) || "SC";
 }
+
+/**
+ * Read an optional id out of a request's query string.
+ *
+ * Clients have sent the literal string "undefined" (a template literal over an
+ * undefined value, the teacher remarks-sheet bug) and "null"; either must mean
+ * "no filter", not a filter whose value is that word. This lives in a
+ * server-safe module on purpose: it is imported by route handlers, and pulling
+ * it from the `"use client"` module broke every hardened route at runtime.
+ */
+export function queryId(sp: URLSearchParams, key: string): string | undefined {
+  const raw = (sp.get(key) || "").trim();
+  return raw && raw !== "undefined" && raw !== "null" ? raw : undefined;
+}

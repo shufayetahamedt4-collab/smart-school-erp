@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit, guardianChildId, resolveActingStudent } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { queryId } from "@/lib/utils";
 
 /**
  * PRD §6.2 — Digital Teaching Material Library.
@@ -17,9 +18,9 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
 
   const where: any = { schoolId, supersededById: null };
-  if (sp.get("classId")) where.classId = sp.get("classId");
-  if (sp.get("subjectId")) where.subjectId = sp.get("subjectId");
-  if (sp.get("sectionId")) where.sectionId = sp.get("sectionId");
+  if (queryId(sp, "classId")) where.classId = queryId(sp, "classId");
+  if (queryId(sp, "subjectId")) where.subjectId = queryId(sp, "subjectId");
+  if (queryId(sp, "sectionId")) where.sectionId = queryId(sp, "sectionId");
   if (sp.get("semester")) where.semester = sp.get("semester");
 
   // §6.2 auto-filter: guardians/students only see their own class's materials.

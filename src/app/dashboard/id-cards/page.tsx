@@ -22,7 +22,10 @@ export default function IdCardsPage() {
 
   const selectClass = async (cid: string) => {
     setClassId(cid);
-    const rows = await api<Student[]>(`/api/students?classId=${cid}`);
+    // The placeholder option is "" — fetch only with a real class id, or the
+    // request would silently mean "every student" while the page waits for a
+    // class-scoped list.
+    const rows = cid ? await api<Student[]>(`/api/students?classId=${encodeURIComponent(cid)}`) : [];
     setStudents(rows);
   };
 

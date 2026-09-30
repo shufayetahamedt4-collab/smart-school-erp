@@ -147,6 +147,38 @@ function dateKey(d: Date | string): string {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
 
+/**
+ * Deterministic id for one pupil's remark on one day.
+ *
+ * A daily remark is a property of (student, day), so the document that holds it
+ * must be too. Exported because the remarks route has to address the same
+ * document this layer would create: the write used to `create()` with a random
+ * id on every save, so re-saving a sheet (or fixing one pupil's rating) appended
+ * a SECOND row instead of replacing the first.
+ */
+export function remarkId(studentId: string, date: Date | string): string {
+  return `rm_${studentId}_${dateKey(date)}`;
+}
+
+/**
+ * Deterministic id for a generated bill: one fee per (student, category,
+ * period).
+ *
+ * `POST /api/fees/generate` promises "a (student, category, period) triple is
+ * billed at most once", but that promise was kept by comparing against a read
+ * taken before the write loop, and a `fee` row had no deterministic id — so two
+ * submissions that overlapped (a double-clicked Generate button, two admins on
+ * the same period) both passed the check and billed the family twice. Give the
+ * row the identity of the thing it represents and the invariant becomes
+ * structural: the second write lands on the same document.
+ *
+ * Manual fees pass no category/period and keep a random id, so an admin can
+ * still raise two ad-hoc charges with the same title.
+ */
+export function generatedFeeId(studentId: string, categoryId: string, period: string): string {
+  return `fee_${studentId}_${sha1(`${categoryId}|${period}`).slice(0, 16)}`;
+}
+
 /** Deterministic doc id for models with a unique key (upsert-friendly). */
 function idFor(model: string, where: Record<string, any>): string | undefined {
   if (typeof where.id === "string") return where.id;
@@ -203,6 +235,10 @@ function idForCreate(model: string, data: Record<string, any>): string | undefin
   if (model === "installment" && data.feeId && data.seq !== undefined) return `in_${data.feeId}_${data.seq}`;
   if (model === "quizAttempt" && data.quizId && data.studentId) return `qa_${data.quizId}_${data.studentId}`;
   if (model === "meetingBooking" && data.slotId && data.guardianUserId) return `mb_${data.slotId}_${data.guardianUserId}`;
+  if (model === "dailyRemark" && data.studentId && data.date) return remarkId(String(data.studentId), data.date);
+  if (model === "fee" && data.studentId && data.categoryId && data.period) {
+    return generatedFeeId(String(data.studentId), String(data.categoryId), String(data.period));
+  }
   return undefined;
 }
 

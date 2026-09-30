@@ -63,10 +63,14 @@ export async function DELETE(req: NextRequest) {
   if (locked) return locked;
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  const subject = await prisma.subject.findUnique({ where: { id } });
+  if (!subject || subject.schoolId !== schoolId) {
+    return NextResponse.json({ error: "Subject not found" }, { status: 404 });
+  }
   await prisma.$transaction([
-    prisma.classAssignment.deleteMany({ where: { subjectId: id } }),
-    prisma.routine.deleteMany({ where: { subjectId: id } }),
-    prisma.homework.deleteMany({ where: { subjectId: id } }),
+    prisma.classAssignment.deleteMany({ where: { subjectId: id, schoolId } }),
+    prisma.routine.deleteMany({ where: { subjectId: id, schoolId } }),
+    prisma.homework.deleteMany({ where: { subjectId: id, schoolId } }),
     prisma.subject.delete({ where: { id } }),
   ]);
   await audit("SUBJECT_DELETE", "subject", id);

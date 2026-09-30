@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { scopeWhere } from "@/lib/permissions";
+import { queryId } from "@/lib/utils";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 import { invalidateReferenceCache } from "@/lib/db";
@@ -16,8 +17,7 @@ export async function GET(req: NextRequest) {
   const classId = sp.get("classId") || "";
   // The literal string "undefined" (legacy client bug) or an empty value must
   // mean "no section filter" — not a section whose id is "undefined".
-  const rawSectionId = (sp.get("sectionId") || "").trim();
-  const sectionId = rawSectionId && rawSectionId !== "undefined" && rawSectionId !== "null" ? rawSectionId : undefined;
+  const sectionId = queryId(sp, "sectionId");
   const dateStr = sp.get("date") || "";
   if (!classId || !dateStr) return NextResponse.json({ error: "classId and date are required." }, { status: 400 });
   const date = new Date(`${dateStr}T00:00:00`);
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
   // branch admins can query their own branch's registers.
   const rowIds = rows.map((r: any) => r.studentId).filter(Boolean);
   const rowStudents = rowIds.length
-    ? await prisma.student.findMany({ where: { id: { in: rowIds } }, select: { id: true, branchId: true } })
+    ? await prisma.student.findMany({ where: { id: { in: rowIds }, schoolId }, select: { id: true, branchId: true } })
     : [];
   const branchOf = new Map(rowStudents.map((s: any) => [s.id, s.branchId]));
 
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
 
   await prisma.$transaction(
     rows
-      .filter((r: any) => r.studentId && r.status && r.status !== "UNMARKED")
+      .filter((r: any) => r.studentId && branchOf.has(r.studentId) && r.status && r.status !== "UNMARKED")
       .map((r: any) =>
         prisma.attendance.upsert({
           where: { studentId_date: { studentId: r.studentId, date: dt } },
@@ -108,5 +108,5 @@ export async function POST(req: NextRequest) {
   await audit("ATTENDANCE_SAVE", "attendance", date);
   invalidateStats(schoolId, "attendance");
   invalidateReferenceCache(schoolId);
-  return NextResponse.json({ data: { ok: true, count: rows.filter((r: any) => r.status && r.status !== "UNMARKED").length } });
+  return NextResponse.json({ data: { ok: true, count: rows.filter((r: any) => r.studentId && branchOf.has(r.studentId) && r.status && r.status !== "UNMARKED").length } });
 }

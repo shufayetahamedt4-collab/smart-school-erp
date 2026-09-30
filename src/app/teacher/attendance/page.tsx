@@ -47,6 +47,8 @@ export default function AttendancePage() {
         body: JSON.stringify({
           date,
           classId,
+          // sectionId: only a real id — undefined keys are dropped by
+          // JSON.stringify, so the server never sees the string "undefined".
           rows: rows.map((r) => ({ studentId: r.id, classId, sectionId: sectionId || undefined, status: r.status, remark: r.remark })),
         }),
       });

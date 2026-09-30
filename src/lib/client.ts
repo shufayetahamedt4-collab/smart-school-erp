@@ -128,3 +128,4 @@ export function qs(params: Record<string, string | number | undefined | null>): 
   if (!clean.length) return "";
   return "?" + clean.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&");
 }
+

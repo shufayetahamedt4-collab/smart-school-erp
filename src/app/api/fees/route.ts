@@ -5,6 +5,7 @@ import { can } from "@/lib/permissions";
 import { postToLedger } from "@/lib/ledger";
 import { writeGuard } from "@/lib/subscription";
 import { money } from "@/lib/utils";
+import { queryId } from "@/lib/utils";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
     if (!allowedStudentIds.size) return NextResponse.json({ data: { fees: [], settings: null } });
   } else {
     if (sp.get("status")) where.status = sp.get("status");
-    if (sp.get("studentId")) where.studentId = sp.get("studentId");
+    if (queryId(sp, "studentId")) where.studentId = queryId(sp, "studentId");
     if (sp.get("q")) {
       where.student = { name: { contains: sp.get("q"), mode: "insensitive" } };
     }
@@ -61,8 +62,8 @@ export async function GET(req: NextRequest) {
   // one branch via ?branchId=. Fees carry their branch; legacy rows fall back
   // to the owning student's branch.
   const drillBranch =
-    sp.get("branchId") && (session.role === "SCHOOL_ADMIN" || session.role === "SUPER_ADMIN")
-      ? sp.get("branchId")!
+    queryId(sp, "branchId") && (session.role === "SCHOOL_ADMIN" || session.role === "SUPER_ADMIN")
+      ? queryId(sp, "branchId")!
       : null;
   let drillStudentIds: Set<string> | null = null;
   if (drillBranch) {
@@ -172,16 +173,25 @@ export async function POST(req: NextRequest) {
   if (!studentId || !title || !amount) {
     return NextResponse.json({ error: "Student, title and amount are required." }, { status: 400 });
   }
+  const studentIdStr = String(studentId);
 
   // The fee inherits its student's branch so branch monitoring stays exact
-  // even for fees created before the multi-branch feature.
-  const owner = await prisma.student.findUnique({ where: { id: studentId }, select: { branchId: true } });
+  // even for fees created before the multi-branch feature. The student is also
+  // checked against this session's school first: the query used to be
+  // `where: { id: studentId }` with no tenant test and no error when nothing
+  // matched, so a school admin could raise a fee against another school's pupil
+  // (the row carried their own schoolId, so it landed in their own books as an
+  // orphan fee) — or create a fee for an id that does not exist at all.
+  const owner = await prisma.student.findUnique({ where: { id: studentIdStr } });
+  if (!owner || owner.schoolId !== schoolId) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
 
   const fee = await prisma.fee.create({
     data: {
       schoolId,
-      studentId,
-      branchId: owner?.branchId || null,
+      studentId: studentIdStr,
+      branchId: owner.branchId || null,
       title: String(title),
       amount: Number(amount),
       // Explicit 0, never absent: a brand-new fee is by definition unpaid, and a
@@ -203,7 +213,7 @@ export async function POST(req: NextRequest) {
         data: {
           schoolId,
           feeId: fee.id,
-          studentId,
+          studentId: studentIdStr,
           seq: seq++,
           amount: Number(inst.amount),
           dueDate: inst.dueDate ? new Date(inst.dueDate) : null,
@@ -218,7 +228,7 @@ export async function POST(req: NextRequest) {
     kind: "FEE",
     amount: Number(amount),
     status: "CONFIRMED",
-    studentId,
+    studentId: studentIdStr,
     feeId: fee.id,
     actorId: session.id,
     description: `Fee created: ${title}`,

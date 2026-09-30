@@ -54,6 +54,10 @@ export async function DELETE(req: NextRequest) {
   if (locked) return locked;
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  const assignment = await prisma.classAssignment.findUnique({ where: { id } });
+  if (!assignment || assignment.schoolId !== schoolId) {
+    return NextResponse.json({ error: "Assignment not found" }, { status: 404 });
+  }
   await prisma.classAssignment.delete({ where: { id } });
   await audit("ASSIGNMENT_DELETE", "assignment", id);
   return NextResponse.json({ data: { ok: true } });

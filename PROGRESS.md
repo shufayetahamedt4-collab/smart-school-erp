@@ -5,7 +5,139 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** `E:\SmartSchoolERP`
-**Last updated:** 2026-09-29
+**Last updated:** 2026-09-30
+
+---
+
+## 🔁 Session — 2026-09-30 (whole-project bug sweep: tenancy, orphaned money, idempotency — and the queryId/500 lesson)
+
+**Input:** "go through the whole project and find bugs" → a systematic sweep (security/tenancy, data
+integrity, money math), each candidate verified against code and live probes, clear-cut bugs fixed
+and the rest reported. Follow-ups: fix student-delete orphans, sweep the demo's junk fees, validate
+fee-period vs category cadence, and audit the screens that build query URLs by hand.
+
+### 1. Write-integrity bugs fixed in the API routes
+
+- **Remarks appended on every save.** `POST /api/remarks` used `create()` with a random id, so saving
+  the same pupil's day twice kept both rows and the sheet showed whichever came back first. It now
+  upserts on the canonical id `rm_<studentId>_<YYYY-MM-DD>` (new `remarkId()` export in `lib/db.ts`),
+  validates the roster, sweeps legacy duplicates, returns `{saved, replaced}`, and GET loads the
+  day's remarks separately (the old `take:1` include had no `orderBy`, so it could show the replaced
+  value).
+- **Fee generation was neither idempotent nor cadence-aware.** `/api/fees/generate` now derives a
+  deterministic row id per (student, category, period) — `fee_<studentId>_<hash>` — and skips rows
+  that already exist; a `periodShapeOk` gate refuses to bill a MONTHLY category under `2026` or a
+  YEARLY one under `2026-09`, returning the skipped heads in a `mismatched` array (dry-run preview,
+  result and audit log all carry it). The Structure page renders an amber warning and a conditional
+  footer ("Nothing to bill — the selected fee does not bill for PERIOD.").
+- **Leave decisions were re-decidable.** `PATCH /api/leave-requests` now 400s on a bad `decision`
+  and 409s on a non-PENDING request instead of silently REJECTing it again.
+- **Cross-tenant writes and deletes.** `POST /api/payments` (fee's schoolId), `POST /api/fees`
+  (student's schoolId) and `POST /api/books/issues` (borrower exists + same school) all 404 on a
+  foreign id; `DELETE` on subjects/assignments/notices/students is guarded by a school-scoped
+  `findUnique` before the cascade, and the cascade `deleteMany`s carry `schoolId` too.
+- **Marks roster + subject gap.** `POST /api/marks` drops rows for pupils not on the sheet and —
+  when the sheet has no declared columns — restricts `subjectId`s to the school's own subjects
+  (previously any id passed when no columns were declared).
+- **Attendance POST** scopes its student pull by `schoolId` and writes only branch-visible pupils,
+  so the returned `count` matches what was actually written.
+
+### 2. Deleting a pupil no longer orphans the books (DELETE /api/students/[id])
+
+The old delete removed the identity doc alone: fees kept showing due, a stale fee could still be
+"paid", and the ledger kept money against a pupil nobody could see. The delete now resolves rows
+across 20 collections and commits in 400-op chunks: pupil-owned rows go **with** the pupil (fees,
+attendance, daily remarks, submissions, marks, quiz attempts, leave requests, payments, intents,
+installments, notifications, messages, meeting bookings, health records, SMS logs — plus the
+pupil's login user and its devices/notifications); money/history rows **survive** with the link cut
+to null (ledgerEntry → also `feeId:null`, bookIssue → also `fineFeeId:null`, complaint,
+conversation, admission). Ends with `invalidateStats(schoolId, "all")` and an audited `STUDENT_DELETE`
+carrying the cascade counts. Note: the Students UI only soft-deactivates — this hard delete is
+API-level defence (and the harness below proves it).
+
+### 3. Demo data repaired
+
+`scripts/sweep-demo-junk-fees.mjs` (new; dry-run by default, refuses rows that have payments,
+intents, installments or a non-FEE ledger entry) removed 32 junk rows — 16 × "maggie — 2026-09" and
+16 × "Yearly Study Tour 2026 — 2026-09" — and their 32 FEE ledger entries. The demo sits at
+**76 fee rows · billed ৳151,700 · paid ৳98,700 · due ৳53,000**, and the `maggie` category was
+deleted through the app's own audited `DELETE /api/fee-categories` (remaining heads: Milad
+ONE_TIME, Yearly Study Tour 2026 YEARLY). The junk-fee drift noted on 2026-09-29 is resolved.
+
+### 4. The hand-built query-URL audit, the `queryId` hardening — and the 500 it caused
+
+- **Audit:** most client pages already go through `qs()` (teacher/attendance, dashboard/students,
+  dashboard/reports, fees, ledger, admissions); routine/promotion guard their class filter; the
+  parent app filters client-side; `guardianChildId()` rejects any id that is not this family's, so
+  guardians cannot leak through a literal "undefined". Two real client bugs: **teacher/remarks**
+  templated `sectionId=undefined` into the URL (now `qs()`), and **dashboard/id-cards** fetched
+  `/api/students?classId=` for the placeholder option — returning the whole school — now skipped
+  when no class is chosen.
+- **Server side:** `queryId(sp, key)` treats `""`/`"undefined"`/`"null"` as *no filter* and is used
+  by the students / attendance / remarks / resources / timetable-slots / homework / exams / gallery
+  / routines / fees routes, so a stale client can no longer turn a junk param into a filter whose
+  value is that word.
+- **The regression and the lesson:** `queryId` was first placed in `src/lib/client.ts`, which
+  starts with `"use client"`. Importing a client-only module from route handlers **500s at runtime
+  while `tsc` and `next build` both stay green** — every hardened route went down, including
+  unfiltered baselines. `queryId` now lives in the server-safe `src/lib/utils.ts` and the 10 routes
+  import it from there. Lesson: never let a route import from a `"use client"` module — the
+  compiler will not catch it; only a live probe did.
+
+### 5. New harness: scripts/verify-write-integrity.mjs (7 sections)
+
+Remark replace-not-append (+ legacy sweep + sheet read) · leave decisions terminal/explicit ·
+cross-tenant write refusals (payments/fees/books/remarks/attendance/marks + unknown subject) ·
+delete school-scoping (unknown ids → 404) · the full pupil-delete cascade across 18 collections
+(owned rows gone, history survives with links null, login user gone, deleted pupil unbilleable) ·
+fee-generation idempotency with a cadence-chosen period (YEARLY → `1900`, else `1900-01`) · the
+cadence gate (YEARLY + monthly period → wouldBill 0 + named in `mismatched`). Everything it creates
+it removes by document reference; probes use `1900-01` / `2001-01-01` sentinels.
+
+### Verified
+
+After the queryId fix: ✅ `tsc --noEmit` 0 errors · ✅ `next build` clean (132 pages) · ✅
+`smoke-all.mjs` ALL GREEN · ✅ `verify-write-integrity.mjs` ALL GREEN (one flake: the login-user
+check failed once and passed on re-run; an isolated repro showed `loginRemoved:true` and the user
+gone — a transient Firestore read, not code) · ✅ `verify-fees-totals.mjs` ALL GREEN at the new
+totals · ✅ a 14-URL junk-param probe (`=undefined`/`=null`) across the school and teacher hosts —
+all 200 with junk meaning *no filter* (attendance 400s only when `classId` itself is missing, by
+design) · ✅ browser: `/teacher/attendance` with All sections loads 5 pupils and sends a clean URL
+(no `sectionId` at all), Section A sends a real id and loads 3.
+
+Earlier in the session, before the queryId edit, the same route batch also passed
+`verify-user-secrets.mjs`, `verify-tenant-isolation.mjs` and `verify-guardian-child.mjs`.
+
+### Validation commands to re-run next session
+
+```bash
+BUN="$LOCALAPPDATA/Programs/@codebufffreebuff-desktop/resources/bun/bun.exe"
+cd <project root>            # this checkout; no Node.js on PATH — always use "$BUN"
+"$BUN" x tsc --noEmit        # typecheck
+"$BUN" x next build          # production build
+("$BUN" x next start -p 3000 > /tmp/sserp-start.log 2>&1 & echo $! > /tmp/sserp.pid)
+SMOKE_PORT=3000 "$BUN" scripts/smoke-all.mjs              # run harnesses ONE at a time (slow)
+SMOKE_PORT=3000 "$BUN" scripts/verify-write-integrity.mjs
+SMOKE_PORT=3000 "$BUN" scripts/verify-fees-totals.mjs
+SMOKE_PORT=3000 "$BUN" scripts/verify-user-secrets.mjs
+"$BUN" scripts/isolation-fixture.mjs create                # fixture for the next two
+SMOKE_PORT=3000 "$BUN" scripts/verify-tenant-isolation.mjs
+SMOKE_PORT=3000 "$BUN" scripts/verify-guardian-child.mjs
+"$BUN" scripts/isolation-fixture.mjs clean && rm -f scripts/.qa-fixtures.json
+# stop the server when done (find the pid with: netstat -ano | grep ":3000" | grep LISTENING):
+taskkill //F //PID "$(cat /tmp/sserp.pid)"
+```
+
+`.env` holds the live demo's Firebase credentials — local runs mutate the demo data; every harness
+cleans up after itself by document reference.
+
+### Still open
+
+- **Nothing is committed or pushed from this session** — the working tree carries the whole batch
+  (~24 modified files + the two new scripts). The repo has no git identity configured; earlier
+  sessions set `GIT_AUTHOR_*`/`GIT_COMMITTER_*` per command with the repo author
+  `Faysal Ahmed Himel`.
+- The Firebase App Hosting rollout has not been re-run for this batch.
 
 ---
 

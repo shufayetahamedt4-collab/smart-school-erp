@@ -131,8 +131,110 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const locked = await writeGuard(session.schoolId);
   if (locked) return locked;
-  await audit("STUDENT_DELETE", "student", id);
-  invalidateStats(session.schoolId, "students");
-  await prisma.student.delete({ where: { id } });
-  return NextResponse.json({ data: { ok: true } });
+  const student = await prisma.student.findUnique({ where: { id } });
+  if (!student || student.schoolId !== session.schoolId) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // A pupil is referenced from all over the school. Deleting the identity doc
+  // alone left fees, attendance, marks, remarks, leave requests, book issues
+  // and payment intents pointing at a studentId that no longer existed — dues
+  // kept showing, a stale fee could still be "paid", and the ledger kept
+  // claiming money against a pupil nobody could see. So: pupil-owned rows go
+  // with the pupil; rows that are money/audit/history (ledger, library issues,
+  // complaints, chat threads, the admission trail) survive with the link cut.
+  const ids = (m: string, where: Record<string, any>) =>
+    (prisma as any)[m].findMany({ where, select: { id: true } });
+  const [
+    feeRows, attRows, remarkRows, subRows, markRows, quizRows, leaveRows,
+    payRows, intentRows, instRows, notifRows, msgRows, bookRows, healthRows,
+    smsRows, ledgerRows, issueRows, complaintRows, convRows, admissionRows,
+  ] = await Promise.all([
+    ids("fee", { studentId: id }),
+    ids("attendance", { studentId: id }),
+    ids("dailyRemark", { studentId: id }),
+    ids("homeworkSubmission", { studentId: id }),
+    ids("examMark", { studentId: id }),
+    ids("quizAttempt", { studentId: id }),
+    ids("leaveRequest", { studentId: id }),
+    ids("payment", { studentId: id }),
+    ids("paymentIntent", { studentId: id }),
+    ids("installment", { studentId: id }),
+    ids("notification", { studentId: id }),
+    ids("message", { studentId: id }),
+    ids("meetingBooking", { studentId: id }),
+    ids("healthRecord", { studentId: id }),
+    ids("smsLog", { studentId: id }),
+    ids("ledgerEntry", { studentId: id }),
+    ids("bookIssue", { studentId: id }),
+    ids("complaint", { studentId: id }),
+    ids("conversation", { studentId: id }),
+    ids("admission", { convertedStudentId: id }),
+  ]);
+
+  const ops: any[] = [];
+  const drop = (m: string, rows: { id: string }[]) => {
+    for (const r of rows) ops.push((prisma as any)[m].delete({ where: { id: r.id } }));
+  };
+  const cut = (m: string, rows: { id: string }[], data: Record<string, any>) => {
+    for (const r of rows) ops.push((prisma as any)[m].update({ where: { id: r.id }, data }));
+  };
+
+  // Pupil-owned rows go with the pupil...
+  drop("fee", feeRows);
+  drop("attendance", attRows);
+  drop("dailyRemark", remarkRows);
+  drop("homeworkSubmission", subRows);
+  drop("examMark", markRows);
+  drop("quizAttempt", quizRows);
+  drop("leaveRequest", leaveRows);
+  drop("payment", payRows);
+  drop("paymentIntent", intentRows);
+  drop("installment", instRows);
+  drop("notification", notifRows);
+  drop("message", msgRows);
+  drop("meetingBooking", bookRows);
+  drop("healthRecord", healthRows);
+  drop("smsLog", smsRows);
+  // ...history rows survive but no longer point at the pupil. The ledger keeps
+  // its entries (money that genuinely moved), the library keeps its issues
+  // (a copy may still be out), guardians keep their feedback and chat threads,
+  // admissions keep their trail.
+  cut("ledgerEntry", ledgerRows, { studentId: null, feeId: null });
+  cut("bookIssue", issueRows, { studentId: null, fineFeeId: null });
+  cut("complaint", complaintRows, { studentId: null });
+  cut("conversation", convRows, { studentId: null });
+  cut("admission", admissionRows, { convertedStudentId: null });
+  // The pupil's own login, if one was created.
+  if (student.userId) {
+    drop("device", await prisma.device.findMany({ where: { userId: student.userId }, select: { id: true } }));
+    drop("notification", await prisma.notification.findMany({ where: { userId: student.userId }, select: { id: true } }));
+    ops.push(prisma.user.delete({ where: { id: student.userId } }));
+  }
+  ops.push(prisma.student.delete({ where: { id } }));
+
+  // Firestore batches cap at 500 writes and each op above is one write, so
+  // chunk — a pupil with years of attendance must still delete fully.
+  for (let i = 0; i < ops.length; i += 400) {
+    await prisma.$transaction(ops.slice(i, i + 400));
+  }
+
+  invalidateStats(session.schoolId, "all");
+  const cascade = {
+    fees: feeRows.length,
+    payments: payRows.length,
+    attendance: attRows.length,
+    remarks: remarkRows.length,
+    marks: markRows.length,
+    submissions: subRows.length,
+    quizAttempts: quizRows.length,
+    leaveRequests: leaveRows.length,
+    bookIssues: issueRows.length,
+    ledgerEntries: ledgerRows.length,
+    notifications: notifRows.length,
+    messages: msgRows.length,
+    loginRemoved: Boolean(student.userId),
+  };
+  await audit("STUDENT_DELETE", "student", id, { cascade });
+  return NextResponse.json({ data: { ok: true, cascade } });
 }
