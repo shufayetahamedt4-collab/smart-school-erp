@@ -5,7 +5,115 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** `E:\SmartSchoolERP`
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-01
+
+---
+
+## 🔁 Session — 2026-10-01 (School Admin redesign: grouped IA, one composed workspace — and the "Admin skips login" regression)
+
+**Input:** four passes on the School Admin panel. The standing rule for all of them: information
+architecture + visual = yes, functionality = 0. The asks arrived in sequence — (1) regroup the sidebar and
+rebuild the dashboard as a command center; (2) a premium visual refinement; (3) a final polish pass with the
+navigation frozen; (4) extend the same design system to Students, Admissions and Fees. Mid-way the user
+reported what looked like a *functionality* regression — "clicking Admin no longer shows the Admin login
+page" — which was investigated and fixed before any further visual work continued.
+
+### 1. The "Admin login is skipped" regression — root cause, and the fix
+
+It was **not an authentication bypass, and not caused by the redesign.** Measured evidence:
+
+| Check | Result |
+| --- | --- |
+| anonymous `admin.<host>/` | `307 → /login` |
+| `POST /api/auth/login`, wrong password | `401` |
+| School Admin credential posted to the admin host | `403` (sector mismatch) |
+| school session, then `admin.<host>/` | still `/login` — the cookie is host-scoped, it does not leak |
+
+The real cause: `c11fe30 chore(deploy): commit the working tree so App Hosting can build it` introduced
+per-sector hosts, the `PortalChooser` directory (whose cards linked to each app's **host root**), and two
+middleware shortcuts — `pathname === "/"` and `pathname === "/login"` → `sector.home` whenever a valid
+session for that sector existed. So a visitor holding a live `ss_token` (a demo session left open in the
+browser) went straight into the panel. Before `c11fe30` there was a single host and `/login` was never
+intercepted, so the sign-in screen always appeared. There is no `/admin/login` route: `src/app/login/page.tsx`
+renders the Super Admin form whenever the host resolves to the `super` sector.
+
+Fixed with the smallest change that restores the old behaviour:
+
+- `src/components/PortalChooser.tsx` — each card targets that app's `/login`, not its host root.
+- `src/middleware.ts` — the `/login` → `sector.home` self-redirect is gone, so the sign-in screen is always
+  reachable. Role guards, permissions, sessions, the cookie and the auth APIs are untouched.
+
+Re-verified: a signed-in visitor at `/login` gets `200` (no bounce); `/admin` deep link is `200` signed in and
+`/login?next=/admin` anonymous; logout, refresh and deep links unchanged; Teacher / Guardian / Parent / School
+`/login` each still render their own sign-in screen.
+
+### 2. Grouped sidebar (was a flat 31-item rail)
+
+`src/components/nav.ts` (new) holds the per-role `NAVS` moved **verbatim** out of `Shell.tsx`, plus
+`SCHOOL_GROUP_ORDER`, `SCHOOL_GROUP_META`, `SCHOOL_GROUP_OF`, `groupNavFor()`, `NOTIFICATIONS_HREF`,
+`PROFILE_HREF` and `isSchoolPanelRole()`. The seven modules are Overview, Academics, People, Finance,
+Communication, Operations, System, as a collapsible accordion whose open/closed state persists in
+`localStorage`. A role allow-list gates the grouping, so a non-panel role can never inherit a module header
+(this fixed a real pass-1 bug where the teacher sidebar grew a stray group header). Longest-prefix active
+matching and the hover/focus/touch `prefetch(dataForRoute(href))` warming are preserved exactly.
+
+### 3. The dashboard as one composed workspace
+
+`/dashboard` was a stack of nine independent white cards. It is now **four grouped surfaces plus a quiet
+supporting row**, in this hierarchy: page context + primary action → a "Today" surface pairing a flat
+operational pulse (classes live now · periods not taken · periods held · attendance marked) with the school's
+standing totals in a divided KPI row → attendance trend beside a tinted "needs your attention" rail → live
+schedule beside recent activity → three deliberately quieter supporting panels (Notice Board, Upcoming PTM,
+Parent engagement).
+
+Every figure is emphasised once: Outstanding dues appears in the KPI row only, today's attendance percentage
+leads only the chart header, and the page subtitle no longer repeats the school name already shown in the
+global header. Nothing was removed — the same endpoints, the same fields.
+
+### 4. The school-scoped visual system
+
+All of it is gated on `[data-sector="school"]`, with `:root` defaults that reproduce the previous rendering,
+so Teacher / Parents / Platform Console are untouched. Chrome becomes deep navy (`#0b1220`, a 56px app bar),
+cards lose their elevation, and the tenant's theme color stays the **only** interactive accent — the active
+nav row, the primary CTA and the attendance trend line all follow `--brand`, and the chart line inherits it
+via `currentColor` rather than a hardcoded hue. New helpers (outside `@layer components` so they can beat
+Tailwind utilities): `.ss-surface`, `.ss-surface-quiet`, `.ss-section`, `.ss-fact`, `.ss-row`, `.ss-toolbar`,
+`.ss-accent*`, `.ss-hover-accent*`, and the type scale `.ss-page-title` / `.ss-metric` / `.ss-eyebrow`.
+
+### 5. Pass 4 — Students, Admissions, Fees
+
+Each gained the dashboard's shape: a numbers-first metric strip over **one** list surface whose heading, flat
+filter toolbar and hairline table share a single frame (instead of a text-only summary plus two floating
+cards). Students gained enrolment/dues figures, Fees gained billed/collected/outstanding, Admissions gained a
+pipeline readout explicitly labelled *"Across the N applications currently listed"* (the list is
+server-filtered, so it must not read as a school-wide total). Avatar tiles, name hovers, discount links and
+the sibling callout moved off hardcoded indigo onto `--brand`. Every new figure is a presentational sum over
+rows already in memory — no endpoint, route, permission or data-structure change.
+
+### 6. Verification
+
+`tsc --noEmit` 0 errors · `next build` clean (141 pages) · `smoke-all.mjs` ALL GREEN after every pass ·
+nav parity 0 added / 0 dropped (SCHOOL_ADMIN 31 items / 7 groups, BRANCH_ADMIN 30/7, REGISTRAR 7/4,
+ACCOUNTANT 8/4, LIBRARIAN 3/3, FRONT_DESK 4/3; TEACHER 14, GUARDIAN 18, SUPER_ADMIN 5 flat) · cross-sector
+computed styles unchanged (Teacher/Guardian/Super: 16px cards, slate-900 chrome, 0 group headers, 64px
+header, 0 `ss-*` surfaces) · white-label confirmed with two arbitrary theme colors (green and pink — nav,
+CTA and chart line all followed, chrome stayed navy, module accents stayed fixed, zero hardcoded indigo in
+the dashboard's and the three modules' surfaces) · logo containment square/wide/tall → 40×40, 40×8, 8×40,
+`object-contain`, no distortion · no console errors.
+
+Committed as `e2ec1ec` (auth fix), `eb3dc39` (grouped sidebar + composed dashboard), `f983559` (the three
+modules). **All three are local only — not pushed.**
+
+### Next steps (in order):
+
+1. Align the remaining high-traffic school modules with the same composed-surface pattern — Exams & Results,
+   Reports, Staff & Roles, Library: a metric strip over one list surface whose heading, flat `.ss-toolbar`
+   filters and hairline table share a frame.
+2. Push the branch and trigger the App Hosting rollout — `deploy/app-hosting` is 3+ commits ahead of origin
+   and the last rollout was blocked on `firebase login`. Pushing is the user's call; ask first.
+3. Optional hardening: a guard script that asserts the sector invariants (16px cards / slate-900 chrome / 0
+   group headers / nav link counts for the non-school sectors, brand-following CTA and chart line) so a
+   future visual pass cannot silently leak into Teacher, Parents or the Platform Console.
 
 ---
 
