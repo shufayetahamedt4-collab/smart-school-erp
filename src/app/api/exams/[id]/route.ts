@@ -7,6 +7,7 @@ import { gradeForScheme, gpaOfScheme, resolveExamColumns } from "@/lib/grading";
 import { loadScheme } from "@/lib/grading-store";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateExamsCache } from "@/lib/exams-cache";
+import { notifyGuardiansOfClass } from "@/lib/notify";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -144,6 +145,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const updated = await prisma.exam.update({ where: { id }, data });
   await audit("EXAM_UPDATE", "exam", id, { published: updated.published });
   invalidateExamsCache(exam.schoolId);
+
+  // PRD §13 — publishing results is the moment the family can look. Only the
+  // false→true transition notifies, so re-saving a published exam is silent.
+  if (body?.published === true && !exam.published && updated.classId) {
+    await notifyGuardiansOfClass(
+      exam.schoolId,
+      { classId: updated.classId, sectionId: (updated as any).sectionId || null },
+      {
+        event: "RESULT_PUBLISHED",
+        title: `Results published: ${updated.name || "Exam"}`,
+        body: "Your child's marks and grades are now available in the Parents App.",
+        link: "/parent/results",
+        excludeUserId: session.id,
+      }
+    ).catch(() => null);
+  }
   return NextResponse.json({ data: updated });
 }
 

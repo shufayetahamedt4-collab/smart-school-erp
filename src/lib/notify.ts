@@ -17,55 +17,213 @@ export type NotifyEvent =
   | "ADMISSION_STATUS"
   | "DISCOUNT_DECISION"
   | "PTM_BOOKED"
-  | "COMPLAINT_UPDATE";
+  | "COMPLAINT_UPDATE"
+  | "LEAVE_DECISION"
+  | "CLASS_STARTED"
+  | "EXAM_PUBLISHED"
+  | "RESULT_PUBLISHED"
+  | "RESOURCE_ADDED"
+  | "PLATFORM_EVENT"
+  | "SYSTEM";
 
 export interface NotifyInput {
   schoolId: string;
   userIds: string[];
-  event: NotifyEvent;
+  event: NotifyEvent | (string & {});
   title: string;
   body?: string;
   link?: string;
   studentId?: string;
   push?: boolean;
+  /** The person who caused the event (the signed-in user) is never notified. */
+  excludeUserId?: string;
 }
 
-/** Create in-app notifications (one per user) and optionally fan out push/SMS. */
-export async function notifyUsers(input: NotifyInput): Promise<void> {
-  const { schoolId, userIds, event, title, body, link, studentId } = input;
-  const unique = [...new Set(userIds.filter(Boolean))];
-  if (!unique.length) return;
+/**
+ * Cap on one fan-out. A whole-school notice can legitimately reach every parent
+ * plus every teacher, but a mistyped caller must not be able to write tens of
+ * thousands of rows in a single request.
+ */
+const MAX_RECIPIENTS = 2000;
 
+/**
+ * Create in-app notifications (one per user) and optionally fan out push/SMS.
+ *
+ * `createdAt` is stamped here and only here. The datastore shim never adds
+ * timestamps of its own, so a row written without one rendered a blank "—" in
+ * the bell and sorted to the bottom forever — which is exactly why the old
+ * notification list looked like fabricated demo data. Every writer goes through
+ * this function, so every notification now carries a real time.
+ *
+ * Returns the number of rows written.
+ */
+export async function notifyUsers(input: NotifyInput): Promise<number> {
+  const { schoolId, event, title, body, link, studentId, excludeUserId } = input;
+  const unique = [...new Set((input.userIds || []).filter(Boolean))]
+    .filter((id) => id !== excludeUserId)
+    .slice(0, MAX_RECIPIENTS);
+  if (!unique.length) return 0;
+
+  const now = new Date();
   await prisma.notification.createMany({
     data: unique.map((userId) => ({
       schoolId,
       userId,
       event,
-      title,
-      body: body || null,
+      title: String(title).slice(0, 160),
+      body: body ? String(body).slice(0, 600) : null,
       link: link || null,
       studentId: studentId || null,
       readAt: null,
+      createdAt: now,
     })),
   });
 
   if (input.push) {
-    await pushToUsers(unique, { title, body: body || "" }).catch(() => null);
+    await pushToUsers(unique, { title, body: body || "", link }).catch(() => null);
   }
+  return unique.length;
 }
 
-/** Mark a user's notifications read (optionally one specific notification). */
-export async function markRead(userId: string, notificationId?: string) {
-  const ids = notificationId ? [notificationId] : undefined;
-  const where = ids
-    ? { id: { in: ids }, userId }
-    : { userId, readAt: null } as any;
-  const list = await prisma.notification.findMany({ where });
-  for (const n of list) {
-    if (!n.readAt) {
-      await prisma.notification.update({ where: { id: n.id }, data: { readAt: new Date() } });
-    }
+/* ------------------------------------------------------------ Targeting helpers */
+//
+// A notification is only useful if it reaches the right people. These resolve a
+// *set of users* for a role, a class or a child, so a route can say what
+// happened instead of hand-listing ids. They all funnel into notifyUsers, so
+// timestamps, dedupe and the fan-out cap are applied in one place.
+
+/** The inverse of NotifyInput: everything except who to notify. */
+export type NotifyTarget = Omit<NotifyInput, "userIds" | "schoolId">;
+
+/** User ids of every account in a school holding one of `roles`. */
+async function userIdsForRoles(schoolId: string, roles: string[], branchId?: string | null): Promise<string[]> {
+  const users = await prisma.user.findMany({ where: { schoolId, role: { in: roles } } });
+  return (users as any[])
+    // A branch-scoped event reaches school-wide staff plus that one branch's staff.
+    .filter((u) => !branchId || !u.branchId || u.branchId === branchId)
+    .map((u) => u.id);
+}
+
+/** Notify every account in a school that holds one of `roles` — the standard
+ *  "tell the office" fan-out (admins, front desk, librarians, teachers…). */
+export async function notifyRoles(
+  schoolId: string,
+  roles: string[],
+  input: NotifyTarget,
+  branchId?: string | null
+): Promise<number> {
+  const userIds = await userIdsForRoles(schoolId, roles, branchId);
+  return notifyUsers({ ...input, schoolId, userIds });
+}
+
+/** Guardian account ids for the students matching `where` (deduped, capped). */
+async function guardianIdsFor(schoolId: string, where: Record<string, any>): Promise<string[]> {
+  const students = await prisma.student.findMany({ where: { schoolId, ...where } });
+  const ids = new Set<string>();
+  for (const s of students as any[]) {
+    if (s.active === false) continue; // a child who left gets no new mail
+    if (s.guardianUserId) ids.add(s.guardianUserId);
+    if (ids.size >= MAX_RECIPIENTS) break;
   }
+  return [...ids];
+}
+
+/** Every guardian with a child in this class (optionally narrowed to a section). */
+export async function notifyGuardiansOfClass(
+  schoolId: string,
+  scope: { classId: string; sectionId?: string | null },
+  input: NotifyTarget
+): Promise<number> {
+  const userIds = await guardianIdsFor(schoolId, {
+    classId: scope.classId,
+    ...(scope.sectionId ? { sectionId: scope.sectionId } : {}),
+  });
+  return notifyUsers({ ...input, schoolId, userIds });
+}
+
+/** Every guardian in a school — a school-wide notice or an urgent alert. */
+export async function notifyGuardiansOfSchool(schoolId: string, input: NotifyTarget): Promise<number> {
+  const userIds = await guardianIdsFor(schoolId, {});
+  return notifyUsers({ ...input, schoolId, userIds });
+}
+
+/** The guardian of one child — attendance, results and other per-student events. */
+export async function notifyGuardianOfStudent(
+  schoolId: string,
+  studentId: string,
+  input: NotifyTarget
+): Promise<number> {
+  const student: any = await prisma.student.findUnique({ where: { id: studentId } });
+  if (!student || student.schoolId !== schoolId || !student.guardianUserId) return 0;
+  return notifyUsers({ ...input, schoolId, userIds: [student.guardianUserId], studentId });
+}
+
+/**
+ * Platform-console events (a new school, a plan change). Super Admins sit above
+ * any one school, and the notification list is read by `userId` alone, so a
+ * platform notice is written against the school it concerns and still lands in
+ * the Super Admin's own bell.
+ */
+export async function notifySuperAdmins(input: Omit<NotifyInput, "userIds">): Promise<number> {
+  const users = await prisma.user.findMany({ where: { role: "SUPER_ADMIN" } });
+  return notifyUsers({ ...input, userIds: (users as any[]).map((u) => u.id) });
+}
+
+/* ----------------------------------------------------------------- Read / delete */
+
+/**
+ * Mark all of a user's notifications read, or just one. Returns rows changed.
+ *
+ * The single-id path resolves the document by id and then checks ownership in
+ * code, rather than trusting `findFirst({ where: { id, userId } })`: the
+ * datastore shim's doc-id lookup ignores every other key in `where`, so an
+ * unguarded `findFirst` would let one user read or delete another user's rows.
+ */
+export async function markRead(userId: string, notificationId?: string): Promise<number> {
+  if (notificationId) {
+    const row: any = await prisma.notification.findFirst({ where: { id: notificationId } });
+    if (!row || row.userId !== userId) return 0;
+    await prisma.notification.update({ where: { id: row.id }, data: { readAt: new Date() } });
+    return 1;
+  }
+  const rows: any[] = await prisma.notification.findMany({ where: { userId, readAt: null } });
+  const ids = rows.map((n) => n.id);
+  if (!ids.length) return 0;
+  await prisma.notification.updateMany({ where: { id: { in: ids } }, data: { readAt: new Date() } });
+  return ids.length;
+}
+
+/** Put a read notification back in the unread badge. */
+export async function markUnread(userId: string, notificationId: string): Promise<number> {
+  const row: any = await prisma.notification.findFirst({ where: { id: notificationId } });
+  if (!row || row.userId !== userId) return 0;
+  await prisma.notification.update({ where: { id: row.id }, data: { readAt: null } });
+  return 1;
+}
+
+/**
+ * Delete one notification, or every read one, for this user. Returns the count.
+ *
+ * Ownership is load-bearing: the id comes from the caller, so an unguarded
+ * lookup would let any signed-in user delete any notification by guessing ids.
+ */
+export async function deleteNotifications(
+  userId: string,
+  opts: { id?: string; readOnly?: boolean } = {}
+): Promise<number> {
+  // Single-id path resolves the doc then checks ownership in code, for the same
+  // reason markRead does — the doc-id lookup ignores any other `where` key.
+  if (opts.id) {
+    const row: any = await prisma.notification.findFirst({ where: { id: opts.id } });
+    if (!row || row.userId !== userId) return 0;
+    await prisma.notification.delete({ where: { id: row.id } });
+    return 1;
+  }
+  const rows: any[] = await prisma.notification.findMany({ where: { userId } });
+  const ids = rows.filter((n) => (opts.readOnly ? !!n.readAt : true)).map((n) => n.id);
+  if (!ids.length) return 0;
+  await prisma.notification.deleteMany({ where: { id: { in: ids } } });
+  return ids.length;
 }
 
 /* ------------------------------------------------------------------ Push (FCM) */

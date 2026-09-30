@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
 import { audit } from "@/lib/auth";
+import { notifySuperAdmins } from "@/lib/notify";
 
 function addDays(date: Date, days: number) {
   const copy = new Date(date);
@@ -181,6 +182,21 @@ export async function POST(req: NextRequest) {
     adminEmail,
     planId: result?.subscription?.planId || currentPlan?.id || null,
   });
+
+  // PRD §13 — the Platform Console is a sector too: a new tenant is the event
+  // its operators care about. Notifying against the new school keeps the row
+  // school-scoped while it lands in each Super Admin's own bell.
+  if (schoolId) {
+    await notifySuperAdmins({
+      schoolId,
+      event: "PLATFORM_EVENT",
+      title: `New school registered: ${name}`,
+      body: `${adminEmail} is the first admin account. Assign a plan from Billing & Plans.`,
+      link: "/admin/schools",
+      // The registering operator is themselves a Super Admin, so there is no
+      // actor to exclude — a platform event is addressed to the platform.
+    }).catch(() => null);
+  }
 
   return NextResponse.json({ data: result ?? null }, { status: 201 });
 }

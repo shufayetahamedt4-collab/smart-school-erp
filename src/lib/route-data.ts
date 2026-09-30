@@ -19,6 +19,7 @@ import type { SectorKey } from "@/lib/sectors";
 const ROUTE_DATA: Record<string, string[]> = {
   // ---- dashboard (school admin / branch admin / back-office staff) ----
   "/dashboard": ["/api/stats", "/api/notices?limit=5"],
+  "/dashboard/notifications": ["/api/notifications?take=30"],
   "/dashboard/admissions": ["/api/admissions", "/api/classes", "/api/sections", "/api/books", "/api/branches"],
   "/dashboard/admissions/new": ["/api/classes", "/api/admissions/intake"],
   "/dashboard/students": ["/api/students", "/api/classes", "/api/branches"],
@@ -26,7 +27,7 @@ const ROUTE_DATA: Record<string, string[]> = {
   "/dashboard/teachers": ["/api/teachers", "/api/classes", "/api/subjects", "/api/branches"],
   "/dashboard/classes": ["/api/classes"],
   "/dashboard/subjects": ["/api/subjects"],
-  "/dashboard/routine": ["/api/classes", "/api/subjects"],
+  "/dashboard/routine": ["/api/classes", "/api/subjects", "/api/routine-config"],
   "/dashboard/exams": ["/api/exams", "/api/classes", "/api/subjects"],
   "/dashboard/grades": ["/api/grading-scheme", "/api/subjects"],
   "/dashboard/notices": ["/api/notices"],
@@ -49,6 +50,7 @@ const ROUTE_DATA: Record<string, string[]> = {
 
   // ---- teacher ----
   "/teacher": ["/api/stats"],
+  "/teacher/notifications": ["/api/notifications?take=30"],
   "/teacher/attendance": ["/api/classes", "/api/attendance"],
   "/teacher/remarks": ["/api/classes", "/api/remarks"],
   "/teacher/homework": ["/api/homework?mine=1", "/api/classes", "/api/subjects"],
@@ -63,6 +65,7 @@ const ROUTE_DATA: Record<string, string[]> = {
 
   // ---- parents app ----
   "/parent": ["/api/stats", "/api/notices?limit=3"],
+  "/parent/notifications": ["/api/notifications?take=30"],
   "/parent/attendance": ["/api/stats"],
   "/parent/homework": ["/api/homework"],
   "/parent/quizzes": ["/api/quizzes/available"],
@@ -81,6 +84,7 @@ const ROUTE_DATA: Record<string, string[]> = {
 
   // ---- platform console ----
   "/admin": ["/api/schools", "/api/subscriptions"],
+  "/admin/notifications": ["/api/notifications?take=30"],
   "/admin/schools": ["/api/schools", "/api/plans"],
   "/admin/billing": ["/api/plans", "/api/subscriptions", "/api/schools"],
   "/admin/settings": ["/api/settings"],

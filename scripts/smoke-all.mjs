@@ -41,42 +41,44 @@ const ROLES = [
 
 // Page routes per host. Dynamic segments are filled where a value is known.
 const PAGES = {
-  "super-admin": ["/admin", "/admin/schools", "/admin/billing", "/admin/settings"],
+  "super-admin": ["/admin", "/admin/notifications", "/admin/schools", "/admin/billing", "/admin/settings"],
   "school-admin": [
     "/dashboard", "/dashboard/admissions", "/dashboard/admissions/new", "/dashboard/branches", "/dashboard/classes",
     "/dashboard/complaints", "/dashboard/exams", "/dashboard/fees", "/dashboard/fees/structure",
     "/dashboard/fees/payments", "/dashboard/gallery",
     "/dashboard/grades",
     "/dashboard/guardian-app", "/dashboard/guardians", "/dashboard/id-cards", "/dashboard/leaves",
-    "/dashboard/ledger", "/dashboard/library", "/dashboard/meetings", "/dashboard/messages",
-    "/dashboard/notices", "/dashboard/promotion", "/dashboard/reports", "/dashboard/resources",
+    "/dashboard/ledger", "/dashboard/library", "/dashboard/live-classes", "/dashboard/meetings", "/dashboard/messages",
+    "/dashboard/notices", "/dashboard/notifications", "/dashboard/promotion", "/dashboard/reports", "/dashboard/resources",
     "/dashboard/routine", "/dashboard/settings", "/dashboard/staff", "/dashboard/students",
     "/dashboard/students/new", "/dashboard/subjects", "/dashboard/teachers",
   ],
   teacher: [
-    "/teacher", "/teacher/attendance", "/teacher/grades", "/teacher/homework", "/teacher/leaves", "/teacher/marks",
-    "/teacher/meetings", "/teacher/messages", "/teacher/quizzes", "/teacher/remarks",
+    "/teacher", "/teacher/attendance", "/teacher/classes", "/teacher/grades", "/teacher/homework", "/teacher/leaves", "/teacher/marks",
+    "/teacher/meetings", "/teacher/messages", "/teacher/notifications", "/teacher/quizzes", "/teacher/remarks",
     "/teacher/resources", "/teacher/results",
   ],
   guardian: [
     "/parent", "/parent/attendance", "/parent/books", "/parent/feedback", "/parent/fees",
-    "/parent/gallery", "/parent/homework", "/parent/leave", "/parent/meetings", "/parent/messages",
-    "/parent/notices", "/parent/profile", "/parent/quizzes", "/parent/remarks", "/parent/resources",
+    "/parent/gallery", "/parent/homework", "/parent/leave", "/parent/live-classes", "/parent/meetings", "/parent/messages",
+    "/parent/notices", "/parent/notifications", "/parent/profile", "/parent/quizzes", "/parent/remarks", "/parent/resources",
     "/parent/results",
   ],
 };
 
 // GET API routes (no params).
 const APIS = {
-  "super-admin": ["/api/schools", "/api/stats", "/api/settings"],
+  "super-admin": ["/api/schools", "/api/stats", "/api/settings", "/api/notifications", "/api/notifications?countOnly=1"],
   "school-admin": ["/api/students", "/api/teachers", "/api/classes", "/api/sections", "/api/subjects",
     "/api/fees", "/api/fee-categories", "/api/fees/settings", "/api/exams", "/api/homework", "/api/attendance", "/api/notices",
-    "/api/meetings", "/api/guardians", "/api/messages", "/api/chat", "/api/stats", "/api/settings"],
+    "/api/meetings", "/api/guardians", "/api/messages", "/api/chat", "/api/stats", "/api/settings",
+    "/api/notifications", "/api/notifications?countOnly=1", "/api/notifications?filter=unread"],
   teacher: ["/api/students", "/api/classes", "/api/sections", "/api/subjects", "/api/fees",
     "/api/exams", "/api/homework", "/api/attendance", "/api/notices", "/api/meetings",
-    "/api/messages", "/api/chat", "/api/stats"],
+    "/api/messages", "/api/chat", "/api/stats", "/api/notifications", "/api/notifications?countOnly=1"],
   guardian: ["/api/fees", "/api/homework", "/api/attendance", "/api/exams", "/api/notices",
-    "/api/meetings", "/api/messages", "/api/chat", "/api/stats"],
+    "/api/meetings", "/api/messages", "/api/chat", "/api/stats",
+    "/api/notifications", "/api/notifications?countOnly=1", "/api/notifications?filter=unread"],
 };
 
 const HUB_PAGES = ["/login", "/welcome", "/qr", "/s/sunrise", "/apply"];

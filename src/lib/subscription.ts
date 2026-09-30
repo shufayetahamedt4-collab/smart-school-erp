@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "./db";
-import { notifyUsers } from "./notify";
+import { notifyUsers, notifySuperAdmins } from "./notify";
 
 /**
  * PRD §12.1 — Subscription & Billing (Super Admin).
@@ -234,6 +234,18 @@ export async function assignPlan(input: {
     });
   }
 
+  // The platform operators watch the money side: tell them a tenant changed plan.
+  const school: any = await prisma.school.findUnique({ where: { id: input.schoolId } });
+  await notifySuperAdmins({
+    schoolId: input.schoolId,
+    event: "PLATFORM_EVENT",
+    title: `${isTrial ? "Trial assigned" : "Plan assigned"}: ${school?.name || "school"} — ${plan.name}`,
+    body: `Invoice ${invoice.invoiceNo} · ${cycle.toLowerCase()} cycle until ${periodEnd.toDateString()}.`,
+    link: "/admin/billing",
+    // No actor exclusion here: the person assigning the plan IS a Super Admin,
+    // so excluding them would leave the platform console permanently empty.
+  }).catch(() => null);
+
   return { subscription: sub, invoice };
 }
 
@@ -278,6 +290,16 @@ export async function renewSubscription(schoolId: string, actorId: string) {
       link: "/dashboard",
     });
   }
+
+  const school: any = await prisma.school.findUnique({ where: { id: schoolId } });
+  await notifySuperAdmins({
+    schoolId,
+    event: "PLATFORM_EVENT",
+    title: `Subscription renewed: ${school?.name || "school"}`,
+    body: `${plan.name} · invoice ${invoice.invoiceNo} · period ends ${periodEnd.toDateString()}.`,
+    link: "/admin/billing",
+    // See assignPlan: the actor is the audience for a platform event.
+  }).catch(() => null);
 
   return { periodEnd, invoice };
 }

@@ -4,6 +4,7 @@ import { getSession, audit } from "@/lib/auth";
 import { queryId } from "@/lib/utils";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
+import { notifyGuardiansOfClass } from "@/lib/notify";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -144,5 +145,16 @@ export async function POST(req: NextRequest) {
   await audit("HOMEWORK_CREATE", "homework", homework.id, { title });
   invalidateStats(schoolId, "homework");
   invalidateReferenceCache(schoolId);
+
+  // PRD §13 — the families of the class this homework targets hear about it.
+  const due = dueDate ? ` Due ${new Date(dueDate).toLocaleDateString()}.` : "";
+  await notifyGuardiansOfClass(schoolId, { classId, sectionId: sectionId || null }, {
+    event: "HOMEWORK_POSTED",
+    title: `New homework: ${title}`,
+    body: `${description ? String(description).slice(0, 200) : "Open the Homework page for details."}${due}`,
+    link: "/parent/homework",
+    excludeUserId: session.id,
+  }).catch(() => null);
+
   return NextResponse.json({ data: homework }, { status: 201 });
 }

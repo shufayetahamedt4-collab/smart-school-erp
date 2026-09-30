@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
+import { notifyRoles, notifyGuardiansOfSchool } from "@/lib/notify";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -45,6 +46,24 @@ export async function POST(req: NextRequest) {
     },
   });
   await audit("NOTICE_CREATE", "notice", notice.id, { title });
+
+  // PRD §13 — a published notice is the one event every sector has in common:
+  // the office and the teachers read it on their dashboards, and the family
+  // reads it in the Parents App. Fan out to both, minus the author.
+  await Promise.all([
+    notifyRoles(
+      schoolId,
+      ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR", "ACCOUNTANT", "LIBRARIAN", "FRONT_DESK", "TEACHER"],
+      { event: "NOTICE_PUBLISHED", title: `Notice: ${title}`, body: bodyText || undefined, link: "/dashboard/notices", excludeUserId: session.id }
+    ).catch(() => null),
+    notifyGuardiansOfSchool(schoolId, {
+      event: "NOTICE_PUBLISHED",
+      title: `Notice: ${title}`,
+      body: bodyText || undefined,
+      link: "/parent/notices",
+      excludeUserId: session.id,
+    }).catch(() => null),
+  ]);
   return NextResponse.json({ data: notice }, { status: 201 });
 }
 

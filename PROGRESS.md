@@ -9,6 +9,222 @@
 
 ---
 
+## 🔁 Session — 2026-09-30 (notifications: one centre, every sector, real events)
+
+**Input:** "the notification is just demo what I see — make it a working perfect notification section for
+every sector." The complaint was literally true, and the cause was measurable.
+
+### 1. Why it *looked* fabricated
+
+- **355 of 356 rows had no `createdAt`.** `notifyUsers()` never stamped one, the datastore shim never adds
+  timestamps of its own, so `orderBy: { createdAt: "desc" }` did nothing and every row rendered a blank
+  "—" in the bell. A list where nothing has a time reads as mock data.
+- **Almost every row was from a retired workflow.** 286 of them were `EXAM_MARKS_*` /`EXAM_RESULT_PUBLISHED`
+  from a marks module that no longer exists in this codebase, titled "Paper Workflow 1790607971159".
+- **Only 10 event types were ever wired**, and the core sector events — publishing a notice, saving
+  attendance, posting homework, publishing results, starting a class, deciding a leave — raised nothing.
+- **There was no notification screen.** The bell dropdown was the whole feature, and the Platform Console
+  could never receive anything at all (a Super Admin has no `schoolId`, and every writer passed one).
+
+### 2. `src/lib/notify.ts` — the core, hardened and extended
+
+`notifyUsers()` now stamps `createdAt`, dedupes, caps a fan-out at 2000 recipients, and returns the number
+written; `excludeUserId` keeps the actor out of their own notice. New targeting helpers so a route can say
+what happened instead of hand-listing ids: `notifyRoles`, `notifyGuardiansOfSchool`,
+`notifyGuardiansOfClass`, `notifyGuardianOfStudent`, `notifySuperAdmins`. Read/unread/delete moved here too
+(`markRead`, `markUnread`, `deleteNotifications`).
+
+Two shim traps are documented in the code and load-bearing:
+
+- `findMany({ where: { id } })` matches **nothing** — the shim pushes the first equality filter down as a
+  *stored field*, and a document id is not one. Single-row reads go through the doc-id lookup.
+- that lookup **ignores every other key in `where`**, so ownership is compared in code. Without it, any
+  signed-in user could read, mark or delete another user's notification by guessing an id. The isolation
+  section of the harness failed on exactly this before it was fixed.
+
+### 3. `/api/notifications` rebuilt
+
+`GET` (list with `filter=all|unread|read`, `event`, `q`, `take`+`before` paging, and `since` for the live
+poll), `GET ?countOnly=1` (badge), `POST` (mark read / mark all / mark unread), `DELETE ?id=` | `?scope=read`
+| `?scope=all`. Every query is scoped to `session.id`.
+
+### 4. Real events, per sector
+
+| Event | Fires from | Reaches |
+| --- | --- | --- |
+| `NOTICE_PUBLISHED` | `POST /api/notices` | staff + every guardian (minus the author) |
+| `HOMEWORK_POSTED` | `POST /api/homework` | the guardians of that class/section |
+| `ATTENDANCE_PUBLISHED` | `POST /api/attendance` | the guardian of each **newly** absent child |
+| `RESULT_PUBLISHED` | `PATCH /api/exams/[id]` | the guardians of that class (only on false→true) |
+| `CLASS_STARTED` | `POST /api/class-sessions` | the guardians of that class, when the period goes live |
+| `LEAVE_DECISION` | `PATCH /api/leave-requests` | the applicant (teacher or the child's guardian) |
+| `PLATFORM_EVENT` | school created, plan assigned/renewed | every Super Admin |
+
+The register is the one that needed care: attendance is re-saved whenever a teacher corrects a row, so
+notifying "absent" on every save would mail a family again and again. The route now compares against the
+stored register and only notifies a child who was **not already absent that day**. Likewise results notify
+only on the unpublished→published transition.
+
+Platform events carry no actor exclusion — the operator *is* the audience, and excluding them left the
+console permanently empty (found in the browser, fixed, re-verified).
+
+### 5. The UI: a bell worth opening, and a centre in every portal
+
+- `src/components/NotificationsCenter.tsx` (new) — filters, search, per-row read/unread/delete, mark-all,
+  clear-read, load-more, live poll (20s + on focus), click-through. Shared verbatim by all four portals.
+- `NotificationBell` upgraded: event icons, relative time, per-item read/unread/delete, "N new", and a
+  "View all notifications" hand-off. Polls the badge every 30s **and on window focus**.
+- New pages: `/dashboard/notifications`, `/teacher/notifications`, `/parent/notifications`,
+  `/admin/notifications`; nav entries for every role (incl. REGISTRAR/ACCOUNTANT/LIBRARIAN/FRONT_DESK, who
+  each get their own entry) and `route-data` prefetch/warm entries.
+- `src/components/notification-ui.ts` (new) — one icon/tone/label/relative-time map so an event looks the
+  same in the bell and the centre.
+
+### 6. Demo data cleaned
+
+`scripts/clean-legacy-notifications.mjs` (new, dry-run by default, backs up to the OS temp dir) removed the
+351 undated/retired rows from the Sunrise demo — and the last 4 undated rows in the other demo tenants.
+The demo now holds one real "Parent–teacher meeting" notice fan-out and one platform event.
+
+### 7. Verification
+
+`scripts/verify-notifications.mjs` (new) — **44 checks, ALL GREEN**: every read row carries a timestamp; a
+published notice reaches office + teacher + guardian; homework, a *new* absence (and not a re-saved one),
+published results and a started class each reach the child's guardian; read/unread/delete/mark-all; a
+guardian cannot read, change or delete a teacher's row; filter/search/paging; and a full cleanup check.
+The browser walkthrough covered all four sectors. `verify-class-sessions.mjs` was extended to remove the
+class-start notifications it raises (they are real now, and a stale "class in progress" in a parent's bell
+is worse than none).
+
+`tsc` 0 errors · `next build` clean (141 pages) · `smoke-all.mjs` ALL GREEN (incl. the 4 new pages and the
+notification API variants) · `verify-notifications.mjs` ALL GREEN · `verify-class-sessions.mjs` ALL GREEN.
+
+---
+
+## 🔁 Session — 2026-09-30 (the routine: school-defined periods & days, and section-wise weeks)
+
+**Input:** the routine was a hard-coded 8 × 5 grid, per class only. Two asks: the school admin should
+**decide how many periods a day** (and which weekdays), and a routine should be authorable **per
+section**, because some sections take different subjects in the same period.
+
+### 1. The school's day is now a setting, not a constant
+
+`PERIODS = 8` / `DAY_COUNT = 5` are gone from the editor. A school's shape lives in the `settings`
+collection under `routine_config_<schoolId>` (new `src/lib/routine-config.ts`, mirroring
+`grading-store.ts`): a day count 1–12, a start/end time per period, and the set of working weekdays.
+It starts from the shipped default (Sunday–Thursday, 8 periods, the times this demo already used), so
+adopting it moves nobody's bells. `GET/PUT /api/routine-config` reads and writes it; validation refuses
+0 days, 20 periods, a backwards time or a bad clock.
+
+Because every existing reader (the live-classes board, the parent view, the teacher console) takes a
+period's clock time off the routine row itself, `PUT` **re-stamps that school's rows** to the new times
+and **deletes the rows that fall outside the new shape**, returning `{retimed, removed}` so the screen
+can say exactly what changed (the UI confirms first when the shape shrinks).
+
+### 2. Section-wise routines — class-wide default, sections override
+
+The `routines` row already had a `sectionId`; only the editor and the save scope ignored it.
+`/api/routines` now takes a scope: `?classId=` is the class-wide week, `?classId=&sectionId=` is that
+section's. A save replaces **only that scope** (`deleteMany({schoolId, classId, sectionId})`), so
+Section A can never wipe Section B or the class default. Saves are validated against the school's
+shape (an unknown weekday, period or subject is a 400; a section from another class is a 404) and the
+bell times are stamped from the config, never from the client.
+
+In the editor the scope bar is a Class dropdown plus a Section dropdown (“Whole class (default)” or a
+section). Opening a section that has no week of its own shows the class-wide week with an amber
+banner — *“This section has no routine of its own … Saving gives this section its own week”* — and a
+“Use the class routine instead” button drops the section's own week again.
+
+### 3. The roster learned the override
+
+`rostersFor()` in `class-sessions` now applies section precedence: a section lesson replaces the
+class-wide one for that section, and once **every** section of a class overrides a slot the class-wide
+lesson stops being anyone's — so a teacher is not left standing on the board for a period nobody
+teaches. Rows are de-duplicated per (teacher, class, section, period).
+
+### 4. Seeded demo + verification
+
+`scripts/verify-routine-config.mjs` (new) — **35 checks, ALL GREEN**: the shape reads and a teacher may
+read it (a guardian may not, and cannot write it); bad shapes are refused; shortening the day re-times
+50 rows and removes 70; a lesson on a period the school does not have is pruned; a section's week saves
+without touching its sibling or the class-wide week; a class-wide read never returns section lessons;
+non-working days / unknown periods / unknown subjects / foreign sections are refused; a teacher cannot
+save; and a class-wide lesson leaves the teacher once every section overrides it, then returns when the
+overrides are cleared. The harness **backs up and restores the whole timetable** (120 → 120) because the
+shape test deletes lessons by design.
+
+Demo data: **Class 1 · Section A · Wednesday Period 4** now takes **English (Farhana Akter)** while the
+class-wide default keeps Period 4 as **Science (Hasan Mahmud)** for Section B — the same class, same
+period, different sections. Every teacher still stays at or under 5 periods a day.
+
+`tsc` 0 errors, `next build` clean (137 pages), `smoke-all.mjs` ALL GREEN, `verify-class-sessions.mjs`
+ALL GREEN, and a browser pass over `/dashboard/routine`: Class 1 whole-class grid, Section A's own week,
+Section B showing the inherited week with the banner, and the Periods & days panel.
+
+---
+
+## 🔁 Session — 2026-09-30 (live class sessions: the timetable *is* the roster)
+
+**Input:** the first cut of Live Class Sessions made the teacher *pick* a class, section, subject and
+period — several taps before they could start, and again for a restart. The request: when the office
+builds a routine and puts a teacher on a period, that period is already the teacher's roster; the
+portal should just show it, one tap of **Yes** to enter and **Finish class** when the lesson ends. The
+old manual start had to stay available for a teacher covering someone else's period.
+
+### 1. The roster is derived, never stored
+
+`src/app/api/class-sessions/route.ts` gains `rostersFor(schoolId, day, teacherIds)`, which returns
+each teacher's periods for a weekday: `routine` rows that name them (`teacherId`), **plus** — for
+schools whose routine editor does not set a teacher per period — routine rows with no teacher that
+match one of their `classAssignment`s on class + subject (sections compatible when either side is
+class-wide). Nothing is copied or synced, so editing the routine or an assignment updates the roster
+instantly. `GET ?view=me` now returns `roster[]` (each period with its class/section/subject names,
+period label, times, `isNow` and a `state` of `upcoming | inClass | done | declined`), alongside the
+existing `active`, `sessions`, `date`, `todayKey`, `liveMaxMinutes` and a new `otherSessions` (classes
+started with no scheduled period — a relief class, or legacy rows).
+
+### 2. Yes / No / Finish — one tap each
+
+- `POST /api/class-sessions` accepts `routineId` (and `action`), so the client sends only the period
+  id; the class, section, subject and label come from the timetable and cannot be mis-filed. Starting
+a period reuses that period's row for the day, so a re-start never leaves a duplicate and tapping Yes
+twice just returns the running session.
+- **No** writes a third status, `DECLINED` (`startedAt:null`, `declinedAt`), so the office can see a
+  period nobody covered; tapping Yes afterwards reopens the same row. `PATCH /[id]` on a declined row
+  now 409s with “marked as not taken”.
+- A period that belongs to another teacher 404s (“not on your timetable today”), and the existing
+  one-open-class-at-a-time 409 is unchanged.
+- The manual start (no `routineId`) is untouched — the “Covering another class?” panel.
+
+### 3. Screens
+
+- `src/app/teacher/classes/page.tsx` — rebuilt as the roster: one row per period with **Yes / No**
+  while waiting (amber “now” on the current period), “In class now” + **Finish class** while running,
+  “Done · ran N min” after, and “Not taken” + **I am teaching it** to undo a No. The class/section/
+  subject/period pickers only load inside the collapsed cover panel.
+- `src/app/dashboard/live-classes/page.tsx` — the board now shows the timetable *next to* the taps:
+  stat cards for **In class now / Not started / Not taken / On leave / Classes held**, and the teacher
+  table flags “Not started” (expected now, no tap) and “Not taken”, with the expected period named.
+  `GET ?view=roster` computes each teacher's `expected` current period, `declinedNow`, `declinedToday`
+  and `missing` (expected, nothing recorded — a period that was held or declined is not missing).
+- `src/app/parent/live-classes/page.tsx` — a declined period shows “Class not held” in the day list.
+- `src/components/Shell.tsx` — nav entries unchanged from the first cut (`/teacher/classes`,
+  `/dashboard/live-classes`, `/parent/live-classes`).
+
+### 4. Verification
+
+`scripts/verify-class-sessions.mjs` extended from 32 to **58 checks, all green**: a period written into
+`routines` appears on the teacher's console with no extra step (polling past the ~30 s read memo); the
+office board expects it and flags it “not started”; Yes → running → office sees it → tapping Yes again
+reuses the row; No → `DECLINED` (visible to the office, same row, cannot be ended, nothing live); Yes
+after No reopens; Finish closes and clears “missing”; a foreign period 404s. The suite also ends any
+stuck open class left by an earlier run before it starts. `tsc` 0 errors, `next build` clean (136
+pages), `smoke-all.mjs` ALL GREEN, and a browser walkthrough on the demo logins (teacher Yes → 15:57
+start, parent “Class in progress”, admin 1 in class / other teachers free, teacher Finish, English
+period “Not taken”). Probe rows are deleted afterwards — `classSessions` is back to its prior state.
+
+---
+
 ## 🔁 Session — 2026-09-30 (whole-project bug sweep: tenancy, orphaned money, idempotency — and the queryId/500 lesson)
 
 **Input:** "go through the whole project and find bugs" → a systematic sweep (security/tenancy, data
@@ -117,6 +333,7 @@ cd <project root>            # this checkout; no Node.js on PATH — always use 
 "$BUN" x next build          # production build
 ("$BUN" x next start -p 3000 > /tmp/sserp-start.log 2>&1 & echo $! > /tmp/sserp.pid)
 SMOKE_PORT=3000 "$BUN" scripts/smoke-all.mjs              # run harnesses ONE at a time (slow)
+SMOKE_PORT=3000 "$BUN" scripts/verify-notifications.mjs    # one centre, every sector, real events
 SMOKE_PORT=3000 "$BUN" scripts/verify-write-integrity.mjs
 SMOKE_PORT=3000 "$BUN" scripts/verify-fees-totals.mjs
 SMOKE_PORT=3000 "$BUN" scripts/verify-user-secrets.mjs
@@ -1234,4 +1451,6 @@ BASE=http://127.0.0.1:3123 node scripts/verify-tenant-isolation.mjs   # cross-sc
 node scripts/isolation-fixture.mjs create                  # …then `clean` when finished
 node scripts/verify-grading.mjs                            # grading scheme + columns + report card
 node scripts/seed-kit-demo.mjs                             # demo Class-1 kit (incl. one empty shelf)
+SMOKE_PORT=3123 node scripts/verify-class-sessions.mjs      # timetable-as-roster: Yes/No/Finish, board expectations
+SMOKE_PORT=3123 node scripts/verify-routine-config.mjs      # day shape (periods/times/days) + section-wise routine
 ```

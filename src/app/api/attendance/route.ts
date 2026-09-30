@@ -6,6 +6,7 @@ import { queryId } from "@/lib/utils";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 import { invalidateReferenceCache } from "@/lib/db";
+import { notifyGuardianOfStudent } from "@/lib/notify";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -84,6 +85,17 @@ export async function POST(req: NextRequest) {
   const teacher = session.role === "TEACHER" ? await prisma.teacher.findUnique({ where: { userId: session.id } }) : null;
   const markedById = teacher?.id || session.id;
 
+  // Who is NEWLY absent on this save? The register is re-saved whenever a
+  // teacher corrects one row, so notifying every absent child on every save
+  // would mail a family again and again. Compare against the stored register
+  // first and notify only a child who was not already marked absent today.
+  const priorRows: any[] = rowIds.length
+    ? await prisma.attendance.findMany({ where: { schoolId, studentId: { in: rowIds } } })
+    : [];
+  const alreadyAbsent = new Set(
+    priorRows.filter((a) => a.status === "ABSENT" && a.date && new Date(a.date).toDateString() === dt.toDateString()).map((a) => a.studentId)
+  );
+
   await prisma.$transaction(
     rows
       .filter((r: any) => r.studentId && branchOf.has(r.studentId) && r.status && r.status !== "UNMARKED")
@@ -108,5 +120,26 @@ export async function POST(req: NextRequest) {
   await audit("ATTENDANCE_SAVE", "attendance", date);
   invalidateStats(schoolId, "attendance");
   invalidateReferenceCache(schoolId);
+
+  // PRD §13 — a parent learns the same morning that their child was marked
+  // absent. Fire-and-forget: a notification must never fail the register.
+  const newlyAbsent = rows
+    .filter((r: any) => r.studentId && r.status === "ABSENT" && branchOf.has(r.studentId) && !alreadyAbsent.has(r.studentId))
+    .map((r: any) => String(r.studentId));
+  if (newlyAbsent.length) {
+    const kids = await prisma.student.findMany({ where: { id: { in: newlyAbsent }, schoolId }, select: { id: true, name: true } });
+    const nameOf = new Map((kids as any[]).map((s) => [s.id, s.name]));
+    await Promise.all(
+      newlyAbsent.map((studentId) =>
+        notifyGuardianOfStudent(schoolId, studentId, {
+          event: "ATTENDANCE_PUBLISHED",
+          title: `${nameOf.get(studentId) || "Your child"} was marked absent`,
+          body: `Attendance for ${dt.toLocaleDateString()} records an absence. Open the Attendance page for the monthly picture, or message the class teacher.`,
+          link: "/parent/attendance",
+        }).catch(() => null)
+      )
+    );
+  }
+
   return NextResponse.json({ data: { ok: true, count: rows.filter((r: any) => r.studentId && branchOf.has(r.studentId) && r.status && r.status !== "UNMARKED").length } });
 }

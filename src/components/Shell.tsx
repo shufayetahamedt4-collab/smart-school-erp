@@ -27,6 +27,7 @@ import {
   Scale,
   CalendarX2,
   CalendarCheck,
+  Radio,
   Images,
   Inbox,
   ArrowUpRight,
@@ -39,6 +40,7 @@ import {
   Building2,
   QrCode,
   ChevronDown,
+  Bell,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api, prefetch } from "@/lib/client";
@@ -100,18 +102,21 @@ interface NavItem {
 const NAVS: Record<string, NavItem[]> = {
   SUPER_ADMIN: [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/admin/notifications", label: "Notifications", icon: Bell },
     { href: "/admin/schools", label: "Schools", icon: School },
     { href: "/admin/billing", label: "Billing & Plans", icon: CreditCard },
     { href: "/admin/settings", label: "Global Settings", icon: Settings },
   ],
   SCHOOL_ADMIN: [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/students", label: "Students", icon: GraduationCap },
     { href: "/dashboard/teachers", label: "Teachers", icon: Users },
     { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
     { href: "/dashboard/subjects", label: "Subjects", icon: BookOpen },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
+    { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
     { href: "/dashboard/grades", label: "Grading & GPA", icon: Award },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
@@ -137,12 +142,14 @@ const NAVS: Record<string, NavItem[]> = {
   ],
   BRANCH_ADMIN: [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/students", label: "Students", icon: GraduationCap },
     { href: "/dashboard/teachers", label: "Teachers", icon: Users },
     { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
     { href: "/dashboard/subjects", label: "Subjects", icon: BookOpen },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
+    { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
     { href: "/dashboard/grades", label: "Grading & GPA", icon: Award },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
@@ -167,6 +174,7 @@ const NAVS: Record<string, NavItem[]> = {
   ],
   REGISTRAR: [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/students", label: "Students", icon: GraduationCap },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
@@ -175,6 +183,7 @@ const NAVS: Record<string, NavItem[]> = {
   ],
   ACCOUNTANT: [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/students", label: "Students", icon: GraduationCap },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
@@ -184,15 +193,19 @@ const NAVS: Record<string, NavItem[]> = {
   ],
   LIBRARIAN: [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/library", label: "Library & Books", icon: BookOpen },
   ],
   FRONT_DESK: [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
   ],
   TEACHER: [
     { href: "/teacher", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/teacher/notifications", label: "Notifications", icon: Bell },
+    { href: "/teacher/classes", label: "My Classes", icon: Radio },
     { href: "/teacher/attendance", label: "Attendance", icon: ClipboardList },
     { href: "/teacher/remarks", label: "Daily Remarks", icon: MessageSquare },
     { href: "/teacher/homework", label: "Homework", icon: BookOpen },
@@ -207,6 +220,8 @@ const NAVS: Record<string, NavItem[]> = {
   ],
   GUARDIAN: [
     { href: "/parent", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/parent/notifications", label: "Notifications", icon: Bell },
+    { href: "/parent/live-classes", label: "Live Classes", icon: Radio },
     { href: "/parent/attendance", label: "Attendance", icon: ClipboardList },
     { href: "/parent/homework", label: "Homework", icon: BookOpen },
     { href: "/parent/quizzes", label: "Quizzes", icon: ClipboardList },
@@ -223,6 +238,19 @@ const NAVS: Record<string, NavItem[]> = {
     { href: "/parent/messages", label: "Messages", icon: MessageSquare },
     { href: "/parent/profile", label: "My Profile", icon: UserRound },
   ],
+};
+
+/** Where the bell's "View all" hands off, per role. */
+const NOTIFICATIONS_HREF: Record<string, string> = {
+  SUPER_ADMIN: "/admin/notifications",
+  SCHOOL_ADMIN: "/dashboard/notifications",
+  BRANCH_ADMIN: "/dashboard/notifications",
+  REGISTRAR: "/dashboard/notifications",
+  ACCOUNTANT: "/dashboard/notifications",
+  LIBRARIAN: "/dashboard/notifications",
+  FRONT_DESK: "/dashboard/notifications",
+  TEACHER: "/teacher/notifications",
+  GUARDIAN: "/parent/notifications",
 };
 
 /** Where the account menu's "Profile" entry points, per role. */
@@ -589,7 +617,7 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
 
           {user && (
             <div className="flex items-center gap-2">
-              <NotificationBell />
+              <NotificationBell viewAllHref={NOTIFICATIONS_HREF[effRole] || "/dashboard/notifications"} />
               <AccountMenu me={me} role={effRole} onSignOut={logout} />
             </div>
           )}

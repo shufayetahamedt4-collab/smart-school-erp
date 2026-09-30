@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit, guardianChildId, guardianChildIds } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { notifyUsers } from "@/lib/notify";
+import { notifyUsers, notifyGuardianOfStudent } from "@/lib/notify";
 
 /**
  * PRD §9.2 — Leave Management (built before Timetable/Substitution per plan).
@@ -131,5 +131,31 @@ export async function PATCH(req: NextRequest) {
     data: { status, approvedById: session.id, approvedAt: new Date() },
   });
   await audit(`LEAVE_${status}`, "leaveRequest", id);
+
+  // PRD §13 — the applicant is told the decision, not left to re-check the page.
+  const approved = status === "APPROVED";
+  if (leave.teacherId) {
+    const teacher: any = await prisma.teacher.findUnique({ where: { id: String(leave.teacherId) } });
+    if (teacher?.userId) {
+      await notifyUsers({
+        schoolId: session.schoolId!,
+        userIds: [teacher.userId],
+        event: "LEAVE_DECISION",
+        title: approved ? "Your leave was approved" : "Your leave was declined",
+        body: `Request for ${new Date(leave.fromDate as any).toLocaleDateString()} was ${approved ? "approved" : "declined"} by ${session.name || "the office"}.`,
+        link: "/teacher/leaves",
+        excludeUserId: session.id,
+      }).catch(() => null);
+    }
+  } else if (leave.studentId) {
+    await notifyGuardianOfStudent(session.schoolId!, String(leave.studentId), {
+      event: "LEAVE_DECISION",
+      title: approved ? "Leave approved" : "Leave declined",
+      body: `Your leave request for ${new Date(leave.fromDate as any).toLocaleDateString()} was ${approved ? "approved" : "declined"}.`,
+      link: "/parent/leave",
+      excludeUserId: session.id,
+    }).catch(() => null);
+  }
+
   return NextResponse.json({ data: updated });
 }

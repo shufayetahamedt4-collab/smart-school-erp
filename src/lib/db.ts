@@ -133,6 +133,7 @@ const COLS: Record<string, string> = {
   virtualClass: "virtualClasses",
   timetableSlot: "timetableSlots",
   substitution: "substitutions",
+  classSession: "classSessions",
   calendarEvent: "calendarEvents",
   twoFactor: "twoFactor",
 };
@@ -1550,6 +1551,7 @@ export const prisma = {
   virtualClass: model("virtualClass"),
   timetableSlot: model("timetableSlot"),
   substitution: model("substitution"),
+  classSession: model("classSession"),
   calendarEvent: model("calendarEvent"),
   twoFactor: model("twoFactor"),
   $transaction: transaction,
