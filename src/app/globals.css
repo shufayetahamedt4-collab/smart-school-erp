@@ -19,8 +19,56 @@
   /* ---- PRD §12.2 white-label: school brand accent (runtime-set) ----
      Defaults to the platform indigo; Shell overrides it with the
      school's themeColor (rgb triplet) so every school-scoped control
-     picks up the school's brand color. */
+     picks up the school's brand color. This is the ONLY interactive accent:
+     chrome, accents and tints all derive from it, so an arbitrary tenant
+     theme color stays balanced. */
   --brand: 79 70 229;
+
+  /* ---- Design tokens (additive; defaults reproduce the original look) ----
+     These drive the shared component classes below. Declaring them changes
+     nothing on its own: each default is exactly the value the class had
+     before. The School Admin panel overrides them in one scoped block, so
+     Teacher / Parent / Platform Console keep the original rendering. See the
+     [data-sector="school"] block beneath :root. */
+  --radius-card: 1rem;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04);
+  --radius-control: 0.75rem;
+  --th-pad-y: 0.6rem;
+  --td-pad-y: 0.7rem;
+
+  /* App chrome. Navy in the School Admin panel; unchanged slate everywhere else. */
+  --chrome-bg: var(--color-slate-900);
+  --chrome-hover: var(--color-slate-800);
+  --chrome-line: rgb(255 255 255 / 0.08);
+  --chrome-text: var(--color-slate-300);
+  --chrome-muted: var(--color-slate-400);
+
+  /* Restrained accent, used in exactly two places (the subscription chip and
+     the app icon plate). Never a primary color. */
+  --gold: 200 167 91;
+}
+
+/* ---- School Admin panel scope (PRD §14.2 enterprise pass) ----
+   Applied only where Shell sets data-sector="school". The other three apps
+   (teacher, guardian, super) never match this selector, so they render exactly
+   as before: same card radius, same table density, same slate chrome. The
+   school's own brand color (--brand) stays the interactive accent and is NOT
+   touched here — only the neutral chrome and the shape tokens change. */
+[data-sector="school"] {
+  --radius-card: 0.75rem;
+  /* Whisper-light: the School Admin workspace is defined by its hairlines and
+     its whitespace, not by elevation. No glow, no glass, no gradient. */
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.03);
+  --radius-control: 0.625rem;
+  --th-pad-y: 0.55rem;
+  --td-pad-y: 0.62rem;
+
+  /* Deep navy institutional chrome. */
+  --chrome-bg: #0b1220;
+  --chrome-hover: rgb(255 255 255 / 0.06);
+  --chrome-line: rgb(255 255 255 / 0.09);
+  --chrome-text: #b8c3d4;
+  --chrome-muted: #7d8ba1;
 }
 
 /* PRD §14.2 dark mode is deliberately GONE.
@@ -56,15 +104,20 @@ body {
   .card {
     background: #fff;
     border: 1px solid var(--color-slate-200);
-    border-radius: 1rem;
-    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  /* App chrome (sidebars). Default is the original slate-900; the School Admin
+     scope paints it deep navy. */
+  .ss-chrome {
+    background: var(--chrome-bg);
   }
   .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    border-radius: 0.75rem;
+    border-radius: var(--radius-control);
     padding: 0.55rem 1rem;
     font-size: 0.875rem;
     font-weight: 600;
@@ -110,11 +163,11 @@ body {
   .btn-sm {
     padding: 0.35rem 0.7rem;
     font-size: 0.8rem;
-    border-radius: 0.6rem;
+    border-radius: calc(var(--radius-control) * 0.8);
   }
   .input {
     width: 100%;
-    border-radius: 0.75rem;
+    border-radius: var(--radius-control);
     border: 1px solid var(--color-slate-300);
     background: #fff;
     padding: 0.55rem 0.85rem;
@@ -154,12 +207,12 @@ body {
     letter-spacing: 0.03em;
     text-transform: uppercase;
     color: var(--color-slate-600);
-    padding: 0.6rem 0.9rem;
+    padding: var(--th-pad-y) 0.9rem;
     border-bottom: 1px solid var(--color-slate-200);
     white-space: nowrap;
   }
   .td {
-    padding: 0.7rem 0.9rem;
+    padding: var(--td-pad-y) 0.9rem;
     font-size: 0.85rem;
     color: var(--color-slate-800);
     border-bottom: 1px solid var(--color-slate-200);
@@ -168,6 +221,301 @@ body {
   .tr-hover:hover {
     background: var(--color-slate-100);
   }
+
+  /* =====================================================================
+     School Admin panel — component refinements (Pass 2).
+     Scoped to [data-sector="school"], so Teacher / Guardian / Platform
+     Console keep the original rendering exactly. Presentation only.
+     ===================================================================== */
+
+  [data-sector="school"] .btn {
+    height: 2.25rem;
+    padding: 0 0.95rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.005em;
+  }
+  [data-sector="school"] .btn-sm {
+    height: 1.95rem;
+    padding: 0 0.7rem;
+    font-size: 0.78rem;
+  }
+  /* The primary glow was a hardcoded indigo; under the school scope it follows
+     the tenant's own theme color so a green/blue/pink school is tinted
+     correctly. The global default is left untouched for the other sectors. */
+  [data-sector="school"] .btn-primary {
+    box-shadow: 0 1px 2px rgb(var(--brand) / 0.26);
+  }
+
+  [data-sector="school"] .input {
+    height: 2.25rem;
+    padding: 0 0.8rem;
+    font-size: 0.8125rem;
+  }
+  [data-sector="school"] textarea.input {
+    height: auto;
+    padding: 0.5rem 0.8rem;
+  }
+
+  [data-sector="school"] .badge {
+    border-radius: 0.375rem;
+    padding: 0.08rem 0.44rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.012em;
+    gap: 0.25rem;
+  }
+
+  [data-sector="school"] .th {
+    background: var(--color-slate-50);
+    color: var(--color-slate-500);
+    font-size: 0.67rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+  }
+  [data-sector="school"] .td {
+    font-size: 0.8125rem;
+    color: var(--color-slate-700);
+    border-bottom-color: var(--color-slate-100);
+  }
+  [data-sector="school"] .tr-hover:hover {
+    background: var(--color-slate-50);
+  }
+
+  /* --- sidebar chrome -------------------------------------------------- */
+  [data-sector="school"] .ss-navlink {
+    color: var(--chrome-text);
+    font-weight: 500;
+  }
+  [data-sector="school"] .ss-navlink:hover {
+    background: var(--chrome-hover);
+    color: #fff;
+  }
+  [data-sector="school"] .ss-navlink svg {
+    color: var(--chrome-muted);
+    transition: color 0.15s ease;
+  }
+  [data-sector="school"] .ss-navlink:hover svg {
+    color: #cbd7e6;
+  }
+  /* The active row: a tinted brand wash + inset ring + a left accent bar,
+     rather than the previous fully saturated pill. */
+  [data-sector="school"] .ss-navlink-active,
+  [data-sector="school"] .ss-navlink-active:hover {
+    background: rgb(var(--brand) / 0.18);
+    color: #fff;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px rgb(var(--brand) / 0.32);
+  }
+  [data-sector="school"] .ss-navlink-active svg,
+  [data-sector="school"] .ss-navlink-active:hover svg {
+    color: #fff;
+  }
+  [data-sector="school"] .ss-groupheader {
+    transition: background-color 0.15s ease;
+  }
+  [data-sector="school"] .ss-groupheader:hover {
+    background: var(--chrome-hover);
+  }
+  /* Keyboard focus on the navy rail: the UA ring is nearly invisible against it,
+     so the rail paints its own brand-tinted ring. */
+  [data-sector="school"] .ss-navlink:focus-visible,
+  [data-sector="school"] .ss-groupheader:focus-visible {
+    outline: 2px solid rgb(var(--brand) / 0.75);
+    outline-offset: 1px;
+  }
+  [data-sector="school"] .ss-childrail {
+    border-color: var(--chrome-line);
+  }
+  /* Thin, dark scrollbar inside the navy rail (the global one is light slate). */
+  [data-sector="school"] .ss-chrome nav {
+    scrollbar-width: thin;
+  }
+  [data-sector="school"] .ss-chrome nav::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.16);
+  }
+}
+
+/* =======================================================================
+   School Admin — typography + composition helpers.
+
+   Deliberately OUTSIDE @layer components: these intentionally override the
+   Tailwind utilities on the same element (a page title is `text-xl
+   font-extrabold`, and a layer-scoped rule could never win that fight). Every
+   selector is gated on [data-sector="school"], so nothing here can reach the
+   Teacher, Guardian or Platform Console applications.
+   ======================================================================= */
+[data-sector="school"] .ss-page-title {
+  font-size: 1.375rem;
+  line-height: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.018em;
+  color: var(--color-slate-900);
+}
+[data-sector="school"] .ss-page-sub {
+  font-size: 0.8125rem;
+  line-height: 1.15rem;
+  font-weight: 400;
+  color: var(--color-slate-500);
+}
+[data-sector="school"] .ss-card-title {
+  font-size: 0.875rem;
+  line-height: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+  color: var(--color-slate-900);
+}
+[data-sector="school"] .ss-card-sub {
+  font-size: 0.75rem;
+  line-height: 1.05rem;
+  font-weight: 400;
+  color: var(--color-slate-500);
+}
+[data-sector="school"] .ss-eyebrow {
+  font-size: 0.67rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+[data-sector="school"] .ss-metric {
+  font-size: 1.5rem;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  color: var(--color-slate-900);
+  font-variant-numeric: tabular-nums;
+}
+[data-sector="school"] .ss-band {
+  background: var(--color-slate-50);
+  border: 1px solid var(--color-slate-200);
+  border-radius: var(--radius-card);
+}
+[data-sector="school"] .ss-row-hover {
+  transition: background-color 0.15s ease;
+}
+[data-sector="school"] .ss-row-hover:hover {
+  background: var(--color-slate-50);
+}
+[data-sector="school"] .ss-hairline {
+  border-bottom: 1px solid var(--color-slate-100);
+}
+
+/* --- composed workspace surfaces (Pass 3) ------------------------------
+   The dashboard is grouped into a few large surfaces instead of a stack of
+   independent cards. A surface is border-defined and shadow-free; the mix of
+   a flat pulse strip, a white data strip and hairline-separated rows is what
+   makes the page read as one workspace. */
+[data-sector="school"] .ss-surface {
+  background: #fff;
+  border: 1px solid var(--color-slate-200);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+/* A supporting surface: same shape, but its heading is quieter, so Notice
+   Board / PTM / engagement sit clearly below the operational sections. */
+[data-sector="school"] .ss-surface-quiet {
+  background: #fff;
+  border: 1px solid var(--color-slate-200);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+/* Section heading inside a surface: page-context eyebrow + title, one hairline. */
+[data-sector="school"] .ss-section {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--color-slate-100);
+}
+[data-sector="school"] .ss-section-title {
+  font-size: 0.8125rem;
+  line-height: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--color-slate-900);
+}
+[data-sector="school"] .ss-section-sub {
+  margin-top: 0.1rem;
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 400;
+  color: var(--color-slate-500);
+}
+[data-sector="school"] .ss-section-quiet .ss-section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-slate-700);
+}
+[data-sector="school"] .ss-section-quiet {
+  padding: 0.7rem 0.9rem;
+}
+
+/* The "today at a glance" pulse: inline operational facts with hairline
+   separators, deliberately NOT four KPI clones. */
+[data-sector="school"] .ss-fact {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  min-width: 0;
+}
+[data-sector="school"] .ss-fact-label {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--color-slate-500);
+  white-space: nowrap;
+}
+[data-sector="school"] .ss-fact-value {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.1rem;
+  color: var(--color-slate-900);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A feed / queue row: one line, hairline-separated, compact. */
+[data-sector="school"] .ss-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.58rem 1rem;
+  min-width: 0;
+}
+/* On a tinted rail the row hover must darken, not lighten (slate-50 → slate-100). */
+[data-sector="school"] .ss-rail .ss-row-hover:hover {
+  background: var(--color-slate-100);
+}
+[data-sector="school"] .ss-rail .ss-section {
+  border-bottom-color: var(--color-slate-200);
+}
+[data-sector="school"] .ss-row-time {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--color-slate-500);
+  font-variant-numeric: tabular-nums;
+}
+
+/* App chrome typography: the global bar is chrome, the page header is context. */
+[data-sector="school"] .ss-appbar {
+  height: 3.5rem;
+}
+[data-sector="school"] .ss-appbar-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--color-slate-800);
+}
+[data-sector="school"] .ss-appbar-role {
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  color: var(--color-slate-400);
 }
 
 /* pretty scrollbars */

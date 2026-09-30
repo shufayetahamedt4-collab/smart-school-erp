@@ -3,50 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  LayoutDashboard,
-  Users,
-  GraduationCap,
-  BookOpen,
-  CalendarDays,
-  ClipboardList,
-  Megaphone,
-  Wallet,
-  IdCard,
-  FileText,
-  MessageSquare,
-  Settings,
-  School,
-  BarChart3,
-  LogOut,
-  Menu,
-  X,
-
-  ShieldCheck,
-  Crown,
-  Scale,
-  CalendarX2,
-  CalendarCheck,
-  Radio,
-  Images,
-  Inbox,
-  ArrowUpRight,
-  Award,
-  FolderOpen,
-  CreditCard,
-  BookUp,
-  UserRound,
-  UserCog,
-  Building2,
-  QrCode,
-  ChevronDown,
-  Bell,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Crown, GraduationCap, LogOut, Menu, X, UserRound, ChevronDown } from "lucide-react";
 import { api, prefetch } from "@/lib/client";
-import { cn, initials, classOf } from "@/lib/utils";
+import { cn, initials } from "@/lib/utils";
 import { sectorForRole } from "@/lib/sectors";
 import { dataForRoute, warmListForSector } from "@/lib/route-data";
+import { NAVS, NOTIFICATIONS_HREF, PROFILE_HREF, groupNavFor, type NavGroup, type NavItem } from "./nav";
 import { PageSkeleton } from "./PageSkeleton";
 import { NotificationBell } from "./NotificationBell";
 
@@ -93,178 +55,8 @@ export function applyBrandColor(themeColor?: string | null) {
   document.documentElement.style.setProperty("--brand", `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`);
 }
 
-interface NavItem {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-}
-
-const NAVS: Record<string, NavItem[]> = {
-  SUPER_ADMIN: [
-    { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/admin/notifications", label: "Notifications", icon: Bell },
-    { href: "/admin/schools", label: "Schools", icon: School },
-    { href: "/admin/billing", label: "Billing & Plans", icon: CreditCard },
-    { href: "/admin/settings", label: "Global Settings", icon: Settings },
-  ],
-  SCHOOL_ADMIN: [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
-    { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
-    { href: "/dashboard/students", label: "Students", icon: GraduationCap },
-    { href: "/dashboard/teachers", label: "Teachers", icon: Users },
-    { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
-    { href: "/dashboard/subjects", label: "Subjects", icon: BookOpen },
-    { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
-    { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
-    { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
-    { href: "/dashboard/grades", label: "Grading & GPA", icon: Award },
-    { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
-    { href: "/dashboard/fees", label: "Fees", icon: Wallet },
-    { href: "/dashboard/fees/structure", label: "Fee structure", icon: Wallet },
-    { href: "/dashboard/fees/payments", label: "Payment channels", icon: CreditCard },
-    { href: "/dashboard/ledger", label: "Ledger", icon: Scale },
-    { href: "/dashboard/leaves", label: "Leave Requests", icon: CalendarX2 },
-    { href: "/dashboard/meetings", label: "PTM Slots", icon: CalendarCheck },
-    { href: "/dashboard/gallery", label: "Gallery", icon: Images },
-    { href: "/dashboard/complaints", label: "Feedback Box", icon: Inbox },
-    { href: "/dashboard/promotion", label: "Promotion & Alumni", icon: ArrowUpRight },
-    { href: "/dashboard/library", label: "Library & Books", icon: BookOpen },
-    { href: "/dashboard/resources", label: "Materials", icon: FolderOpen },
-    { href: "/dashboard/guardians", label: "Guardians", icon: ShieldCheck },
-    { href: "/dashboard/guardian-app", label: "Parents App", icon: QrCode },
-    { href: "/dashboard/id-cards", label: "ID Cards", icon: IdCard },
-    { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
-    { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
-    { href: "/dashboard/branches", label: "Branches", icon: Building2 },
-    { href: "/dashboard/staff", label: "Staff & Roles", icon: UserCog },
-    { href: "/dashboard/settings", label: "Settings", icon: Settings },
-  ],
-  BRANCH_ADMIN: [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
-    { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
-    { href: "/dashboard/students", label: "Students", icon: GraduationCap },
-    { href: "/dashboard/teachers", label: "Teachers", icon: Users },
-    { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
-    { href: "/dashboard/subjects", label: "Subjects", icon: BookOpen },
-    { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
-    { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
-    { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
-    { href: "/dashboard/grades", label: "Grading & GPA", icon: Award },
-    { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
-    { href: "/dashboard/fees", label: "Fees", icon: Wallet },
-    { href: "/dashboard/fees/structure", label: "Fee structure", icon: Wallet },
-    { href: "/dashboard/fees/payments", label: "Payment channels", icon: CreditCard },
-    { href: "/dashboard/ledger", label: "Ledger", icon: Scale },
-    { href: "/dashboard/leaves", label: "Leave Requests", icon: CalendarX2 },
-    { href: "/dashboard/meetings", label: "PTM Slots", icon: CalendarCheck },
-    { href: "/dashboard/gallery", label: "Gallery", icon: Images },
-    { href: "/dashboard/complaints", label: "Feedback Box", icon: Inbox },
-    { href: "/dashboard/library", label: "Library & Books", icon: BookOpen },
-    { href: "/dashboard/resources", label: "Materials", icon: FolderOpen },
-    { href: "/dashboard/guardians", label: "Guardians", icon: ShieldCheck },
-    { href: "/dashboard/guardian-app", label: "Parents App", icon: QrCode },
-    { href: "/dashboard/id-cards", label: "ID Cards", icon: IdCard },
-    { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
-    { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
-    { href: "/dashboard/branches", label: "My Branch", icon: Building2 },
-    { href: "/dashboard/staff", label: "Branch Staff", icon: UserCog },
-    { href: "/dashboard/settings", label: "Settings", icon: Settings },
-  ],
-  REGISTRAR: [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
-    { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
-    { href: "/dashboard/students", label: "Students", icon: GraduationCap },
-    { href: "/dashboard/fees", label: "Fees", icon: Wallet },
-    { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
-    { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
-  ],
-  ACCOUNTANT: [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
-    { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
-    { href: "/dashboard/students", label: "Students", icon: GraduationCap },
-    { href: "/dashboard/fees", label: "Fees", icon: Wallet },
-    { href: "/dashboard/fees/structure", label: "Fee structure", icon: Wallet },
-    { href: "/dashboard/fees/payments", label: "Payment channels", icon: CreditCard },
-    { href: "/dashboard/ledger", label: "Ledger", icon: Scale },
-  ],
-  LIBRARIAN: [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
-    { href: "/dashboard/library", label: "Library & Books", icon: BookOpen },
-  ],
-  FRONT_DESK: [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
-    { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
-    { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
-  ],
-  TEACHER: [
-    { href: "/teacher", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/teacher/notifications", label: "Notifications", icon: Bell },
-    { href: "/teacher/classes", label: "My Classes", icon: Radio },
-    { href: "/teacher/attendance", label: "Attendance", icon: ClipboardList },
-    { href: "/teacher/remarks", label: "Daily Remarks", icon: MessageSquare },
-    { href: "/teacher/homework", label: "Homework", icon: BookOpen },
-    { href: "/teacher/marks", label: "Marks Entry", icon: FileText },
-    { href: "/teacher/results", label: "Results", icon: BarChart3 },
-    { href: "/teacher/grades", label: "Grading & GPA", icon: Award },
-    { href: "/teacher/resources", label: "My Materials", icon: FolderOpen },
-    { href: "/teacher/quizzes", label: "Quizzes", icon: ClipboardList },
-    { href: "/teacher/leaves", label: "My Leaves", icon: CalendarX2 },
-    { href: "/teacher/meetings", label: "PTM Slots", icon: CalendarCheck },
-    { href: "/teacher/messages", label: "Messages", icon: MessageSquare },
-  ],
-  GUARDIAN: [
-    { href: "/parent", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/parent/notifications", label: "Notifications", icon: Bell },
-    { href: "/parent/live-classes", label: "Live Classes", icon: Radio },
-    { href: "/parent/attendance", label: "Attendance", icon: ClipboardList },
-    { href: "/parent/homework", label: "Homework", icon: BookOpen },
-    { href: "/parent/quizzes", label: "Quizzes", icon: ClipboardList },
-    { href: "/parent/remarks", label: "Teacher Remarks", icon: MessageSquare },
-    { href: "/parent/results", label: "Exam Results", icon: FileText },
-    { href: "/parent/fees", label: "Fees & Payments", icon: Wallet },
-    { href: "/parent/books", label: "My Books", icon: BookUp },
-    { href: "/parent/resources", label: "Class Materials", icon: FolderOpen },
-    { href: "/parent/gallery", label: "Gallery", icon: Images },
-    { href: "/parent/meetings", label: "Book PTM", icon: CalendarCheck },
-    { href: "/parent/leave", label: "Apply Leave", icon: CalendarX2 },
-    { href: "/parent/feedback", label: "Complaints", icon: Inbox },
-    { href: "/parent/notices", label: "Notices", icon: Megaphone },
-    { href: "/parent/messages", label: "Messages", icon: MessageSquare },
-    { href: "/parent/profile", label: "My Profile", icon: UserRound },
-  ],
-};
-
-/** Where the bell's "View all" hands off, per role. */
-const NOTIFICATIONS_HREF: Record<string, string> = {
-  SUPER_ADMIN: "/admin/notifications",
-  SCHOOL_ADMIN: "/dashboard/notifications",
-  BRANCH_ADMIN: "/dashboard/notifications",
-  REGISTRAR: "/dashboard/notifications",
-  ACCOUNTANT: "/dashboard/notifications",
-  LIBRARIAN: "/dashboard/notifications",
-  FRONT_DESK: "/dashboard/notifications",
-  TEACHER: "/teacher/notifications",
-  GUARDIAN: "/parent/notifications",
-};
-
-/** Where the account menu's "Profile" entry points, per role. */
-const PROFILE_HREF: Record<string, string> = {
-  SUPER_ADMIN: "/admin/settings",
-  SCHOOL_ADMIN: "/dashboard/settings",
-  BRANCH_ADMIN: "/dashboard/settings",
-  REGISTRAR: "/dashboard/settings",
-  ACCOUNTANT: "/dashboard/settings",
-  LIBRARIAN: "/dashboard/settings",
-  FRONT_DESK: "/dashboard/settings",
-  GUARDIAN: "/parent/profile",
-  TEACHER: "/teacher",
-};
+/** Persisted open/closed state of the grouped sidebar sections. */
+const NAV_GROUPS_KEY = "ss_nav_groups_v1";
 
 /**
  * Header account menu (replaces the old decorative avatar): account details,
@@ -474,6 +266,20 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
   const [drawer, setDrawer] = useState(false);
   const warmed = useRef(false);
 
+  // The dashboard hosts several roles (SCHOOL_ADMIN, BRANCH_ADMIN, REGISTRAR,
+  // ACCOUNTANT, LIBRARIAN, FRONT_DESK) — the sidebar always follows the
+  // session's real role, not the layout's placeholder prop.
+  const effRole = me?.user?.role || role;
+  const nav = NAVS[effRole] || [];
+  const user = me?.user;
+  /** Which app is this shell? (each sector has its own name and nav) */
+  const app = sectorForRole(effRole);
+  const sectorKey = app?.key;
+
+  // School Admin panel roles get the grouped sidebar; every other sector keeps
+  // the original flat list, untouched.
+  const groups = useMemo(() => groupNavFor(effRole), [effRole]);
+
   // Once the shell knows who is signed in, warm the rest of this app's reads in
   // the background — pre-paying them is what makes the *first* click on any
   // sidebar entry instant when a Firestore read costs 0.5–1.2s cold. The
@@ -508,15 +314,6 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
     };
   }, [me]);
 
-  // The dashboard hosts several roles (SCHOOL_ADMIN, BRANCH_ADMIN, REGISTRAR,
-  // ACCOUNTANT, LIBRARIAN, FRONT_DESK) — the sidebar always follows the
-  // session's real role, not the layout's placeholder prop.
-  const effRole = me?.user?.role || role;
-  const nav = NAVS[effRole] || [];
-  const user = me?.user;
-  /** Which app is this shell? (each sector has its own name and nav) */
-  const app = sectorForRole(effRole);
-
   const logout = async () => {
     await api("/api/auth/logout", { method: "POST" }).catch(() => null);
     writeCachedMe(null);
@@ -534,23 +331,23 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
   // route loads and only the data fills in.
   if (loading) {
     return (
-      <div className="min-h-screen bg-white">
-        <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-slate-900 lg:flex">
-          <div className="flex items-center gap-3 px-5 py-5">
-            <div className="h-10 w-10 rounded-xl bg-slate-800" />
+      <div className="min-h-screen bg-white" data-sector={sectorKey}>
+        <aside className="ss-chrome fixed inset-y-0 left-0 z-40 hidden w-64 flex-col lg:flex">
+          <div className="flex items-center gap-3 px-4 py-4">
+            <div className="h-10 w-10 rounded-lg bg-white/10" />
             <div className="space-y-2">
-              <div className="h-3 w-28 rounded bg-slate-800" />
-              <div className="h-2 w-20 rounded bg-slate-800/70" />
+              <div className="h-3 w-28 rounded bg-white/10" />
+              <div className="h-2 w-20 rounded bg-white/[0.07]" />
             </div>
           </div>
           <div className="flex-1 space-y-2 px-3">
             {Array.from({ length: 9 }).map((_, i) => (
-              <div key={i} className="h-9 rounded-xl bg-slate-800/60" />
+              <div key={i} className="h-9 rounded-lg bg-white/[0.06]" />
             ))}
           </div>
         </aside>
         <div className="flex min-h-screen flex-col lg:pl-64">
-          <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/85 px-4 backdrop-blur md:px-6">
+          <header className="ss-appbar sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/85 px-4 backdrop-blur md:px-6">
             <div className="h-4 w-40 rounded bg-slate-200" />
             <div className="ml-auto flex items-center gap-2">
               <div className="h-8 w-8 rounded-full bg-slate-100" />
@@ -566,15 +363,19 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white" data-sector={sectorKey}>
       {/* desktop sidebar */}
-      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-slate-900 lg:flex">
+      <aside className="ss-chrome no-print fixed inset-y-0 left-0 z-40 hidden w-64 flex-col lg:flex">
         <SidebarContent
           role={effRole}
           nav={nav}
+          groups={groups}
           active={active}
           schoolName={me?.school?.name}
+          schoolLogo={me?.school?.logoUrl}
+          plan={me?.school?.plan}
           appLabel={app?.label}
+          appShort={app?.app}
           onClose={() => setDrawer(false)}
         />
       </aside>
@@ -583,13 +384,17 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
       {drawer && (
         <div className="no-print fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setDrawer(false)} />
-          <aside className="absolute inset-y-0 left-0 w-72 bg-slate-900 shadow-2xl">
+          <aside className="ss-chrome absolute inset-y-0 left-0 w-72 shadow-2xl">
             <SidebarContent
               role={effRole}
               nav={nav}
+              groups={groups}
               active={active}
               schoolName={me?.school?.name}
+              schoolLogo={me?.school?.logoUrl}
+              plan={me?.school?.plan}
               appLabel={app?.label}
+              appShort={app?.app}
               onClose={() => setDrawer(false)}
             />
           </aside>
@@ -598,20 +403,25 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
 
       {/* main */}
       <div className="flex min-h-screen flex-col lg:pl-64">
-        <header className="no-print sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/85 px-4 backdrop-blur md:px-6">
-          <button className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden" onClick={() => setDrawer(true)}>
+        <header className="ss-appbar no-print sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/85 px-4 backdrop-blur md:px-6">
+          <button className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden" onClick={() => setDrawer(true)} aria-label="Open navigation">
             <Menu size={20} />
           </button>
+          {/* Chrome, not content: the school's identity stays here, quietly, while
+              the page header below carries the page's own context. */}
           <div className="min-w-0 flex-1">
             {me?.school ? (
-              <div className="truncate text-sm font-bold text-slate-800">{me.school.name}</div>
+              <div className="ss-appbar-name truncate text-sm font-bold text-slate-800">{me.school.name}</div>
             ) : (
-              <div className="text-sm font-bold text-slate-800">Amar E School</div>
+              <div className="ss-appbar-name text-sm font-bold text-slate-800">Amar E School</div>
             )}
-            <div className="hidden text-[11px] uppercase tracking-widest text-slate-400 sm:block">
+            <div className="ss-appbar-role hidden text-[11px] uppercase tracking-widest text-slate-400 sm:block">
               {app ? app.app : effRole.replace("_", " ")}
               {user?.scope === "BRANCH" && user?.branch && <span className="ml-1">· {user.branch.name}</span>}
-              {me?.school?.plan && <span className="ml-2 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-600">{me.school.plan} plan</span>}
+              {/* The school panel surfaces the plan in its sidebar branding block,
+                  so the header chip is only for the other sectors — same badge,
+                  never shown twice. */}
+              {!groups && me?.school?.plan && <span className="ml-2 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-600">{me.school.plan} plan</span>}
             </div>
           </div>
 
@@ -633,23 +443,39 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
   );
 }
 
-function SidebarContent({
+/**
+ * The top branding block.
+ *
+ * `premium` is the School Admin panel variant: the school's own logo in a
+ * protected, contrast-safe container (so wide, tall or tiny logos all stay
+ * balanced and undistorted), a truncating school name, and the school's live
+ * subscription plan. The plan chip renders ONLY when the school actually has a
+ * plan — there is no placeholder and no fallback label.
+ *
+ * Every other sector passes `premium={false}` and gets the original block.
+ */
+function BrandingBlock({
+  premium,
   role,
-  nav,
-  active,
   schoolName,
+  schoolLogo,
+  plan,
   appLabel,
+  appShort,
   onClose,
 }: {
+  premium: boolean;
   role: string;
-  nav: NavItem[];
-  active: string;
   schoolName?: string;
+  schoolLogo?: string | null;
+  plan?: string | null;
   appLabel?: string;
+  /** Short product name ("School Admin") for the compact premium rail. */
+  appShort?: string;
   onClose: () => void;
 }) {
-  return (
-    <div className="flex h-full flex-col">
+  if (!premium) {
+    return (
       <div className="flex items-center gap-3 px-5 py-5">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl brand-bg text-lg font-black text-white shadow-lg">
           {role === "SUPER_ADMIN" ? <Crown size={20} /> : <GraduationCap size={20} />}
@@ -660,44 +486,261 @@ function SidebarContent({
           </div>
           <div className="text-[10px] uppercase tracking-widest text-slate-400">{appLabel || "ERP Console"}</div>
         </div>
-        <button className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 lg:hidden" onClick={onClose}>
+        <button className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 lg:hidden" onClick={onClose} aria-label="Close navigation">
           <X size={18} />
         </button>
       </div>
+    );
+  }
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
-        {nav.map((item) => {
-          const isActive = active === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onClose}
-              // Warm this page's reads the moment the pointer lands on it, so
-              // the click renders from cache instead of showing its loader.
-              onMouseEnter={() => prefetch(dataForRoute(item.href))}
-              onFocus={() => prefetch(dataForRoute(item.href))}
-              onTouchStart={() => prefetch(dataForRoute(item.href))}
-              className={cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-semibold transition-all",
-                isActive ? "brand-bg text-white shadow-md" : "text-slate-300 hover:bg-slate-800 hover:text-white"
-              )}
+  return (
+    <div className="flex items-center gap-3 px-4 pb-3 pt-4">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/95 ring-1 ring-white/10">
+        {schoolLogo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={schoolLogo} alt="" className="max-h-full max-w-full object-contain p-0.5" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center brand-bg text-white">
+            <GraduationCap size={18} />
+          </span>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-semibold leading-tight text-white">{schoolName || appLabel || "Amar E School"}</div>
+        <div className="mt-1 flex items-center gap-1.5">
+          <span className="truncate text-[10px] font-medium uppercase tracking-[0.09em]" style={{ color: "var(--chrome-muted)" }}>
+            {appShort || appLabel || "School Admin"}
+          </span>
+          {plan ? (
+            <span
+              className="shrink-0 rounded px-1.5 py-px text-[9px] font-bold uppercase tracking-[0.08em]"
+              style={{ background: "rgb(var(--gold) / 0.16)", color: "#d9bd7c" }}
             >
-              <item.icon size={17} className={isActive ? "" : "text-slate-400"} />
-              {item.label}
-            </Link>
-          );
-        })}
+              {plan}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <button className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 lg:hidden" onClick={onClose} aria-label="Close navigation">
+        <X size={18} />
+      </button>
+    </div>
+  );
+}
+
+/** One sidebar link. `premium` renders the School Admin treatment; otherwise the original. */
+function NavLink({ item, active, onClose, premium }: { item: NavItem; active: boolean; onClose: () => void; premium: boolean }) {
+  const warm = () => prefetch(dataForRoute(item.href));
+
+  if (premium) {
+    return (
+      <Link
+        href={item.href}
+        onClick={onClose}
+        onMouseEnter={warm}
+        onFocus={warm}
+        onTouchStart={warm}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "ss-navlink relative flex items-center gap-2.5 rounded-lg py-1.5 pl-3 pr-2 text-[13px] transition-colors",
+          active && "ss-navlink-active"
+        )}
+      >
+        {active && (
+          <span
+            aria-hidden
+            className="absolute -left-px top-1/2 h-4 w-[2.5px] -translate-y-1/2 rounded-full"
+            style={{ background: "rgb(var(--brand))" }}
+          />
+        )}
+        <item.icon size={15} className="shrink-0" />
+        <span className="truncate">{item.label}</span>
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      href={item.href}
+      onClick={onClose}
+      // Warm this page's reads the moment the pointer lands on it, so the click
+      // renders from cache instead of showing its loader.
+      onMouseEnter={warm}
+      onFocus={warm}
+      onTouchStart={warm}
+      className={cn(
+        "ss-navlink flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-semibold transition-all",
+        active ? "brand-bg text-white shadow-md" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+      )}
+    >
+      <item.icon size={17} className={active ? "" : "text-slate-400"} />
+      {item.label}
+    </Link>
+  );
+}
+
+/**
+ * The sidebar body. School Admin panel roles pass `groups` and get collapsible
+ * module sections; every other sector passes `nav` and keeps the flat list.
+ */
+function SidebarContent({
+  role,
+  nav,
+  groups,
+  active,
+  schoolName,
+  schoolLogo,
+  plan,
+  appLabel,
+  appShort,
+  onClose,
+}: {
+  role: string;
+  nav: NavItem[];
+  groups: NavGroup[] | null;
+  active: string;
+  schoolName?: string;
+  schoolLogo?: string | null;
+  plan?: string | null;
+  appLabel?: string;
+  appShort?: string;
+  onClose: () => void;
+}) {
+  const premium = !!groups;
+  const activeGroup = useMemo(
+    () => (groups ? groups.find((g) => g.items.some((i) => i.href === active))?.key : undefined),
+    [groups, active]
+  );
+  const [openKeys, setOpenKeys] = useState<string[]>(() => (activeGroup ? [activeGroup] : []));
+  const [hydrated, setHydrated] = useState(false);
+
+  // Restore the user's sections after mount (never during SSR, so the server and
+  // first client render agree).
+  useEffect(() => {
+    let stored: string[] = [];
+    try {
+      const raw = window.localStorage.getItem(NAV_GROUPS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed)) stored = parsed.filter((k) => typeof k === "string");
+    } catch {
+      /* ignore malformed storage */
+    }
+    setHydrated(true);
+    setOpenKeys((prev) => Array.from(new Set([...stored, ...prev])));
+  }, []);
+
+  // The section a page belongs to is always open, however the user left it.
+  useEffect(() => {
+    if (!activeGroup) return;
+    setOpenKeys((prev) => (prev.includes(activeGroup) ? prev : [...prev, activeGroup]));
+  }, [activeGroup]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      window.localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(openKeys));
+    } catch {
+      /* storage unavailable — the accordion still works for this session */
+    }
+  }, [openKeys, hydrated]);
+
+  const toggle = (key: string) =>
+    setOpenKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+
+  return (
+    <div className="flex h-full flex-col">
+      <BrandingBlock
+        premium={premium}
+        role={role}
+        schoolName={schoolName}
+        schoolLogo={schoolLogo}
+        plan={plan}
+        appLabel={appLabel}
+        appShort={appShort}
+        onClose={onClose}
+      />
+
+      <nav className="flex-1 overflow-y-auto px-3 pb-4">
+        {groups ? (
+          <div className="space-y-4 pt-1">
+            {groups.map((group) => {
+              const multi = group.items.length > 1;
+              const isOpen = !multi || openKeys.includes(group.key);
+              const hasActive = group.items.some((i) => i.href === active);
+              const header = (
+                <>
+                  <span
+                    aria-hidden
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+                    style={{ background: group.tint, color: group.accent }}
+                  >
+                    <group.icon size={13} />
+                  </span>
+                  <span
+                    className="flex-1 truncate text-[10.5px] font-semibold uppercase tracking-[0.09em]"
+                    style={{ color: hasActive ? "#e6ecf5" : "var(--chrome-muted)" }}
+                  >
+                    {group.label}
+                  </span>
+                </>
+              );
+              return (
+                <div key={group.key}>
+                  {multi ? (
+                    <button
+                      type="button"
+                      onClick={() => toggle(group.key)}
+                      aria-expanded={isOpen}
+                      className="ss-groupheader flex w-full items-center gap-2 rounded-lg py-1.5 pl-1.5 pr-2 text-left"
+                    >
+                      {header}
+                      <ChevronDown
+                        size={13}
+                        className={cn("shrink-0 transition-transform", isOpen && "rotate-180")}
+                        style={{ color: "var(--chrome-muted)" }}
+                      />
+                    </button>
+                  ) : (
+                    <div className="flex w-full items-center gap-2 rounded-lg py-1.5 pl-1.5 pr-2">{header}</div>
+                  )}
+                  {isOpen && (
+                    <div
+                      className={cn(
+                        "ml-[11px] mt-1 space-y-0.5 pl-2.5",
+                        multi && "ss-childrail border-l"
+                      )}
+                    >
+                      {group.items.map((item) => (
+                        <NavLink key={item.href} item={item} active={active === item.href} onClose={onClose} premium />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {nav.map((item) => (
+              <NavLink key={item.href} item={item} active={active === item.href} onClose={onClose} premium={false} />
+            ))}
+          </div>
+        )}
       </nav>
 
-      <div className="border-t border-slate-800 p-4">
+      <div className="border-t border-white/10 p-4">
         <button
           onClick={async () => {
             await api("/api/auth/logout", { method: "POST" }).catch(() => null);
             writeCachedMe(null);
             window.location.href = "/login";
           }}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-800 px-3 py-2.5 text-[13px] font-semibold text-slate-300 transition hover:bg-slate-700 hover:text-white"
+          className={cn(
+            "flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-semibold transition",
+            premium
+              ? "bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white"
+              : "bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white"
+          )}
         >
           <LogOut size={16} /> Sign out
         </button>
