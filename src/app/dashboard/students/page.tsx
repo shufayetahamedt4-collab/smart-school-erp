@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Search, GraduationCap, Eye, UserX } from "lucide-react";
+import { Plus, Search, GraduationCap, Eye, UserX, Wallet, Scale } from "lucide-react";
 import { api, qs } from "@/lib/client";
-import { Card, Badge, Select, TextInput, EmptyState, LoadingScreen, PageHeader, statusTone, prettyStatus } from "@/components/ui";
+import { Badge, Select, TextInput, EmptyState, LoadingScreen, PageHeader, KpiCard, statusTone, prettyStatus } from "@/components/ui";
 import { initials, fmtMoney, fmtDate, feeDue } from "@/lib/utils";
 
 interface Student {
@@ -46,58 +46,86 @@ export default function StudentsPage() {
   const debt = (s: Student) => s.fees.reduce((a, f) => a + feeDue(f), 0);
   const selectedClass = useMemo(() => classes.find((c) => c.id === classId), [classes, classId]);
 
+  // Standing figures for the loaded view. Purely presentational sums over the
+  // rows already in memory — no extra read, no new endpoint.
+  const activeCount = students.filter((s) => s.active).length;
+  const withDues = students.filter((s) => debt(s) > 0).length;
+  const duesTotal = students.reduce((a, s) => a + debt(s), 0);
+  const metrics = [
+    { key: "active", icon: GraduationCap, label: "Active students", value: activeCount, sub: `${students.length} in this view`, tone: "slate" as const },
+    { key: "inactive", icon: UserX, label: "Inactive", value: students.length - activeCount, sub: "not attending", tone: "slate" as const },
+    { key: "with-dues", icon: Wallet, label: "Students with dues", value: withDues, sub: "need follow-up", tone: "amber" as const },
+    { key: "due-amount", icon: Scale, label: "Fees due", value: fmtMoney(duesTotal), sub: "in this view", tone: "amber" as const },
+  ];
+
   return (
     <div>
       <PageHeader
         title="Students"
-        subtitle={`${students.length} students enrolled`}
+        subtitle="Enrolment, class placement and fee status"
         actions={<Link href="/dashboard/students/new" className="btn btn-primary"><Plus size={16} /> New Admission</Link>}
       />
 
-      {/* branch drill-down (main admin only — the list stays empty otherwise) */}
-      {branches.length > 0 && (
-        <Card className="mb-4 p-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Branch</span>
-            <Select
-              className="max-w-xs"
-              value={branchId}
-              onChange={(e) => {
-                const v = e.target.value;
-                setBranchId(v);
-                setLoading(true);
-                load(qs({ q: q || undefined, classId: classId || undefined, sectionId: sectionId || undefined, branchId: v || undefined }));
-              }}
-            >
-              <option value="">All branches (whole school)</option>
-              {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
-            </Select>
-          </div>
-        </Card>
-      )}
+      {/* standing figures — numbers first, one divided surface */}
+      <section className="ss-surface mb-6">
+        <div className="grid grid-cols-2 gap-px bg-slate-100 lg:grid-cols-4">
+          {metrics.map((m) => (
+            <div key={m.key} className="bg-white">
+              <KpiCard bare icon={m.icon} label={m.label} value={m.value} sub={m.sub} tone={m.tone} />
+            </div>
+          ))}
+        </div>
+      </section>
 
-      {/* filters */}
-      <Card className="mb-4 p-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-          <div className="relative sm:col-span-2">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <TextInput className="!pl-9" placeholder="Search by name, ID or guardian phone…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
-          </div>
-          <Select value={classId} onChange={(e) => { setClassId(e.target.value); setSectionId(""); }}>
-            <option value="">All classes</option>
-            {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
-          <div className="flex gap-2">
-            <Select value={sectionId} onChange={(e) => setSectionId(e.target.value)}>
-              <option value="">All sections</option>
-              {selectedClass?.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </Select>
-            <button className="btn btn-primary" onClick={applyFilters}>Filter</button>
+      {/* the directory: one surface — heading, a flat filter toolbar, the table */}
+      <section className="ss-surface">
+        <div className="ss-section">
+          <div className="min-w-0">
+            <h3 className="ss-section-title">Student directory</h3>
+            <p className="ss-section-sub">{students.length} in this view</p>
           </div>
         </div>
-      </Card>
 
-      <Card>
+        <div className="ss-toolbar">
+          {/* branch drill-down (main admin only — the list stays empty otherwise) */}
+          {branches.length > 0 && (
+            <div className="flex w-full items-center gap-3">
+              <span className="ss-toolbar-label">Branch</span>
+              <Select
+                className="max-w-xs"
+                value={branchId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setBranchId(v);
+                  setLoading(true);
+                  load(qs({ q: q || undefined, classId: classId || undefined, sectionId: sectionId || undefined, branchId: v || undefined }));
+                }}
+              >
+                <option value="">All branches (whole school)</option>
+                {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
+              </Select>
+            </div>
+          )}
+
+          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-4">
+            <div className="relative sm:col-span-2">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <TextInput className="!pl-9" placeholder="Search by name, ID or guardian phone…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
+            </div>
+            <Select value={classId} onChange={(e) => { setClassId(e.target.value); setSectionId(""); }}>
+              <option value="">All classes</option>
+              {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+            <div className="flex gap-2">
+              <Select value={sectionId} onChange={(e) => setSectionId(e.target.value)}>
+                <option value="">All sections</option>
+                {selectedClass?.sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </Select>
+              <button className="btn btn-primary" onClick={applyFilters}>Filter</button>
+            </div>
+          </div>
+        </div>
+
         {loading ? (
           <LoadingScreen />
         ) : students.length === 0 ? (
@@ -125,10 +153,10 @@ export default function StudentsPage() {
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={s.photoUrl} alt="" className="h-9 w-9 rounded-lg object-cover" />
                         ) : (
-                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-xs font-bold text-indigo-600">{initials(s.name)}</div>
+                          <div className="ss-accent-soft flex h-9 w-9 items-center justify-center rounded-lg text-xs font-bold">{initials(s.name)}</div>
                         )}
                         <div>
-                          <div className="font-bold text-slate-800 hover:text-indigo-600">{s.name}</div>
+                          <div className="ss-hover-accent font-bold text-slate-800">{s.name}</div>
                           <div className="text-xs text-slate-400">{s.admissionNo}</div>
                         </div>
                       </Link>
@@ -145,7 +173,7 @@ export default function StudentsPage() {
                     </td>
                     <td className="td">
                       <div className="flex justify-end gap-1">
-                        <Link href={`/dashboard/students/${s.id}`} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-indigo-600"><Eye size={15} /></Link>
+                        <Link href={`/dashboard/students/${s.id}`} className="ss-hover-accent rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"><Eye size={15} /></Link>
                       </div>
                     </td>
                   </tr>
@@ -154,7 +182,7 @@ export default function StudentsPage() {
             </table>
           </div>
         )}
-      </Card>
+      </section>
     </div>
   );
 }

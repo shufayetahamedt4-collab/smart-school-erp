@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ClipboardList, Plus, Search, FileUp, Tag, CheckCircle, XCircle, GraduationCap } from "lucide-react";
 import { api, qs, upload } from "@/lib/client";
-import { Card, Badge, Field, TextInput, Select, Textarea, Modal, PageHeader, LoadingScreen, EmptyState, ErrorNote, statusTone, prettyStatus } from "@/components/ui";
+import { Badge, Field, TextInput, Select, Textarea, Modal, PageHeader, LoadingScreen, EmptyState, ErrorNote, KpiCard, statusTone, prettyStatus } from "@/components/ui";
 import { fmtMoney, fmtDate } from "@/lib/utils";
 
 /**
@@ -211,11 +211,22 @@ export default function AdmissionsPage() {
 
   if (loading) return <LoadingScreen />;
 
+  // Pipeline readout for the loaded list — counts over rows already in memory.
+  // The list is server-filtered, so this is labelled as "currently listed"
+  // rather than implying a school-wide total.
+  const stage = (statuses: string[]) => items.filter((a) => statuses.includes(a.status)).length;
+  const metrics = [
+    { key: "enquiries", icon: ClipboardList, label: "Open enquiries", value: stage(["ENQUIRY"]), sub: "not yet applied", tone: "slate" as const },
+    { key: "progress", icon: FileUp, label: "In progress", value: stage(["APPLIED", "DOCS_PENDING", "TEST_SCHEDULED", "SEAT_CONFIRMED"]), sub: "being processed", tone: "amber" as const },
+    { key: "enrolled", icon: CheckCircle, label: "Enrolled", value: stage(["ENROLLED"]), sub: "admitted", tone: "emerald" as const },
+    { key: "rejected", icon: XCircle, label: "Rejected", value: stage(["REJECTED"]), sub: "closed", tone: "slate" as const },
+  ];
+
   return (
     <div>
       <PageHeader
         title="Admissions"
-        subtitle="Complete admission workflow (PRD §4) — enquiry to enrollment"
+        subtitle="Enquiry to enrolment — pipeline, documents and seat confirmation"
         actions={
           // §4.2 — the same intake form the Students module uses, so the two
           // entry points can never ask for different information.
@@ -225,44 +236,67 @@ export default function AdmissionsPage() {
         }
       />
 
-      {branches.length > 0 && (
-        <Card className="mb-4 p-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Branch</span>
-            <Select
-              className="max-w-xs"
-              value={branchId}
-              onChange={(e) => {
-                const v = e.target.value;
-                setBranchId(v);
-                setLoading(true);
-                load({ status: statusFilter || undefined, q: q || undefined, branchId: v || undefined });
-              }}
-            >
-              <option value="">All branches (whole school)</option>
-              {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
-            </Select>
+      {/* pipeline — numbers first, one divided surface */}
+      <section className="ss-surface mb-6">
+        <div className="ss-section">
+          <div className="min-w-0">
+            <h3 className="ss-section-title">Admissions pipeline</h3>
+            <p className="ss-section-sub">Across the {items.length} applications currently listed</p>
           </div>
-        </Card>
-      )}
+        </div>
+        <div className="grid grid-cols-2 gap-px bg-slate-100 lg:grid-cols-4">
+          {metrics.map((m) => (
+            <div key={m.key} className="bg-white">
+              <KpiCard bare icon={m.icon} label={m.label} value={m.value} sub={m.sub} tone={m.tone} />
+            </div>
+          ))}
+        </div>
+      </section>
 
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 
-      <Card className="mb-4 p-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-          <div className="relative sm:col-span-2">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <TextInput className="!pl-9" placeholder="Search name / phone / admission no…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && refresh()} />
+      {/* applications: one surface — heading, a flat filter toolbar, the table */}
+      <section className="ss-surface">
+        <div className="ss-section">
+          <div className="min-w-0">
+            <h3 className="ss-section-title">Applications</h3>
+            <p className="ss-section-sub">{items.length} in this view</p>
           </div>
-          <Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); load({ status: e.target.value || undefined, q: q || undefined }); }}>
-            <option value="">All statuses</option>
-            {STATUS_STEPS.map((s) => <option key={s}>{s}</option>)}
-          </Select>
-          <button className="btn btn-primary" onClick={refresh}>Filter</button>
         </div>
-      </Card>
 
-      <Card>
+        <div className="ss-toolbar">
+          {branches.length > 0 && (
+            <div className="flex w-full items-center gap-3">
+              <span className="ss-toolbar-label">Branch</span>
+              <Select
+                className="max-w-xs"
+                value={branchId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setBranchId(v);
+                  setLoading(true);
+                  load({ status: statusFilter || undefined, q: q || undefined, branchId: v || undefined });
+                }}
+              >
+                <option value="">All branches (whole school)</option>
+                {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
+              </Select>
+            </div>
+          )}
+
+          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-4">
+            <div className="relative sm:col-span-2">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <TextInput className="!pl-9" placeholder="Search name / phone / admission no…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && refresh()} />
+            </div>
+            <Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); load({ status: e.target.value || undefined, q: q || undefined }); }}>
+              <option value="">All statuses</option>
+              {STATUS_STEPS.map((s) => <option key={s}>{s}</option>)}
+            </Select>
+            <button className="btn btn-primary" onClick={refresh}>Filter</button>
+          </div>
+        </div>
+
         {items.length ? (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -307,7 +341,7 @@ export default function AdmissionsPage() {
         ) : (
           <EmptyState icon={ClipboardList} title="No admissions yet" description="New enquiries from the public form and walk-ins appear here." />
         )}
-      </Card>
+      </section>
 
       {/* detail modal */}
       <Modal open={!!active} onClose={() => setActive(null)} title={active ? `Applicant: ${active.fullName}` : ""} wide>
@@ -324,7 +358,7 @@ export default function AdmissionsPage() {
 
             {/* sibling suggestions */}
             {siblings.length > 0 && (
-              <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-xs text-indigo-800">
+              <div className="ss-accent-panel rounded-xl p-3 text-xs">
                 <p className="font-bold">Possible siblings already enrolled (§5.4 auto-suggest):</p>
                 <ul className="mt-1 list-inside list-disc">
                   {siblings.map((s) => <li key={s.id}>{s.name} · {s.classRoom?.name || "—"}</li>)}
@@ -337,7 +371,7 @@ export default function AdmissionsPage() {
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Documents (§4.1 step 2)</p>
               <div className="mb-2 flex flex-wrap gap-2">
                 {active.documents.length ? active.documents.map((d) => (
-                  <a key={d.id} href={d.url} target="_blank" rel="noreferrer" className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:border-indigo-300">
+                  <a key={d.id} href={d.url} target="_blank" rel="noreferrer" className="ss-hover-accent-border rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
                     {d.kind}
                   </a>
                 )) : <p className="text-xs text-slate-400">No documents uploaded.</p>}

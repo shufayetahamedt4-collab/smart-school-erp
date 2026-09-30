@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Wallet, Plus, Search, Save, Receipt } from "lucide-react";
+import { Wallet, Plus, Search, Save, Receipt, Scale, Coins } from "lucide-react";
 import { api, qs } from "@/lib/client";
-import { Card, Badge, Field, TextInput, Select, Modal, PageHeader, LoadingScreen, ErrorNote, statusTone, prettyStatus } from "@/components/ui";
+import { Badge, Field, TextInput, Select, Modal, PageHeader, LoadingScreen, ErrorNote, KpiCard, statusTone, prettyStatus } from "@/components/ui";
 import { fmtMoney, fmtDate, money, feeDue, sumMoney } from "@/lib/utils";
 
 interface FeeRow {
@@ -131,11 +131,22 @@ export default function FeesPage() {
   const payOver = payAmt > payingDue;
   const payRemaining = Math.max(0, payingDue - payAmt);
 
+  // Standing figures for the loaded view — presentational sums over the rows
+  // already in memory, so no extra read and no changed endpoint.
+  const billed = sumMoney(fees, (f) => f.amount);
+  const unpaidRows = fees.filter((f) => feeDue(f) > 0).length;
+  const metrics = [
+    { key: "billed", icon: Receipt, label: "Billed", value: fmtMoney(billed), sub: `${fees.length} records`, tone: "slate" as const },
+    { key: "collected", icon: Wallet, label: "Collected", value: fmtMoney(collected), sub: "received to date", tone: "emerald" as const },
+    { key: "outstanding", icon: Scale, label: "Outstanding", value: fmtMoney(dueTotal), sub: `${unpaidRows} unpaid records`, tone: "amber" as const },
+    { key: "unpaid", icon: Coins, label: "Unpaid rows", value: unpaidRows, sub: "need collection", tone: "amber" as const },
+  ];
+
   return (
     <div>
       <PageHeader
         title="Fees"
-        subtitle={`${fmtMoney(collected)} collected · ${fmtMoney(dueTotal)} outstanding`}
+        subtitle="Billing, collection and outstanding balances"
         actions={
           <>
             <button className="btn btn-primary btn-sm" onClick={openAdd}><Plus size={14} /> Add fee</button>
@@ -144,44 +155,61 @@ export default function FeesPage() {
         }
       />
 
-      {branches.length > 0 && (
-        <Card className="mb-4 p-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Branch</span>
-            <Select
-              className="max-w-xs"
-              value={branchId}
-              onChange={(e) => {
-                const v = e.target.value;
-                setBranchId(v);
-                setLoading(true);
-                load({ status: status || undefined, q: q || undefined, branchId: v || undefined });
-              }}
-            >
-              <option value="">All branches (whole school)</option>
-              {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
-            </Select>
-          </div>
-        </Card>
-      )}
+      {/* standing figures — numbers first, one divided surface */}
+      <section className="ss-surface mb-6">
+        <div className="grid grid-cols-2 gap-px bg-slate-100 lg:grid-cols-4">
+          {metrics.map((m) => (
+            <div key={m.key} className="bg-white">
+              <KpiCard bare icon={m.icon} label={m.label} value={m.value} sub={m.sub} tone={m.tone} />
+            </div>
+          ))}
+        </div>
+      </section>
 
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 
-      <Card className="mb-4 p-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-          <div className="relative sm:col-span-2">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <TextInput className="!pl-9" placeholder="Search by student…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && apply()} />
+      {/* records: one surface — heading, a flat filter toolbar, the table */}
+      <section className="ss-surface">
+        <div className="ss-section">
+          <div className="min-w-0">
+            <h3 className="ss-section-title">Fee records</h3>
+            <p className="ss-section-sub">{fees.length} in this view</p>
           </div>
-          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">All statuses</option>
-            <option>UNPAID</option><option>PARTIAL</option><option>PAID</option>
-          </Select>
-          <button className="btn btn-primary" onClick={apply}>Filter</button>
         </div>
-      </Card>
 
-      <Card>
+        <div className="ss-toolbar">
+          {branches.length > 0 && (
+            <div className="flex w-full items-center gap-3">
+              <span className="ss-toolbar-label">Branch</span>
+              <Select
+                className="max-w-xs"
+                value={branchId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setBranchId(v);
+                  setLoading(true);
+                  load({ status: status || undefined, q: q || undefined, branchId: v || undefined });
+                }}
+              >
+                <option value="">All branches (whole school)</option>
+                {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
+              </Select>
+            </div>
+          )}
+
+          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-4">
+            <div className="relative sm:col-span-2">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <TextInput className="!pl-9" placeholder="Search by student…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && apply()} />
+            </div>
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">All statuses</option>
+              <option>UNPAID</option><option>PARTIAL</option><option>PAID</option>
+            </Select>
+            <button className="btn btn-primary" onClick={apply}>Filter</button>
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -234,7 +262,7 @@ export default function FeesPage() {
           </table>
         </div>
         {!fees.length && <div className="py-10 text-center text-sm text-slate-400">No fee records.</div>}
-      </Card>
+      </section>
 
       {/* create fee modal */}
       <Modal open={addOpen} onClose={() => { setAddOpen(false); setError(""); }} title="Add a fee">

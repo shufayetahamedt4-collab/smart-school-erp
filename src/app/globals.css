@@ -501,6 +501,55 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* A flat filter strip inside a list surface: controls, not a card of their
+   own. Rendered on the tint so the white inputs read as the interactive part. */
+[data-sector="school"] .ss-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  background: var(--color-slate-50);
+  border-bottom: 1px solid var(--color-slate-200);
+}
+[data-sector="school"] .ss-toolbar-label {
+  font-size: 0.67rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-slate-400);
+  white-space: nowrap;
+}
+
+/* --- brand-driven accents (white-label) -------------------------------
+   School-scoped list screens used to hardcode indigo for avatar tiles, name
+   hovers and callouts, which broke the moment a school picked its own theme
+   color. These route every such accent through the tenant's --brand instead. */
+[data-sector="school"] .ss-accent {
+  color: rgb(var(--brand));
+}
+[data-sector="school"] .ss-accent-soft {
+  background: rgb(var(--brand) / 0.1);
+  color: rgb(var(--brand));
+}
+[data-sector="school"] .ss-hover-accent {
+  transition: color 0.15s ease;
+}
+[data-sector="school"] .ss-hover-accent:hover {
+  color: rgb(var(--brand));
+}
+[data-sector="school"] .ss-hover-accent-border {
+  transition: border-color 0.15s ease;
+}
+[data-sector="school"] .ss-hover-accent-border:hover {
+  border-color: rgb(var(--brand) / 0.45);
+}
+[data-sector="school"] .ss-accent-panel {
+  background: rgb(var(--brand) / 0.07);
+  border: 1px solid rgb(var(--brand) / 0.2);
+  color: rgb(var(--brand));
+}
+
 /* App chrome typography: the global bar is chrome, the page header is context. */
 [data-sector="school"] .ss-appbar {
   height: 3.5rem;
