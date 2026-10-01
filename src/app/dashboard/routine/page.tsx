@@ -203,79 +203,80 @@ export default function RoutinePage() {
   const scopeLabel = !classId ? "" : sectionId ? `${classes.find((c) => c.id === classId)?.name} · Section ${sections.find((s) => s.id === sectionId)?.name}` : `${classes.find((c) => c.id === classId)?.name} (whole class)`;
 
   return (
-    <div>
+    <div className="ss-routinepage">
       <PageHeader
+        icon={CalendarDays}
         title="Class Routine"
         subtitle="Build the weekly timetable — per class, or per section"
         actions={
-          <button className="btn btn-primary" onClick={saveRoutine} disabled={busy || !classId}>
+          <button className="btn btn-primary ss-routine-save" onClick={saveRoutine} disabled={busy || !classId}>
             {saved ? <Check size={15} /> : <Save size={15} />} {saved ? "Saved!" : busy ? "Saving…" : "Save routine"}
           </button>
         }
       />
 
-      {error && <div className="mb-4"><ErrorNote message={error} /></div>}
-      {notice && <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">{notice}</div>}
+      {error && <div className="ss-routine-error mb-4"><ErrorNote message={error} /></div>}
+      {notice && <div className="ss-routine-notice mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">{notice}</div>}
 
-      <Card className="mb-4 p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">Class</label>
-            <Select value={classId} onChange={(e) => { setClassId(e.target.value); setSectionId(""); }} className="!w-48">
+      <Card className="ss-routine-toolbar mb-4 p-4">
+        <div className="ss-routine-toolbar-row flex flex-wrap items-end gap-3">
+          <div className="ss-routine-field">
+            <label className="label ss-routine-label">Class</label>
+            <Select value={classId} onChange={(e) => { setClassId(e.target.value); setSectionId(""); }} className="ss-routine-select !w-48">
               <option value="">Select class…</option>
               {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
           </div>
-          <div>
-            <label className="label">Section</label>
-            <Select value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="!w-48" disabled={!classId || !sections.length}>
+          <div className="ss-routine-field">
+            <label className="label ss-routine-label">Section</label>
+            <Select value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="ss-routine-select !w-48" disabled={!classId || !sections.length}>
               <option value="">Whole class (default)</option>
               {sections.map((s) => <option key={s.id} value={s.id}>Section {s.name}</option>)}
             </Select>
           </div>
-          <button className="btn btn-secondary" onClick={() => setShapeOpen((v) => !v)}>
+          <button className="btn btn-secondary ss-routine-shape-toggle" onClick={() => setShapeOpen((v) => !v)}>
             <SlidersHorizontal size={15} /> Periods &amp; days <ChevronDown size={14} className={shapeOpen ? "rotate-180 transition" : "transition"} />
           </button>
-          <span className="text-xs text-slate-400">
+          <span className="ss-routine-hint ss-routine-hint-toolbar text-xs text-slate-400">
             {days.length} day(s) × {periods.length} period(s). Empty cells are free periods.
           </span>
         </div>
 
         {scopeLabel && (
-          <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
+          <p className="ss-routine-scope mt-3 flex items-center gap-1.5 text-xs text-slate-500">
             <Users size={13} /> Editing <span className="font-medium text-slate-700">{scopeLabel}</span>
           </p>
         )}
       </Card>
 
       {shapeOpen && (
-        <Card className="mb-4">
+        <Card className="ss-routine-shape mb-4">
           <CardHeader
-            title="The school's day"
+            title={<><span className="ss-routine-section-icon"><SlidersHorizontal size={15} /></span>The school&apos;s day</>}
             subtitle="How many periods, when each runs, and which weekdays. Applies to every class."
           />
-          <div className="p-5 pt-0">
-            <div className="flex flex-wrap items-center gap-4">
+          <div className="ss-routine-shape-body p-5 pt-0">
+            <div className="ss-routine-shape-top flex flex-wrap items-center gap-4">
               <Field label="Periods per day" className="!mb-0">
                 <input
                   type="number"
                   min={1}
                   max={12}
-                  className="input !w-24"
+                  className="ss-routine-count input !w-24"
                   value={draft.periods.length}
                   onChange={(e) => setPeriodCount(Number(e.target.value))}
                 />
               </Field>
-              <div>
-                <label className="label">Working days</label>
-                <div className="flex flex-wrap gap-1.5">
+              <div className="ss-routine-days">
+                <label className="label ss-routine-label">Working days</label>
+                <div className="ss-routine-days-row flex flex-wrap gap-1.5">
                   {DAYS.map((label, i) => (
                     <button
                       key={i}
                       type="button"
                       onClick={() => toggleDay(i)}
                       title={label}
-                      className={`rounded-full border px-3 py-1 text-xs ${draft.days.includes(i) ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}
+                      className={`ss-routine-day rounded-full border px-3 py-1 text-xs ${draft.days.includes(i) ? "is-on border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}
                     >
                       {DAYS_SHORT[i]}
                     </button>
@@ -284,33 +285,33 @@ export default function RoutinePage() {
               </div>
             </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="ss-routine-periods mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {draft.periods.map((p, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-50 text-xs font-black text-indigo-600">{i + 1}</span>
-                  <input type="time" className="input !w-28 !px-2 !py-1 text-xs" value={p.start} onChange={(e) => setPeriodTime(i, "start", e.target.value)} />
-                  <span className="text-slate-300">–</span>
-                  <input type="time" className="input !w-28 !px-2 !py-1 text-xs" value={p.end} onChange={(e) => setPeriodTime(i, "end", e.target.value)} />
+                <div key={i} className="ss-routine-period flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
+                  <span className="ss-routine-period-no flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-50 text-xs font-black text-indigo-600">{i + 1}</span>
+                  <input type="time" className="ss-routine-time input !w-28 !px-2 !py-1 text-xs" value={p.start} onChange={(e) => setPeriodTime(i, "start", e.target.value)} />
+                  <span className="ss-routine-dash text-slate-300">–</span>
+                  <input type="time" className="ss-routine-time input !w-28 !px-2 !py-1 text-xs" value={p.end} onChange={(e) => setPeriodTime(i, "end", e.target.value)} />
                 </div>
               ))}
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="ss-routine-shape-actions mt-4 flex flex-wrap items-center gap-3">
               <button
-                className="btn btn-primary"
+                className="btn btn-primary ss-routine-shape-save"
                 disabled={busy || !draft.days.length || !draft.periods.length}
                 onClick={() => (shapeShrinks ? setConfirmShape(true) : applyShape())}
               >
                 <Check size={15} /> Save periods &amp; days
               </button>
-              <span className="text-xs text-slate-400">Changing a period&apos;s time re-times every class&apos;s lessons in that period.</span>
+              <span className="ss-routine-hint text-xs text-slate-400">Changing a period&apos;s time re-times every class&apos;s lessons in that period.</span>
             </div>
           </div>
         </Card>
       )}
 
       {inherited && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="ss-routine-inherited mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <TriangleAlert size={16} className="mt-0.5 shrink-0" />
           <span>
             This section has no routine of its own — what you see is the <strong>class routine</strong>. Saving gives this section its own week.
@@ -318,32 +319,32 @@ export default function RoutinePage() {
         </div>
       )}
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+      <Card className="ss-routine-grid overflow-hidden">
+        <div className="ss-routine-scroll overflow-x-auto">
+          <table className="ss-routine-table w-full">
             <thead>
-              <tr className="bg-slate-50">
-                <th className="th min-w-40">Period / Time</th>
+              <tr className="ss-routine-thead bg-slate-50">
+                <th className="th ss-routine-th-pin min-w-40">Period / Time</th>
                 {days.map((d) => (
-                  <th key={d} className="th text-center">{DAYS[d]}</th>
+                  <th key={d} className="th ss-routine-th text-center">{DAYS[d]}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {periods.map((p) => (
-                <tr key={p.period}>
-                  <td className="td">
+                <tr key={p.period} className="ss-routine-row">
+                  <td className="td ss-routine-period-cell">
                     <div className="flex items-center gap-2">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-xs font-black text-indigo-600">{p.period}</span>
-                      <span className="text-xs text-slate-500">
+                      <span className="ss-routine-period-no flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-xs font-black text-indigo-600">{p.period}</span>
+                      <span className="ss-routine-period-time text-xs text-slate-500">
                         {p.start || p.end ? `${hhmm(p.start) || "—"}–${hhmm(p.end) || "—"}` : "no time set"}
                       </span>
                     </div>
                   </td>
                   {days.map((d) => (
-                    <td key={d} className="td">
+                    <td key={d} className="td ss-routine-cell">
                       <select
-                        className="input !px-2 !py-1.5 text-xs"
+                        className="ss-routine-cell-select input !px-2 !py-1.5 text-xs"
                         value={cells[cellKey(d, p.period)] || ""}
                         onChange={(e) => setCells((m) => ({ ...m, [cellKey(d, p.period)]: e.target.value }))}
                         disabled={!classId}
@@ -359,7 +360,7 @@ export default function RoutinePage() {
           </table>
         </div>
         {!classId && (
-          <div className="flex flex-col items-center gap-2 py-10 text-slate-400">
+          <div className="ss-routine-empty flex flex-col items-center gap-2 py-10 text-slate-400">
             <CalendarDays size={28} />
             <p className="text-sm">Select a class to build its routine</p>
           </div>
@@ -367,26 +368,26 @@ export default function RoutinePage() {
       </Card>
 
       {classId && sectionId && (
-        <div className="mt-4 flex items-center gap-3">
-          <button className="btn btn-secondary btn-sm" onClick={clearSection} disabled={busy}>
+        <div className="ss-routine-reset mt-4 flex items-center gap-3">
+          <button className="btn btn-secondary btn-sm ss-routine-reset-btn" onClick={clearSection} disabled={busy}>
             Use the class routine instead
           </button>
-          <span className="text-xs text-slate-400">Removes this section&apos;s own week; it goes back to following the class.</span>
+          <span className="ss-routine-hint text-xs text-slate-400">Removes this section&apos;s own week; it goes back to following the class.</span>
         </div>
       )}
 
       <Modal open={confirmShape} onClose={() => setConfirmShape(false)} title="Change the school's day shape?">
-        <p className="text-sm text-slate-600">
+        <p className="ss-routine-modal-note text-sm text-slate-600">
           Every class&apos;s lessons will be re-timed to match, and any lesson on a period or weekday you are removing will be
           <strong> deleted</strong>.
         </p>
-        <p className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+        <p className="ss-routine-modal-chips mt-2 flex items-center gap-2 text-xs text-slate-500">
           <Badge tone="amber">{(draft.periods.length)} periods</Badge>
           <Badge tone="amber">{draft.days.map((d) => DAYS_SHORT[d]).join(" ")}</Badge>
         </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="btn btn-secondary" onClick={() => setConfirmShape(false)} disabled={busy}>Cancel</button>
-          <button className="btn btn-primary" onClick={applyShape} disabled={busy}>{busy ? "Applying…" : "Apply to every class"}</button>
+        <div className="ss-routine-modal-actions mt-5 flex justify-end gap-2">
+          <button className="btn btn-secondary ss-routine-modal-cancel" onClick={() => setConfirmShape(false)} disabled={busy}>Cancel</button>
+          <button className="btn btn-primary ss-routine-modal-cta" onClick={applyShape} disabled={busy}>{busy ? "Applying…" : "Apply to every class"}</button>
         </div>
       </Modal>
     </div>

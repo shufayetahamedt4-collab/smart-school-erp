@@ -2485,3 +2485,303 @@ body {
     backdrop-filter: none;
   }
 }
+
+/* --- Routine: premium timetable workspace (page-scoped) ----------------
+   VISUAL ONLY. Gated on [data-sector="school"] AND scoped under
+   .ss-routinepage, so it cannot reach any other School Admin screen or the
+   Teacher / Guardian / Platform apps.
+
+   Routine is a WORKSPACE rather than a plain table: a scope toolbar (class +
+   section), an optional "shape of the day" editor, an inheritance warning and
+   the weekly grid itself. The grid keeps its exact semantics — one <select>
+   per day x period cell, grouped by period rows — and only its surface is
+   refined: a frosted toolbar, a crisp grid plate, tinted period chips and
+   premium cell selects on the shared cool canvas. Nothing is invented; the
+   page still has no summary strip and none is added.
+
+   NOTE: this wrapper deliberately sets no transform/filter/backdrop-filter of
+   its own, so the page's fixed-position <Modal> stays viewport-anchored. */
+[data-sector="school"] .ss-routinepage {
+  position: relative;
+  border-radius: 26px;
+  padding: 1.15rem 1.15rem 1.4rem;
+  background:
+    radial-gradient(1100px 460px at 2% -18%, rgb(129 140 248 / 0.14), transparent 62%),
+    radial-gradient(940px 420px at 100% 0%, rgb(56 189 248 / 0.11), transparent 60%),
+    linear-gradient(165deg, #f6f9ff 0%, #f5f6ff 48%, #f2f8ff 100%);
+}
+
+/* Header mark + Save CTA (brand-driven, no hardcoded brand colour). */
+[data-sector="school"] .ss-routinepage .ss-page-mark {
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.92), rgb(219 234 254 / 0.85));
+  color: #0284c7;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7), 0 10px 26px -12px rgb(14 165 233 / 0.5);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-save {
+  border-radius: 0.75rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.82) 56%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 10px 24px -12px rgb(var(--brand) / 0.75), inset 0 1px 0 rgb(255 255 255 / 0.35);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-save:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+  box-shadow: 0 16px 32px -14px rgb(var(--brand) / 0.85), inset 0 1px 0 rgb(255 255 255 / 0.4);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-save:disabled {
+  transform: none;
+  filter: grayscale(0.25);
+  box-shadow: none;
+}
+
+/* The scope toolbar: frosted, with 40px controls. */
+[data-sector="school"] .ss-routinepage .ss-routine-toolbar {
+  border-radius: 18px;
+  border: 1px solid rgb(255 255 255 / 0.75);
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.86), rgb(255 255 255 / 0.66));
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 18px 40px -30px rgb(15 23 42 / 0.28);
+}
+/* Every label on this page — the toolbar's and the ones Field renders inside
+   the shape editor — shares one rhythm. Stays BLOCK so a label keeps sitting
+   above its control, as it does everywhere else. (The teacher-filter label is
+   inline because that one sits beside a Select in a filter row; these do
+   not.) */
+[data-sector="school"] .ss-routinepage .label {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-select {
+  height: 2.5rem;
+  border-radius: 0.7rem;
+  border-color: rgb(203 213 225 / 0.9);
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-select:focus {
+  border-color: rgb(var(--brand) / 0.7);
+  box-shadow: 0 0 0 3px rgb(var(--brand) / 0.15);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-shape-toggle {
+  height: 2.5rem;
+  border-radius: 0.7rem;
+  background: rgb(255 255 255 / 0.9);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-shape-toggle:hover {
+  border-color: rgb(var(--brand) / 0.4);
+  color: rgb(var(--brand));
+}
+[data-sector="school"] .ss-routinepage .ss-routine-hint {
+  font-size: 0.7rem;
+  color: var(--color-slate-400);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-hint-toolbar {
+  margin-left: auto;
+  text-align: right;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-scope {
+  font-size: 0.72rem;
+}
+
+/* The "shape of the day" editor: a frosted section card with its own mark. */
+[data-sector="school"] .ss-routinepage .ss-routine-shape {
+  border-radius: 20px;
+  border: 1px solid rgb(255 255 255 / 0.78);
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.72));
+  -webkit-backdrop-filter: blur(12px) saturate(1.18);
+  backdrop-filter: blur(12px) saturate(1.18);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 22px 48px -34px rgb(15 23 42 / 0.3);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-shape .ss-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex: none;
+  border-radius: 0.55rem;
+  color: #6d28d9;
+  background: linear-gradient(150deg, rgb(237 233 254), rgb(224 231 255));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7), 0 6px 14px -8px rgb(109 40 217 / 0.6);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-count {
+  height: 2.4rem;
+  border-radius: 0.7rem;
+}
+
+/* Working-day pills: quiet by default, brand-tinted when on. */
+[data-sector="school"] .ss-routinepage .ss-routine-day {
+  border-radius: 999px;
+  padding: 0.32rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-day.is-on {
+  border-color: rgb(var(--brand) / 0.35);
+  background: linear-gradient(150deg, rgb(var(--brand) / 0.12), rgb(139 92 246 / 0.12));
+  color: rgb(var(--brand));
+  box-shadow: 0 6px 14px -10px rgb(var(--brand) / 0.6);
+}
+
+/* Per-period time rows in the shape editor. */
+[data-sector="school"] .ss-routinepage .ss-routine-period {
+  border-radius: 14px;
+  border-color: rgb(226 232 240 / 0.9);
+  background: linear-gradient(160deg, rgb(248 250 252 / 0.9), rgb(255 255 255 / 0.7));
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-period:focus-within {
+  border-color: rgb(var(--brand) / 0.45);
+  box-shadow: 0 0 0 3px rgb(var(--brand) / 0.12);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-period-no {
+  flex: none;
+  background: linear-gradient(150deg, rgb(var(--brand) / 0.14), rgb(139 92 246 / 0.14));
+  color: rgb(var(--brand));
+}
+[data-sector="school"] .ss-routinepage .ss-routine-time {
+  height: 1.9rem;
+  border-radius: 0.55rem;
+  background: rgb(255 255 255 / 0.95);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-shape-save {
+  border-radius: 0.7rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.84) 58%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 10px 22px -12px rgb(var(--brand) / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.35);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-shape-save:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-shape-save:disabled {
+  transform: none;
+  box-shadow: none;
+  filter: grayscale(0.25);
+}
+
+/* The inheritance warning (message unchanged — only its frame is refined). */
+[data-sector="school"] .ss-routinepage .ss-routine-inherited {
+  border-radius: 14px;
+  border-color: rgb(251 191 36 / 0.45);
+  background: linear-gradient(150deg, rgb(255 251 235 / 0.95), rgb(254 243 199 / 0.7));
+  -webkit-backdrop-filter: blur(8px) saturate(1.1);
+  backdrop-filter: blur(8px) saturate(1.1);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.03);
+}
+
+/* The weekly grid itself: a crisp white plate over the wash. */
+[data-sector="school"] .ss-routinepage .ss-routine-grid {
+  border-radius: 20px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 24px 52px -34px rgb(15 23 42 / 0.34);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-thead {
+  background: linear-gradient(180deg, rgb(248 250 252), rgb(241 245 249 / 0.8));
+}
+[data-sector="school"] .ss-routinepage .ss-routine-th,
+[data-sector="school"] .ss-routinepage .ss-routine-th-pin {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-period-cell {
+  background: rgb(250 251 255 / 0.7);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-period-time {
+  font-variant-numeric: tabular-nums;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-row:hover .ss-routine-cell {
+  background: rgb(248 250 255 / 0.65);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-cell-select {
+  height: 2.1rem;
+  border-radius: 0.6rem;
+  border-color: rgb(226 232 240);
+  background: rgb(255 255 255 / 0.92);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-cell-select:hover:not(:disabled) {
+  border-color: rgb(var(--brand) / 0.35);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-cell-select:focus {
+  border-color: rgb(var(--brand) / 0.7);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgb(var(--brand) / 0.14);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-cell-select:disabled {
+  background: rgb(248 250 252 / 0.8);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-empty svg {
+  color: rgb(var(--brand) / 0.55);
+}
+
+/* The section reset row keeps glass secondary affordances. */
+[data-sector="school"] .ss-routinepage .ss-routine-reset {
+  padding: 0.85rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgb(255 255 255 / 0.78);
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.86), rgb(255 255 255 / 0.66));
+  -webkit-backdrop-filter: blur(10px) saturate(1.16);
+  backdrop-filter: blur(10px) saturate(1.16);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-reset-btn {
+  border-radius: 0.65rem;
+  background: rgb(255 255 255 / 0.9);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-reset-btn:hover:not(:disabled) {
+  border-color: rgb(var(--brand) / 0.4);
+  color: rgb(var(--brand));
+}
+
+/* Validation / confirmation notes. */
+[data-sector="school"] .ss-routinepage .ss-routine-error > div {
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.03);
+}
+[data-sector="school"] .ss-routinepage .ss-routine-notice {
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.03);
+}
+
+/* The destructive-confirm modal reuses the page's button language. */
+[data-sector="school"] .ss-routinepage .ss-routine-modal-cancel {
+  border-radius: 0.7rem;
+}
+[data-sector="school"] .ss-routinepage .ss-routine-modal-cta {
+  border-radius: 0.7rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.84) 58%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 10px 22px -12px rgb(var(--brand) / 0.7);
+}
+
+/* Print: back to a plain white page. */
+@media print {
+  [data-sector="school"] .ss-routinepage {
+    background: #fff;
+    padding: 0;
+  }
+  [data-sector="school"] .ss-routinepage .ss-routine-toolbar,
+  [data-sector="school"] .ss-routinepage .ss-routine-shape,
+  [data-sector="school"] .ss-routinepage .ss-routine-reset {
+    background: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
