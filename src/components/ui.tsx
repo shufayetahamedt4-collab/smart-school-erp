@@ -303,18 +303,69 @@ export function KpiCard({
   // Numbers first: the figure is the largest thing in the cell, the label is a
   // quiet eyebrow, and the icon is a thin monochrome glyph — NOT a filled
   // pastel tile, so five KPIs never shout over the values they describe.
+  //
+  // The label and the supporting line wrap rather than truncate: the strip
+  // narrows with the window, and a clipped figure or a "DUES OUTSTANDI…"
+  // label reads as a broken layout. The grid reflows (see the pages), so this
+  // only comes into play at genuinely tight widths.
   const inner = (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <p className="truncate text-[10.5px] font-semibold uppercase tracking-[0.08em] text-slate-400">{label}</p>
+        <p className="break-words text-[10.5px] font-semibold uppercase tracking-[0.08em] text-slate-400">{label}</p>
         <p className="ss-metric mt-2">{value}</p>
-        {sub && <p className="mt-1 truncate text-[11px] leading-tight text-slate-500">{sub}</p>}
+        {sub && <p className="mt-1 break-words text-[11px] leading-tight text-slate-500">{sub}</p>}
       </div>
       <Icon size={15} strokeWidth={1.75} className={cn("mt-0.5 shrink-0", kpiTones[tone].glyph)} />
     </div>
   );
   if (bare) return <div className="px-4 py-3.5">{inner}</div>;
   return <Card className="p-5">{inner}</Card>;
+}
+
+/**
+ * The colour-tinted summary card: dashboard standing figures and the Admissions
+ * pipeline.
+ *
+ * Additive, and deliberately DUMB. It renders exactly the four values it is
+ * handed and nothing else — no onClick, no link, no chevron and no hover lift.
+ * The real pipeline cards are not interactive, so nothing here may look like a
+ * button or imply a destination.
+ *
+ * `tone` selects a FIXED semantic hue (blue informational, amber pending, green
+ * positive, red negative) so status meaning is independent of the tenant brand;
+ * the `brand` tone is the one exception and follows the school's own --brand.
+ * Colours live in globals.css under [data-sector="school"], so the other three
+ * apps are untouched.
+ */
+export type SoftStatTone = "brand" | "sky" | "amber" | "emerald" | "rose" | "violet";
+
+export function SoftStatCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  tone = "brand",
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: SoftStatTone;
+}) {
+  return (
+    <div className={cn("ss-statcard", `ss-sc-${tone}`)}>
+      <div className="flex items-start gap-2.5">
+        <span className="ss-statcard-badge">
+          <Icon size={18} strokeWidth={2} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="ss-statcard-label">{label}</p>
+          <p className="ss-statcard-value">{value}</p>
+          {sub && <p className="ss-statcard-sub">{sub}</p>}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -343,9 +394,27 @@ export function PulseFact({
 }
 
 /**
+ * Per-item accents for the attention queue. A 100-shade tint with 700-shade
+ * ink, deliberately NOT the 50-shade `kpiTones` hues: these rows sit on a
+ * slate-50 rail, where a 50-shade chip disappears. Kept separate from
+ * `kpiTones` so the KPI and pulse tones used elsewhere are untouched.
+ */
+const attentionTones: Record<string, string> = {
+  amber: "bg-amber-100 text-amber-700",
+  sky: "bg-sky-100 text-sky-700",
+  rose: "bg-rose-100 text-rose-700",
+  violet: "bg-violet-100 text-violet-700",
+  slate: "bg-slate-200 text-slate-600",
+};
+
+/**
  * A "needs your attention" row: links to the module that resolves it.
  * Borderless by design — rows sit inside one divided panel (see the dashboard),
  * so a list of six does not read as six cards.
+ *
+ * Presentation is an action-queue row: a soft tinted icon tile, a stronger
+ * label, a tinted count pill and a subtle chevron. The accent is per-row and
+ * never a fill, so a queue of five still reads as "to do", not as five alarms.
  */
 export function AttentionRow({
   icon: Icon,
@@ -360,17 +429,15 @@ export function AttentionRow({
   href: string;
   tone?: KpiTone;
 }) {
-  // An operational queue row: neutral glyph, one soft tinted count chip, one
-  // arrow. The warning colors are restrained on purpose — a queue of four
-  // items should read as "to do", not as four alarms.
+  const accent = attentionTones[tone] ?? attentionTones.slate;
   return (
-    <Link href={href} className="group ss-row ss-row-hover">
-      <Icon size={15} strokeWidth={1.75} className="shrink-0 text-slate-400 transition-colors group-hover:text-slate-600" />
-      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-700">{label}</span>
-      <span className={cn("shrink-0 rounded-md px-1.5 py-px text-[11px] font-semibold tabular-nums", kpiTones[tone].tile)}>
-        {count}
+    <Link href={href} className="ss-attrow">
+      <span className={cn("ss-attrow-icon", accent)}>
+        <Icon size={16} strokeWidth={2} />
       </span>
-      <ChevronRight size={15} className="shrink-0 text-slate-300 transition-all group-hover:translate-x-0.5 group-hover:text-slate-500" />
+      <span className="ss-attrow-label">{label}</span>
+      <span className={cn("ss-attrow-count", accent)}>{count}</span>
+      <ChevronRight size={16} className="ss-attrow-chevron" />
     </Link>
   );
 }
@@ -379,17 +446,36 @@ export function PageHeader({
   title,
   subtitle,
   actions,
+  icon: Icon,
 }: {
   title: string;
   subtitle?: string;
   actions?: React.ReactNode;
+  /**
+   * Optional page mark, rendered as a brand-tinted tile beside the title.
+   * OPTIONAL ON PURPOSE: only the pages that pass it get the tile, and every
+   * other caller keeps the exact `<div>{h1}{p}</div>` it renders today.
+   */
+  icon?: LucideIcon;
 }) {
+  const heading = (
+    <>
+      <h1 className="ss-page-title text-xl font-extrabold tracking-tight text-slate-900">{title}</h1>
+      {subtitle && <p className="ss-page-sub mt-1 text-sm text-slate-500">{subtitle}</p>}
+    </>
+  );
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h1 className="ss-page-title text-xl font-extrabold tracking-tight text-slate-900">{title}</h1>
-        {subtitle && <p className="ss-page-sub mt-1 text-sm text-slate-500">{subtitle}</p>}
-      </div>
+      {Icon ? (
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="ss-page-mark">
+            <Icon size={21} strokeWidth={1.9} />
+          </span>
+          <div className="min-w-0">{heading}</div>
+        </div>
+      ) : (
+        <div>{heading}</div>
+      )}
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>
   );

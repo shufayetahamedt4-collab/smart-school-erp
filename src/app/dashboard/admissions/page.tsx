@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ClipboardList, Plus, Search, FileUp, Tag, CheckCircle, XCircle, GraduationCap } from "lucide-react";
+import { ClipboardList, Plus, Search, FileUp, Tag, CheckCircle, XCircle, GraduationCap, Users } from "lucide-react";
 import { api, qs, upload } from "@/lib/client";
-import { Badge, Field, TextInput, Select, Textarea, Modal, PageHeader, LoadingScreen, EmptyState, ErrorNote, KpiCard, statusTone, prettyStatus } from "@/components/ui";
-import { fmtMoney, fmtDate } from "@/lib/utils";
+import { Badge, Field, TextInput, Select, Textarea, Modal, PageHeader, LoadingScreen, EmptyState, ErrorNote, SoftStatCard, statusTone, prettyStatus } from "@/components/ui";
+import { fmtMoney, fmtDate, initials } from "@/lib/utils";
 
 /**
  * PRD §4 — Admission pipeline (Admin + Front Desk + Accountant views).
@@ -215,11 +215,13 @@ export default function AdmissionsPage() {
   // The list is server-filtered, so this is labelled as "currently listed"
   // rather than implying a school-wide total.
   const stage = (statuses: string[]) => items.filter((a) => statuses.includes(a.status)).length;
+  // Only the `tone` label changed (blue / amber / green / red). The keys, icons,
+  // labels, subs and every stage([...]) count are untouched.
   const metrics = [
-    { key: "enquiries", icon: ClipboardList, label: "Open enquiries", value: stage(["ENQUIRY"]), sub: "not yet applied", tone: "slate" as const },
+    { key: "enquiries", icon: ClipboardList, label: "Open enquiries", value: stage(["ENQUIRY"]), sub: "not yet applied", tone: "sky" as const },
     { key: "progress", icon: FileUp, label: "In progress", value: stage(["APPLIED", "DOCS_PENDING", "TEST_SCHEDULED", "SEAT_CONFIRMED"]), sub: "being processed", tone: "amber" as const },
     { key: "enrolled", icon: CheckCircle, label: "Enrolled", value: stage(["ENROLLED"]), sub: "admitted", tone: "emerald" as const },
-    { key: "rejected", icon: XCircle, label: "Rejected", value: stage(["REJECTED"]), sub: "closed", tone: "slate" as const },
+    { key: "rejected", icon: XCircle, label: "Rejected", value: stage(["REJECTED"]), sub: "closed", tone: "rose" as const },
   ];
 
   return (
@@ -227,6 +229,7 @@ export default function AdmissionsPage() {
       <PageHeader
         title="Admissions"
         subtitle="Enquiry to enrolment — pipeline, documents and seat confirmation"
+        icon={GraduationCap}
         actions={
           // §4.2 — the same intake form the Students module uses, so the two
           // entry points can never ask for different information.
@@ -236,19 +239,20 @@ export default function AdmissionsPage() {
         }
       />
 
-      {/* pipeline — numbers first, one divided surface */}
-      <section className="ss-surface mb-6">
+      {/* pipeline — four semantic summary cards, one per stage */}
+      <section className="ss-surface mb-8">
         <div className="ss-section">
-          <div className="min-w-0">
-            <h3 className="ss-section-title">Admissions pipeline</h3>
-            <p className="ss-section-sub">Across the {items.length} applications currently listed</p>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="ss-section-tile"><ClipboardList size={16} /></span>
+            <div className="min-w-0">
+              <h3 className="ss-section-title">Admissions pipeline</h3>
+              <p className="ss-section-sub">Across the {items.length} applications currently listed</p>
+            </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-px bg-slate-100 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-4">
           {metrics.map((m) => (
-            <div key={m.key} className="bg-white">
-              <KpiCard bare icon={m.icon} label={m.label} value={m.value} sub={m.sub} tone={m.tone} />
-            </div>
+            <SoftStatCard key={m.key} icon={m.icon} label={m.label} value={m.value} sub={m.sub} tone={m.tone} />
           ))}
         </div>
       </section>
@@ -258,9 +262,12 @@ export default function AdmissionsPage() {
       {/* applications: one surface — heading, a flat filter toolbar, the table */}
       <section className="ss-surface">
         <div className="ss-section">
-          <div className="min-w-0">
-            <h3 className="ss-section-title">Applications</h3>
-            <p className="ss-section-sub">{items.length} in this view</p>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="ss-section-tile"><Users size={16} /></span>
+            <div className="min-w-0">
+              <h3 className="ss-section-title">Applications</h3>
+              <p className="ss-section-sub">{items.length} in this view</p>
+            </div>
           </div>
         </div>
 
@@ -289,11 +296,15 @@ export default function AdmissionsPage() {
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <TextInput className="!pl-9" placeholder="Search name / phone / admission no…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && refresh()} />
             </div>
-            <Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); load({ status: e.target.value || undefined, q: q || undefined }); }}>
-              <option value="">All statuses</option>
-              {STATUS_STEPS.map((s) => <option key={s}>{s}</option>)}
-            </Select>
-            <button className="btn btn-primary" onClick={refresh}>Filter</button>
+            {/* the control and the CTA share the last cells, so the button keeps
+                its own width instead of stretching across a grid column */}
+            <div className="flex gap-2 sm:col-span-2">
+              <Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); load({ status: e.target.value || undefined, q: q || undefined }); }}>
+                <option value="">All statuses</option>
+                {STATUS_STEPS.map((s) => <option key={s}>{s}</option>)}
+              </Select>
+              <button className="btn btn-primary" onClick={refresh}>Filter</button>
+            </div>
           </div>
         </div>
 
@@ -315,8 +326,18 @@ export default function AdmissionsPage() {
                 {items.map((a) => (
                   <tr key={a.id} className="tr-hover cursor-pointer" onClick={() => openDetail(a)}>
                     <td className="td">
-                      <div className="font-bold text-slate-800">{a.fullName}</div>
-                      <div className="text-[11px] text-slate-400">{a.fullNameBn || ""} {a.admissionNo ? `· ${a.admissionNo}` : ""}</div>
+                      {/* Same presentational avatar the Students list uses, and the
+                          same initials() helper — the cell's data is unchanged.
+                          Hidden below xl: it costs 46px of table width, and this
+                          table already wraps its Guardian column at that size, so
+                          narrow screens keep exactly the density they had before. */}
+                      <div className="flex items-center gap-2.5">
+                        <div className="ss-accent-soft hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold xl:flex">{initials(a.fullName)}</div>
+                        <div className="min-w-0">
+                          <div className="truncate font-bold text-slate-800">{a.fullName}</div>
+                          <div className="truncate text-[11px] text-slate-400">{a.fullNameBn || ""} {a.admissionNo ? `· ${a.admissionNo}` : ""}</div>
+                        </div>
+                      </div>
                     </td>
                     <td className="td">
                       <div className="text-xs font-semibold text-slate-700">{a.guardianName || "—"}</div>
@@ -324,7 +345,7 @@ export default function AdmissionsPage() {
                     </td>
                     <td className="td text-xs text-slate-600">{a.previousSchoolName || "—"}{a.previousClass ? ` (${a.previousClass})` : ""}</td>
                     <td className="td text-xs">{a.classRoom?.name || "TBD"}</td>
-                    <td className="td"><Badge tone={a.status === "REJECTED" ? "red" : a.status === "ENROLLED" ? "green" : "amber"}>{prettyStatus(a.status)}</Badge></td>
+                    <td className="td"><Badge tone={a.status === "REJECTED" ? "red" : a.status === "ENROLLED" ? "green" : a.status === "ENQUIRY" || a.status === "APPLIED" ? "blue" : "amber"}>{prettyStatus(a.status)}</Badge></td>
                     <td className="td text-xs">
                       {a.discounts.length ? a.discounts.map((d) => (
                         <Badge key={d.id} tone={d.status === "APPROVED" ? "green" : d.status === "REJECTED" ? "red" : "amber"} className="mr-1">
@@ -332,7 +353,7 @@ export default function AdmissionsPage() {
                         </Badge>
                       )) : "—"}
                     </td>
-                    <td className="td text-right font-bold">{a.payableAmount != null ? fmtMoney(a.payableAmount) : "—"}</td>
+                    <td className="td text-right text-sm font-bold tabular-nums text-slate-900">{a.payableAmount != null ? fmtMoney(a.payableAmount) : "—"}</td>
                   </tr>
                 ))}
               </tbody>

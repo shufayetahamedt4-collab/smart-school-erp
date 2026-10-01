@@ -156,13 +156,16 @@ export default function FeesPage() {
       />
 
       {/* standing figures — numbers first, one divided surface */}
-      <section className="ss-surface mb-6">
-        <div className="grid grid-cols-2 gap-px bg-slate-100 lg:grid-cols-4">
+      <section className="ss-surface mb-8">
+        <div className="grid grid-cols-2 gap-px bg-slate-100 sm:grid-cols-3 xl:grid-cols-4">
           {metrics.map((m) => (
             <div key={m.key} className="bg-white">
               <KpiCard bare icon={m.icon} label={m.label} value={m.value} sub={m.sub} tone={m.tone} />
             </div>
           ))}
+          {/* below four columns an odd cell would show the divider grey, not a figure */}
+          <div aria-hidden className="hidden bg-white sm:block xl:hidden" />
+          <div aria-hidden className="hidden bg-white sm:block xl:hidden" />
         </div>
       </section>
 
@@ -202,11 +205,15 @@ export default function FeesPage() {
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <TextInput className="!pl-9" placeholder="Search by student…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && apply()} />
             </div>
-            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="">All statuses</option>
-              <option>UNPAID</option><option>PARTIAL</option><option>PAID</option>
-            </Select>
-            <button className="btn btn-primary" onClick={apply}>Filter</button>
+            {/* the control and the CTA share the last cells, so the button keeps
+                its own width instead of stretching across a grid column */}
+            <div className="flex gap-2 sm:col-span-2">
+              <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">All statuses</option>
+                <option>UNPAID</option><option>PARTIAL</option><option>PAID</option>
+              </Select>
+              <button className="btn btn-primary" onClick={apply}>Filter</button>
+            </div>
           </div>
         </div>
 

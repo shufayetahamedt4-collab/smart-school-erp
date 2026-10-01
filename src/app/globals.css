@@ -55,10 +55,11 @@
    school's own brand color (--brand) stays the interactive accent and is NOT
    touched here — only the neutral chrome and the shape tokens change. */
 [data-sector="school"] {
-  --radius-card: 0.75rem;
-  /* Whisper-light: the School Admin workspace is defined by its hairlines and
-     its whitespace, not by elevation. No glow, no glass, no gradient. */
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.03);
+  /* Softer, larger radii (the 14–20px band) plus ONE restrained elevation
+     step, so a surface reads as layered paper instead of a flat box. Still no
+     glow, no glass and no heavy drop shadow. */
+  --radius-card: 1rem;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 14px 30px -16px rgb(15 23 42 / 0.18);
   --radius-control: 0.625rem;
   --th-pad-y: 0.55rem;
   --td-pad-y: 0.62rem;
@@ -69,6 +70,19 @@
   --chrome-line: rgb(255 255 255 / 0.09);
   --chrome-text: #b8c3d4;
   --chrome-muted: #7d8ba1;
+
+  /* The content canvas is a hair off-white so the white surfaces and the
+     app bar above them read as distinct layers. Deliberately NOT a strong
+     tint: it stays a background, never a feature. */
+  background-color: #f7f9fc;
+}
+
+/* Print stays pure white: /print/** renders inside the same Shell, and a grey
+   page would waste toner and shift the marksheet's greys. */
+@media print {
+  [data-sector="school"] {
+    background-color: #fff;
+  }
 }
 
 /* PRD §14.2 dark mode is deliberately GONE.
@@ -257,9 +271,11 @@ body {
     padding: 0.5rem 0.8rem;
   }
 
+  /* True pills, matching the summary cards' softness. The ring the Badge
+     primitive already applies supplies the tinted edge, so no border here. */
   [data-sector="school"] .badge {
-    border-radius: 0.375rem;
-    padding: 0.08rem 0.44rem;
+    border-radius: 9999px;
+    padding: 0.16rem 0.58rem;
     font-size: 0.68rem;
     font-weight: 600;
     letter-spacing: 0.012em;
@@ -302,10 +318,10 @@ body {
      rather than the previous fully saturated pill. */
   [data-sector="school"] .ss-navlink-active,
   [data-sector="school"] .ss-navlink-active:hover {
-    background: rgb(var(--brand) / 0.18);
+    background: linear-gradient(90deg, rgb(var(--brand)), rgb(var(--brand) / 0.84));
     color: #fff;
     font-weight: 600;
-    box-shadow: inset 0 0 0 1px rgb(var(--brand) / 0.32);
+    box-shadow: 0 8px 18px -10px rgb(var(--brand) / 0.85), inset 0 0 0 1px rgb(255 255 255 / 0.12);
   }
   [data-sector="school"] .ss-navlink-active svg,
   [data-sector="school"] .ss-navlink-active:hover svg {
@@ -411,6 +427,7 @@ body {
   background: #fff;
   border: 1px solid var(--color-slate-200);
   border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 /* A supporting surface: same shape, but its heading is quieter, so Notice
@@ -419,7 +436,136 @@ body {
   background: #fff;
   border: 1px solid var(--color-slate-200);
   border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
+}
+
+/* --- the two colourful summary strips (dashboard KPIs, Admissions pipeline)
+   The ONLY place in the School Admin panel where a section carries more than
+   one hue. Every tone is a FIXED semantic colour (blue = informational,
+   amber = pending, green = positive, red = negative) and is deliberately kept
+   independent of the tenant brand, so status meaning never changes when a
+   school picks a new themeColor. The single exception is the `brand` tone,
+   which follows --brand instead of hardcoding an indigo. */
+[data-sector="school"] .ss-statcard {
+  height: 100%;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--sc-border);
+  background: linear-gradient(150deg, var(--sc-tint) 0%, var(--sc-tint-2) 58%, #fff 100%);
+  padding: 0.9rem 1rem 0.95rem;
+  box-shadow: var(--shadow-card);
+}
+[data-sector="school"] .ss-statcard-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.15rem;
+  width: 2.15rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--sc-solid);
+  color: #fff;
+}
+[data-sector="school"] .ss-statcard-label {
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+  color: var(--sc-ink);
+}
+[data-sector="school"] .ss-statcard-value {
+  margin-top: 0.32rem;
+  font-size: 1.5rem;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  color: var(--sc-ink);
+  font-variant-numeric: tabular-nums;
+}
+[data-sector="school"] .ss-statcard-sub {
+  margin-top: 0.18rem;
+  font-size: 0.7rem;
+  line-height: 1rem;
+  color: var(--color-slate-500);
+}
+
+/* One hue per tone. `brand` tracks the tenant colour; the other five are fixed
+   so a status keeps its meaning whatever the school's theme is. */
+[data-sector="school"] .ss-sc-brand {
+  --sc-solid: rgb(var(--brand));
+  --sc-ink: rgb(var(--brand));
+  --sc-border: rgb(var(--brand) / 0.20);
+  --sc-tint: rgb(var(--brand) / 0.075);
+  --sc-tint-2: rgb(var(--brand) / 0.03);
+}
+[data-sector="school"] .ss-sc-sky {
+  --sc-solid: #0ea5e9;
+  --sc-ink: #0369a1;
+  --sc-border: #bae6fd;
+  --sc-tint: #eff8ff;
+  --sc-tint-2: #e0f2fe;
+}
+[data-sector="school"] .ss-sc-amber {
+  --sc-solid: #f59e0b;
+  --sc-ink: #b45309;
+  --sc-border: #fde68a;
+  --sc-tint: #fffbeb;
+  --sc-tint-2: #fef3c7;
+}
+[data-sector="school"] .ss-sc-emerald {
+  --sc-solid: #10b981;
+  --sc-ink: #047857;
+  --sc-border: #a7f3d0;
+  --sc-tint: #f0fdf8;
+  --sc-tint-2: #d1fae5;
+}
+[data-sector="school"] .ss-sc-rose {
+  --sc-solid: #f43f5e;
+  --sc-ink: #be123c;
+  --sc-border: #fecdd3;
+  --sc-tint: #fff6f7;
+  --sc-tint-2: #ffe4e6;
+}
+[data-sector="school"] .ss-sc-violet {
+  --sc-solid: #8b5cf6;
+  --sc-ink: #6d28d9;
+  --sc-border: #ddd6fe;
+  --sc-tint: #f9f8ff;
+  --sc-tint-2: #ede9fe;
+}
+
+/* Page-context marks: the tile beside a page title and the one beside a
+   section title. Both are brand-tinted, so a school's own colour carries
+   them and no indigo is hardcoded. */
+[data-sector="school"] .ss-page-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.75rem;
+  width: 2.75rem;
+  flex-shrink: 0;
+  border-radius: 0.9rem;
+  background: rgb(var(--brand) / 0.09);
+  color: rgb(var(--brand));
+  box-shadow: inset 0 0 0 1px rgb(var(--brand) / 0.12);
+}
+[data-sector="school"] .ss-section-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.1rem;
+  width: 2.1rem;
+  flex-shrink: 0;
+  border-radius: 0.6rem;
+  background: rgb(var(--brand) / 0.09);
+  color: rgb(var(--brand));
+}
+/* A SUPPORTING section header (schedule, PTM) wears a lighter version of the
+   same tile, so a secondary heading never outweighs the operational ones. */
+[data-sector="school"] .ss-section-quiet .ss-section-tile {
+  height: 1.75rem;
+  width: 1.75rem;
+  border-radius: 0.5rem;
 }
 
 /* Section heading inside a surface: page-context eyebrow + title, one hairline. */
@@ -446,12 +592,17 @@ body {
   color: var(--color-slate-500);
 }
 [data-sector="school"] .ss-section-quiet .ss-section-title {
-  font-size: 0.75rem;
+  /* A section heading must never be smaller than the items it heads: the
+     notice titles below are 0.8125rem, so the header sits at the same size and
+     keeps its edge through weight and colour instead. */
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--color-slate-700);
 }
 [data-sector="school"] .ss-section-quiet {
-  padding: 0.7rem 0.9rem;
+  /* Same horizontal inset as .ss-section and .ss-row, so every L6 header lines
+     up with the content beneath it. Only the vertical rhythm stays tighter. */
+  padding: 0.7rem 1rem;
 }
 
 /* The "today at a glance" pulse: inline operational facts with hairline
@@ -499,6 +650,372 @@ body {
   font-weight: 600;
   color: var(--color-slate-500);
   font-variant-numeric: tabular-nums;
+}
+
+/* --- "Needs your attention": an action queue, not a list of alarms -------
+   One tinted icon tile, a stronger label, a tinted count pill and a subtle
+   chevron. Colour is a per-row ACCENT, never a fill, so a queue of five still
+   reads as a to-do list rather than five alarms. */
+[data-sector="school"] .ss-attention-head {
+  padding-top: 0.85rem;
+  padding-bottom: 0.85rem;
+}
+[data-sector="school"] .ss-attention-head .ss-section-title {
+  font-size: 0.9375rem;
+  letter-spacing: -0.012em;
+}
+[data-sector="school"] .ss-attrow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  transition: background-color 0.15s ease;
+}
+/* On the tinted rail the hover must darken, not lighten (slate-50 → slate-100). */
+[data-sector="school"] .ss-attrow:hover {
+  background: rgb(241 245 249 / 0.8);
+}
+[data-sector="school"] .ss-attrow-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2rem;
+  width: 2rem;
+  flex-shrink: 0;
+  border-radius: 0.6rem;
+  transition: transform 0.15s ease;
+}
+[data-sector="school"] .ss-attrow:hover .ss-attrow-icon {
+  transform: translateY(-1px);
+}
+[data-sector="school"] .ss-attrow-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.006em;
+  color: var(--color-slate-800);
+}
+[data-sector="school"] .ss-attrow-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.65rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+[data-sector="school"] .ss-attrow-chevron {
+  flex-shrink: 0;
+  color: var(--color-slate-300);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+[data-sector="school"] .ss-attrow:hover .ss-attrow-chevron {
+  color: var(--color-slate-500);
+  transform: translateX(2px);
+}
+
+/* --- empty panel -------------------------------------------------------
+   A centred glyph over one quiet line, so an empty surface still reads as a
+   finished panel rather than an unfinished box. The tone variant picks the
+   tile colour AND the panel wash; the sentence keeps the same muted slate it
+   always used, so the copy still leads and colour only frames it. */
+[data-sector="school"] .ss-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1.9rem 1rem;
+  text-align: center;
+}
+[data-sector="school"] .ss-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.5rem;
+  width: 2.5rem;
+  flex-shrink: 0;
+  border-radius: 0.75rem;
+  background: var(--ss-empty-bg, var(--color-slate-100));
+  color: var(--ss-empty-ink, var(--color-slate-400));
+}
+[data-sector="school"] .ss-empty-text {
+  font-size: 0.8125rem;
+  line-height: 1.15rem;
+  color: var(--color-slate-400);
+}
+[data-sector="school"] .ss-empty-slate {
+  --ss-empty-bg: var(--color-slate-100);
+  --ss-empty-ink: var(--color-slate-400);
+}
+/* A TINTED empty panel: a bigger tile over a wash, so an empty slot reads as a
+   deliberate state instead of an unfinished white gap. */
+[data-sector="school"] .ss-empty-sky,
+[data-sector="school"] .ss-empty-violet {
+  padding: 2.3rem 1rem;
+}
+[data-sector="school"] .ss-empty-sky .ss-empty-icon,
+[data-sector="school"] .ss-empty-violet .ss-empty-icon {
+  height: 3rem;
+  width: 3rem;
+  border-radius: 0.85rem;
+}
+[data-sector="school"] .ss-empty-sky {
+  --ss-empty-bg: #bae6fd;
+  --ss-empty-ink: #075985;
+  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+}
+/* PTM is the violet beat of the dashboard (see the attention queue), and its
+   empty panel carries that same hue so the two read as one feature. */
+[data-sector="school"] .ss-empty-violet {
+  --ss-empty-bg: #ddd6fe;
+  --ss-empty-ink: #5b21b6;
+  background: linear-gradient(180deg, #f5f3ff 0%, #ffffff 100%);
+}
+
+/* --- the four shortcut cards -------------------------------------------
+   The dashboard's most colourful secondary row, and it has to read as four
+   DIFFERENT colours at a glance: BLUE / VIOLET / GREEN / AMBER. So each card is
+   a real pastel FILL (two stops, no fade to white), edged with a solid colour
+   bar, carrying a deeper pastel glyph chip and a tinted arrow. Hues are FIXED
+   (not the tenant brand) so the four stay distinguishable whatever theme a
+   school picks, and the label stays dark navy so the copy always leads. */
+[data-sector="school"] .ss-quick {
+  display: flex;
+  align-items: center;
+  /* Tight gutters on purpose: at the 4-column md layout a card is only ~165px,
+     and the label has to keep its longest single word ("admission") on one
+     line rather than spill toward the arrow. */
+  gap: 0.6rem;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--qt-border);
+  border-left: 3px solid var(--qt-solid);
+  background: linear-gradient(150deg, var(--qt-tint-2) 0%, var(--qt-tint) 100%);
+  padding: 0.85rem 0.75rem;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+[data-sector="school"] .ss-quick:hover {
+  transform: translateY(-2px);
+  border-color: var(--qt-border-strong);
+  border-left-color: var(--qt-solid);
+  box-shadow: 0 14px 26px -14px rgb(15 23 42 / 0.28);
+}
+[data-sector="school"] .ss-quick-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.4rem;
+  width: 2.4rem;
+  flex-shrink: 0;
+  border-radius: 0.7rem;
+  background: var(--qt-tile);
+  color: var(--qt-ink);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.6);
+}
+[data-sector="school"] .ss-quick-label {
+  min-width: 0;
+  font-size: 0.8125rem;
+  line-height: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.006em;
+  color: var(--color-slate-900);
+  /* Last-resort guard: a word too long for the box breaks instead of running
+     under the arrow. Normal labels wrap at their spaces. */
+  overflow-wrap: anywhere;
+}
+[data-sector="school"] .ss-quick-arrow {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--qt-ink);
+  opacity: 0.45;
+  transition: color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+}
+[data-sector="school"] .ss-quick:hover .ss-quick-arrow {
+  opacity: 1;
+  transform: translateX(2px);
+}
+
+/* One hue per shortcut. `--qt-solid` is the left edge bar, `--qt-tile`/`--qt-ink`
+   the glyph chip, `--qt-tint`/`--qt-tint-2` the card wash. */
+[data-sector="school"] .ss-qt-sky {
+  --qt-solid: #38bdf8;
+  --qt-ink: #075985;
+  --qt-tile: #bae6fd;
+  --qt-tint: #e0f2fe;
+  --qt-tint-2: #eff6ff;
+  --qt-border: #bfdbfe;
+  --qt-border-strong: #7dd3fc;
+}
+[data-sector="school"] .ss-qt-violet {
+  --qt-solid: #a78bfa;
+  --qt-ink: #5b21b6;
+  --qt-tile: #ddd6fe;
+  --qt-tint: #ede9fe;
+  --qt-tint-2: #f5f3ff;
+  --qt-border: #ddd6fe;
+  --qt-border-strong: #c4b5fd;
+}
+[data-sector="school"] .ss-qt-emerald {
+  --qt-solid: #34d399;
+  --qt-ink: #065f46;
+  --qt-tile: #a7f3d0;
+  --qt-tint: #d1fae5;
+  --qt-tint-2: #ecfdf5;
+  --qt-border: #a7f3d0;
+  --qt-border-strong: #6ee7b7;
+}
+[data-sector="school"] .ss-qt-amber {
+  --qt-solid: #fbbf24;
+  --qt-ink: #92400e;
+  --qt-tile: #fde68a;
+  --qt-tint: #fef3c7;
+  --qt-tint-2: #fffbeb;
+  --qt-border: #fde68a;
+  --qt-border-strong: #fcd34d;
+}
+
+/* --- tinted section headers --------------------------------------------
+   A supporting section that carries a colour of its own: a faint wash, a
+   matching hairline and a solid pastel tile, so "Today's schedule" (sky) and
+   "Upcoming PTM" (violet) are told apart before a word is read. The title
+   steps up a notch; the subtitle stays quiet. */
+[data-sector="school"] .ss-head-sky .ss-section-title,
+[data-sector="school"] .ss-head-violet .ss-section-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+}
+[data-sector="school"] .ss-head-sky .ss-section-tile,
+[data-sector="school"] .ss-head-violet .ss-section-tile {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.55);
+}
+[data-sector="school"] .ss-head-sky {
+  background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%);
+  border-bottom-color: #bfdbfe;
+}
+[data-sector="school"] .ss-head-sky .ss-section-tile {
+  background: #bae6fd;
+  color: #075985;
+}
+[data-sector="school"] .ss-head-violet {
+  background: linear-gradient(180deg, #f5f3ff 0%, #fbfaff 100%);
+  border-bottom-color: #ddd6fe;
+}
+[data-sector="school"] .ss-head-violet .ss-section-tile {
+  background: #ddd6fe;
+  color: #5b21b6;
+}
+
+/* --- notice category badges --------------------------------------------
+   The shared `badge` tint is a 50-shade wash, which almost disappears on a
+   white notice card. The dashboard's board therefore draws its own chip — a
+   real pastel fill with a matching border — so MEETING / PICNIC / EVENT /
+   EXAM / HOLIDAY are told apart at a glance. Same palette as the Notices
+   screens, only stronger; the label text is unchanged. */
+[data-sector="school"] .ss-notice-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid var(--nb-border);
+  background: var(--nb-bg);
+  color: var(--nb-ink);
+  padding: 0.16rem 0.6rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+[data-sector="school"] .ss-nb-blue { --nb-bg: #dbeafe; --nb-ink: #1d4ed8; --nb-border: #93c5fd; }
+[data-sector="school"] .ss-nb-amber { --nb-bg: #fef3c7; --nb-ink: #b45309; --nb-border: #fcd34d; }
+[data-sector="school"] .ss-nb-green { --nb-bg: #d1fae5; --nb-ink: #047857; --nb-border: #6ee7b7; }
+[data-sector="school"] .ss-nb-violet { --nb-bg: #ede9fe; --nb-ink: #6d28d9; --nb-border: #c4b5fd; }
+[data-sector="school"] .ss-nb-red { --nb-bg: #ffe4e6; --nb-ink: #be123c; --nb-border: #fda4af; }
+[data-sector="school"] .ss-nb-slate { --nb-bg: #e2e8f0; --nb-ink: #475569; --nb-border: #cbd5e1; }
+
+/* --- recent activity ---------------------------------------------------
+   A bigger, coloured glyph chip plus a real type hierarchy (title > body >
+   time), so a glance separates what happened from when. The tone classes come
+   from the shared notification meta, which is untouched. */
+[data-sector="school"] .ss-activity-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2rem;
+  width: 2rem;
+  flex-shrink: 0;
+  border-radius: 0.6rem;
+}
+[data-sector="school"] .ss-activity-title {
+  font-size: 0.8125rem;
+  line-height: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.006em;
+  color: var(--color-slate-900);
+}
+[data-sector="school"] .ss-activity-desc {
+  font-size: 0.72rem;
+  line-height: 1.05rem;
+  color: var(--color-slate-500);
+}
+[data-sector="school"] .ss-activity-time {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--color-slate-400);
+  font-variant-numeric: tabular-nums;
+}
+/* Tint only the rows that ARE links — tinting a static row would imply a click
+   that does not exist. */
+[data-sector="school"] .ss-activity-row:hover {
+  background: rgb(var(--brand) / 0.045);
+}
+
+/* --- parent-engagement promo -------------------------------------------
+   The one supporting card that is a call to action, so it gets a colour of its
+   own: a violet wash, a violet glyph chip, a violet eyebrow and a violet CTA
+   edge. Text and destination are unchanged. */
+[data-sector="school"] .ss-promo {
+  border-color: #ddd6fe;
+  background: linear-gradient(160deg, #f5f3ff 0%, #ffffff 62%);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 12px 26px -16px rgb(109 40 217 / 0.3);
+}
+[data-sector="school"] .ss-promo .ss-section {
+  background: transparent;
+  border-bottom-color: #ede9fe;
+}
+[data-sector="school"] .ss-promo-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2rem;
+  width: 2rem;
+  flex-shrink: 0;
+  border-radius: 0.6rem;
+  background: #ede9fe;
+  color: #6d28d9;
+}
+[data-sector="school"] .ss-promo-eyebrow {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #7c3aed;
+}
+[data-sector="school"] .ss-promo-cta {
+  border-color: #c4b5fd;
+  color: #6d28d9;
+}
+[data-sector="school"] .ss-promo-cta:hover {
+  background: #ede9fe;
+  border-color: #a78bfa;
 }
 
 /* A flat filter strip inside a list surface: controls, not a card of their

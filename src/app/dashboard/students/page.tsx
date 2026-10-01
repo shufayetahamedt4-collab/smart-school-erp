@@ -67,13 +67,16 @@ export default function StudentsPage() {
       />
 
       {/* standing figures — numbers first, one divided surface */}
-      <section className="ss-surface mb-6">
-        <div className="grid grid-cols-2 gap-px bg-slate-100 lg:grid-cols-4">
+      <section className="ss-surface mb-8">
+        <div className="grid grid-cols-2 gap-px bg-slate-100 sm:grid-cols-3 xl:grid-cols-4">
           {metrics.map((m) => (
             <div key={m.key} className="bg-white">
               <KpiCard bare icon={m.icon} label={m.label} value={m.value} sub={m.sub} tone={m.tone} />
             </div>
           ))}
+          {/* below four columns an odd cell would show the divider grey, not a figure */}
+          <div aria-hidden className="hidden bg-white sm:block xl:hidden" />
+          <div aria-hidden className="hidden bg-white sm:block xl:hidden" />
         </div>
       </section>
 

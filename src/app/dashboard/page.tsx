@@ -4,15 +4,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   GraduationCap, Users, BookOpen, Wallet, Scale, Megaphone, ArrowUpRight, ArrowRight,
-  ClipboardList, Radio, CalendarX2, CalendarCheck, Inbox, Bell,
+  ClipboardList, Radio, CalendarX2, CalendarCheck, Inbox, Bell, CircleAlert, Clock,
 } from "lucide-react";
 import { api } from "@/lib/client";
 import { useMe } from "@/components/Shell";
 import {
   LoadingScreen, PageHeader, EmptyState,
-  KpiCard, PulseFact, AttentionRow,
+  SoftStatCard, PulseFact, AttentionRow,
 } from "@/components/ui";
-import { notificationMeta, relativeTime } from "@/components/notification-ui";
+import { notificationMeta, relativeTime, noticeCategoryTone } from "@/components/notification-ui";
 import { fmtMoney, fmtDate } from "@/lib/utils";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -149,27 +149,32 @@ export default function SchoolDashboard() {
   if (loading || !stats) return <LoadingScreen label="Loading dashboard…" />;
 
   // Quick actions follow the session's permissions (PRD §2.1) — sub-roles only
-  // get shortcuts to modules they can actually open.
+  // get shortcuts to modules they can actually open. Only a `tone` (a colour
+  // name) was added to each: every href, label, icon and the permission
+  // predicate below is exactly as it was.
   const adminOnly = !role || role === "SCHOOL_ADMIN" || role === "BRANCH_ADMIN";
   const quickActions = [
-    { href: "/dashboard/students", icon: GraduationCap, label: "New admission", show: adminOnly },
-    { href: "/dashboard/exams", icon: ClipboardList, label: "Exams & results", show: adminOnly },
-    { href: "/dashboard/fees", icon: Wallet, label: "Fee collection", show: adminOnly || role === "ACCOUNTANT" || role === "REGISTRAR" },
-    { href: "/dashboard/id-cards", icon: BookOpen, label: "Print ID cards", show: adminOnly },
+    { href: "/dashboard/students", icon: GraduationCap, label: "New admission", tone: "sky", show: adminOnly },
+    { href: "/dashboard/exams", icon: ClipboardList, label: "Exams & results", tone: "violet", show: adminOnly },
+    { href: "/dashboard/fees", icon: Wallet, label: "Fee collection", tone: "emerald", show: adminOnly || role === "ACCOUNTANT" || role === "REGISTRAR" },
+    { href: "/dashboard/id-cards", icon: BookOpen, label: "Print ID cards", tone: "amber", show: adminOnly },
   ].filter((q) => q.show);
 
   // "Needs your attention" — one line per outstanding item that actually exists.
-  // Colour restraint: only the three rows that genuinely need acting on carry a
-  // tone (amber). The informational ones stay neutral, so the queue reads as a
-  // calm to-do list instead of a row of alarms.
+  // Colour restraint: each row carries one soft semantic accent (amber for
+  // money/pending, blue for pipeline, rose for something to answer, violet for
+  // booked slots). The rows that are merely informational stay neutral, so the
+  // queue reads as a calm to-do list instead of a row of alarms. Only the `tone`
+  // labels below differ from before — keys, icons, labels, counts, hrefs and the
+  // filter are untouched.
   const attentionRows = [
     { key: "fees", icon: Wallet, label: "Unpaid fees", count: stats.fees.unpaidCount, href: "/dashboard/fees", tone: "amber" as const },
     { key: "leaves", icon: CalendarX2, label: "Leave requests to review", count: attention.leaves, href: "/dashboard/leaves", tone: "slate" as const },
     { key: "periods", icon: Radio, label: "Periods not taken today", count: roster?.counts?.missing ?? null, href: "/dashboard/live-classes", tone: "amber" as const },
-    { key: "admissions", icon: ClipboardList, label: "Admissions in progress", count: attention.admissions, href: "/dashboard/admissions", tone: "slate" as const },
-    { key: "feedback", icon: Inbox, label: "Feedback to resolve", count: attention.complaints, href: "/dashboard/complaints", tone: "amber" as const },
+    { key: "admissions", icon: ClipboardList, label: "Admissions in progress", count: attention.admissions, href: "/dashboard/admissions", tone: "sky" as const },
+    { key: "feedback", icon: Inbox, label: "Feedback to resolve", count: attention.complaints, href: "/dashboard/complaints", tone: "rose" as const },
     { key: "unread", icon: Bell, label: "Unread notifications", count: attention.unread, href: "/dashboard/notifications", tone: "slate" as const },
-    { key: "ptm", icon: CalendarCheck, label: "PTM slots booked", count: attention.ptm, href: "/dashboard/meetings", tone: "slate" as const },
+    { key: "ptm", icon: CalendarCheck, label: "PTM slots booked", count: attention.ptm, href: "/dashboard/meetings", tone: "violet" as const },
   ].filter((row) => typeof row.count === "number" && row.count > 0);
 
   // L2 — the operational pulse. Time-bound facts only; outstanding dues live in
@@ -191,10 +196,12 @@ export default function SchoolDashboard() {
     },
   ];
 
+  // Only the `tone` labels changed. Keys, icons, labels, values and subs — every
+  // expression — are exactly as they were.
   const kpis = [
-    { key: "students", icon: GraduationCap, label: "Students", value: stats.counts.students, sub: `${stats.counts.marksCount} exam marks recorded`, tone: "slate" as const },
-    { key: "teachers", icon: Users, label: "Teachers", value: stats.counts.teachers, sub: `${stats.counts.classes} classes`, tone: "slate" as const },
-    { key: "classes", icon: BookOpen, label: "Classes", value: stats.counts.classes, sub: `${stats.counts.exams} exams`, tone: "slate" as const },
+    { key: "students", icon: GraduationCap, label: "Students", value: stats.counts.students, sub: `${stats.counts.marksCount} exam marks recorded`, tone: "brand" as const },
+    { key: "teachers", icon: Users, label: "Teachers", value: stats.counts.teachers, sub: `${stats.counts.classes} classes`, tone: "violet" as const },
+    { key: "classes", icon: BookOpen, label: "Classes", value: stats.counts.classes, sub: `${stats.counts.exams} exams`, tone: "sky" as const },
     { key: "collected", icon: Wallet, label: "Fees collected", value: fmtMoney(stats.fees.paidFees), sub: `of ${fmtMoney(stats.fees.totalFees)} billed`, tone: "emerald" as const },
     { key: "dues", icon: Scale, label: "Dues outstanding", value: fmtMoney(stats.fees.dueFees), sub: `${stats.fees.unpaidCount} unpaid`, tone: "amber" as const },
   ];
@@ -228,23 +235,25 @@ export default function SchoolDashboard() {
           </div>
 
           {/* the pulse: tinted, inline facts — not four KPI clones */}
-          <div className="grid grid-cols-2 gap-px border-b border-slate-200 bg-slate-200 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-px border-b border-slate-200 bg-slate-200 sm:grid-cols-3 xl:grid-cols-4">
             {pulse.map((f) => (
               <div key={f.key} className="bg-slate-50">
                 <PulseFact label={f.label} value={f.value} tone={f.tone} />
               </div>
             ))}
+            {/* at three columns the last row needs two spare cells, otherwise the
+                divider grey shows through where a fact should be */}
+            <div aria-hidden className="hidden bg-slate-50 sm:block xl:hidden" />
+            <div aria-hidden className="hidden bg-slate-50 sm:block xl:hidden" />
           </div>
 
-          {/* the totals: one divided white row (reads /api/stats only) */}
-          <div className="grid grid-cols-2 gap-px bg-slate-100 lg:grid-cols-5">
+          {/* the totals: five semantic summary cards (reads /api/stats only).
+              Gaps instead of hairline dividers, so an odd last row needs no
+              spacer cell. */}
+          <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 xl:grid-cols-5">
             {kpis.map((k) => (
-              <div key={k.key} className="bg-white">
-                <KpiCard bare icon={k.icon} label={k.label} value={k.value} sub={k.sub} tone={k.tone} />
-              </div>
+              <SoftStatCard key={k.key} icon={k.icon} label={k.label} value={k.value} sub={k.sub} tone={k.tone} />
             ))}
-            {/* keeps the last row from leaving a tinted gap below 5 columns */}
-            <div aria-hidden className="bg-white lg:hidden" />
           </div>
         </section>
 
@@ -288,18 +297,21 @@ export default function SchoolDashboard() {
             </div>
 
             <div className="ss-rail bg-slate-50 lg:col-span-2">
-              <div className="ss-section">
-                <div className="min-w-0">
-                  <h3 className="ss-section-title">Needs your attention</h3>
-                  <p className="ss-section-sub">
-                    {attentionLoading && !attentionRows.length
-                      ? "Checking…"
-                      : `${attentionRows.length} open item${attentionRows.length === 1 ? "" : "s"}`}
-                  </p>
+              <div className="ss-section ss-attention-head">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="ss-section-tile"><CircleAlert size={16} /></span>
+                  <div className="min-w-0">
+                    <h3 className="ss-section-title">Needs your attention</h3>
+                    <p className="ss-section-sub">
+                      {attentionLoading && !attentionRows.length
+                        ? "Checking…"
+                        : `${attentionRows.length} open item${attentionRows.length === 1 ? "" : "s"}`}
+                    </p>
+                  </div>
                 </div>
               </div>
               {attentionRows.length ? (
-                <div className="divide-y divide-slate-200/70">
+                <div className="divide-y divide-slate-200/60">
                   {attentionRows.map((row) => (
                     <AttentionRow key={row.key} icon={row.icon} label={row.label} count={row.count as number} href={row.href} tone={row.tone} />
                   ))}
@@ -316,13 +328,20 @@ export default function SchoolDashboard() {
         {/* L5 — the operational feeds, in one surface */}
         <section className="ss-surface">
           <div className="grid gap-px bg-slate-100 lg:grid-cols-2">
-            <div className="bg-white">
-              <div className="ss-section">
-                <div className="min-w-0">
-                  <h3 className="ss-section-title">Today&apos;s schedule</h3>
-                  <p className="ss-section-sub">
-                    {roster ? `${roster.counts.sessionsToday} periods held · ${roster.counts.inClass} live now` : "Live classes"}
-                  </p>
+            {/* min-w-0: a grid item defaults to min-width:auto, which resolves
+                to the widest nowrap line inside it — on a phone the activity
+                row's truncated sentence sized this column past the surface and
+                the overflow was clipped away. */}
+            <div className="min-w-0 bg-white">
+              <div className="ss-section ss-head-sky">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="ss-section-tile"><Clock size={15} /></span>
+                  <div className="min-w-0">
+                    <h3 className="ss-section-title">Today&apos;s schedule</h3>
+                    <p className="ss-section-sub">
+                      {roster ? `${roster.counts.sessionsToday} periods held · ${roster.counts.inClass} live now` : "Live classes"}
+                    </p>
+                  </div>
                 </div>
                 <Link href="/dashboard/live-classes" className="btn btn-ghost btn-sm"><ArrowUpRight size={14} /></Link>
               </div>
@@ -344,15 +363,21 @@ export default function SchoolDashboard() {
                   ))}
                 </div>
               ) : roster ? (
-                <p className="px-4 py-8 text-center text-sm text-slate-400">No class is in progress right now.</p>
+                <div className="ss-empty ss-empty-sky">
+                  <span className="ss-empty-icon"><Clock size={22} /></span>
+                  <p className="ss-empty-text">No class is in progress right now.</p>
+                </div>
               ) : (
-                <p className="px-4 py-8 text-center text-sm text-slate-400">
-                  Open <Link href="/dashboard/live-classes" className="font-semibold" style={{ color: "rgb(var(--brand))" }}>Live Classes</Link> to see who is teaching.
-                </p>
+                <div className="ss-empty ss-empty-sky">
+                  <span className="ss-empty-icon"><Clock size={22} /></span>
+                  <p className="ss-empty-text">
+                    Open <Link href="/dashboard/live-classes" className="font-semibold" style={{ color: "rgb(var(--brand))" }}>Live Classes</Link> to see who is teaching.
+                  </p>
+                </div>
               )}
             </div>
 
-            <div className="bg-white">
+            <div className="min-w-0 bg-white">
               <div className="ss-section">
                 <div className="min-w-0">
                   <h3 className="ss-section-title">Recent activity</h3>
@@ -367,16 +392,16 @@ export default function SchoolDashboard() {
                     const Icon = meta.icon;
                     const inner = (
                       <>
-                        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${meta.tone}`}><Icon size={13} /></span>
+                        <span className={`ss-activity-icon ${meta.tone}`}><Icon size={15} /></span>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[13px] font-semibold text-slate-800">{n.title}</div>
-                          <div className="truncate text-[11px] text-slate-500">{n.body || meta.label}</div>
+                          <div className="ss-activity-title truncate">{n.title}</div>
+                          <div className="ss-activity-desc truncate">{n.body || meta.label}</div>
                         </div>
-                        <span className="shrink-0 text-[10.5px] font-medium text-slate-400">{relativeTime(n.createdAt)}</span>
+                        <span className="ss-activity-time shrink-0">{relativeTime(n.createdAt)}</span>
                       </>
                     );
                     return n.link ? (
-                      <Link key={n.id} href={n.link} className="ss-row ss-row-hover">{inner}</Link>
+                      <Link key={n.id} href={n.link} className="ss-row ss-row-hover ss-activity-row">{inner}</Link>
                     ) : (
                       <div key={n.id} className="ss-row">{inner}</div>
                     );
@@ -393,7 +418,9 @@ export default function SchoolDashboard() {
             its own content (items-start) so an empty panel never stretches into a
             void beside a full one. */}
         <div className="grid items-start gap-5 lg:grid-cols-3">
-          <section className="ss-surface-quiet">
+          {/* Spans two columns and both rows so the tall board balances the two
+              short cards beside it instead of leaving a hole in the row. */}
+          <section className="ss-surface-quiet lg:col-span-2 lg:row-span-2">
             <div className="ss-section ss-section-quiet">
               <h3 className="ss-section-title">Notice Board</h3>
               <Link href="/dashboard/notices" className="btn btn-ghost btn-sm"><ArrowUpRight size={14} /></Link>
@@ -403,9 +430,7 @@ export default function SchoolDashboard() {
                 {notices.map((n) => (
                   <div key={n.id} className="px-4 py-3">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500 ring-1 ring-inset ring-slate-200">
-                        {n.category}
-                      </span>
+                      <span className={`ss-notice-badge ss-nb-${noticeCategoryTone(n.category)}`}>{n.category}</span>
                       <span className="text-[10.5px] text-slate-400">{fmtDate(n.date)}</span>
                     </div>
                     <div className="mt-1.5 text-[13px] font-medium text-slate-800">{n.title}</div>
@@ -419,8 +444,11 @@ export default function SchoolDashboard() {
           </section>
 
           <section className="ss-surface-quiet">
-            <div className="ss-section ss-section-quiet">
-              <h3 className="ss-section-title">Upcoming PTM</h3>
+            <div className="ss-section ss-section-quiet ss-head-violet">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="ss-section-tile"><CalendarCheck size={14} /></span>
+                <h3 className="ss-section-title">Upcoming PTM</h3>
+              </div>
               <Link href="/dashboard/meetings" className="btn btn-ghost btn-sm"><ArrowUpRight size={14} /></Link>
             </div>
             {meetings.length ? (
@@ -436,7 +464,7 @@ export default function SchoolDashboard() {
                         <div className="text-[11.5px] font-semibold leading-tight text-slate-700">{day}</div>
                         <div className="text-[10.5px] tabular-nums text-slate-400">{time}</div>
                       </div>
-                      <span aria-hidden className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500">
+                      <span aria-hidden className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-violet-100 text-violet-700">
                         <CalendarCheck size={13} />
                       </span>
                       <div className="min-w-0 flex-1">
@@ -448,41 +476,41 @@ export default function SchoolDashboard() {
                 })}
               </div>
             ) : (
-              <p className="px-4 py-8 text-center text-sm text-slate-400">No upcoming slots.</p>
+              <div className="ss-empty ss-empty-violet">
+                <span className="ss-empty-icon"><CalendarCheck size={22} /></span>
+                <p className="ss-empty-text">No upcoming slots.</p>
+              </div>
             )}
           </section>
 
-          <section className="ss-surface-quiet">
+          <section className="ss-surface-quiet ss-promo">
             <div className="ss-section ss-section-quiet">
               <h3 className="ss-section-title">Parent engagement</h3>
-              <span className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-slate-400">Parents App</span>
+              <span className="ss-promo-eyebrow">Parents App</span>
             </div>
             <div className="p-4">
-              <div className="flex items-center gap-2 text-[13px] font-medium text-slate-800">
-                <Megaphone size={15} strokeWidth={1.75} style={{ color: "rgb(var(--brand))" }} /> Get families on the app
+              <div className="flex items-center gap-2.5 text-[13px] font-semibold text-slate-900">
+                <span className="ss-promo-tile"><Megaphone size={16} strokeWidth={2} /></span>
+                Get families on the app
               </div>
-              <p className="mt-1.5 text-[11.5px] leading-snug text-slate-500">
+              <p className="mt-2 text-[11.5px] leading-snug text-slate-500">
                 Print the invite link or scan a child&apos;s ID card QR to sign a guardian in — no password needed.
               </p>
-              <Link href="/dashboard/guardian-app" className="btn btn-secondary btn-sm mt-3.5">
+              <Link href="/dashboard/guardian-app" className="btn btn-secondary btn-sm ss-promo-cta mt-3.5">
                 Open Parents App tools <ArrowRight size={14} />
               </Link>
             </div>
           </section>
         </div>
 
-        {/* shortcuts (kept from the previous dashboard, now flat) */}
+        {/* shortcuts — same hrefs and permissions as before, now one soft tint each */}
         {quickActions.length > 0 && (
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             {quickActions.map((q) => (
-              <Link
-                key={q.href}
-                href={q.href}
-                className="group flex items-center gap-2.5 rounded-lg border border-slate-200 bg-white px-3.5 py-3 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              >
-                <q.icon size={16} strokeWidth={1.75} className="shrink-0" style={{ color: "rgb(var(--brand))" }} />
-                <span className="text-[13px] font-medium">{q.label}</span>
-                <ArrowRight size={15} className="ml-auto text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500" />
+              <Link key={q.href} href={q.href} className={`ss-quick ss-qt-${q.tone}`}>
+                <span className="ss-quick-icon"><q.icon size={17} strokeWidth={2} /></span>
+                <span className="ss-quick-label">{q.label}</span>
+                <ArrowRight size={15} className="ss-quick-arrow" />
               </Link>
             ))}
           </div>

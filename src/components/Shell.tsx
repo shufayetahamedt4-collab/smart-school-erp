@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Crown, GraduationCap, LogOut, Menu, X, UserRound, ChevronDown } from "lucide-react";
+import { Crown, GraduationCap, LogOut, Menu, X, UserRound, ChevronDown, ChevronRight } from "lucide-react";
 import { api, prefetch } from "@/lib/client";
 import { cn, initials } from "@/lib/utils";
 import { sectorForRole } from "@/lib/sectors";
@@ -546,15 +546,12 @@ function NavLink({ item, active, onClose, premium }: { item: NavItem; active: bo
           active && "ss-navlink-active"
         )}
       >
-        {active && (
-          <span
-            aria-hidden
-            className="absolute -left-px top-1/2 h-4 w-[2.5px] -translate-y-1/2 rounded-full"
-            style={{ background: "rgb(var(--brand))" }}
-          />
-        )}
         <item.icon size={15} className="shrink-0" />
         <span className="truncate">{item.label}</span>
+        {/* Decorative only: the active pill reads as "you are here", so it carries
+            the same right-hand affordance the reference uses. aria-hidden, no
+            handler, no link — nothing about navigation changes. */}
+        {active && <ChevronRight aria-hidden size={14} className="ml-auto shrink-0 opacity-80" />}
       </Link>
     );
   }

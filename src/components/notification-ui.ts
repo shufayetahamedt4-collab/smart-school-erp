@@ -56,6 +56,29 @@ export function notificationMeta(event: string | null | undefined): Notification
   return META[event || ""] || { icon: Bell, tone: "bg-slate-100 text-slate-600", label: "Notification" };
 }
 
+/**
+ * The notice category palette, shared by the Notice Board screens and the
+ * dashboard's notice badges, so one category keeps one colour everywhere.
+ *
+ * Typed against the real Badge tone keys on purpose — the shade is `green`,
+ * not the `emerald` shade name, which the Badge primitive has no class for
+ * (passing it would silently render an untinted badge).
+ */
+export type NoticeTone = "slate" | "red" | "amber" | "blue" | "green" | "violet";
+
+const NOTICE_TONES: Record<string, NoticeTone> = {
+  GENERAL: "slate",
+  HOLIDAY: "red",
+  EXAM: "violet",
+  MEETING: "blue",
+  EVENT: "green",
+  PICNIC: "amber",
+};
+
+export function noticeCategoryTone(category: string | null | undefined): NoticeTone {
+  return NOTICE_TONES[category || ""] || "slate";
+}
+
 /** "just now", "12m ago", "3h ago", "Yesterday", then a short date. */
 export function relativeTime(iso: string | null | undefined): string {
   if (!iso) return "—";
