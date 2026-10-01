@@ -2015,3 +2015,473 @@ body {
     backdrop-filter: none;
   }
 }
+
+/* --- Teachers: premium people directory (page-scoped) -----------------
+   VISUAL ONLY. Gated on [data-sector="school"] AND scoped under
+   .ss-teacherspage, so it cannot reach any other School Admin screen or the
+   Teacher / Guardian / Platform apps.
+
+   Teachers is a CARD directory (identity, designation/qualification, joined
+   date and subject/class assignments), not a row table — there are no columns
+   to keep. The existing card grid is therefore retained and given a people-
+   specific hierarchy: a brand identity tile, a status chip, a hairline-
+   separated meta block and subject(violet)/class(sky) assignment pills, on
+   crisp white cards over the shared cool canvas. No statistics are invented:
+   the page has no summary strip and none is added. */
+[data-sector="school"] .ss-teacherspage {
+  position: relative;
+  border-radius: 26px;
+  padding: 1.15rem 1.15rem 1.4rem;
+  background:
+    radial-gradient(1100px 460px at 4% -16%, rgb(129 140 248 / 0.14), transparent 62%),
+    radial-gradient(900px 420px at 100% 0%, rgb(56 189 248 / 0.11), transparent 60%),
+    linear-gradient(165deg, #f6f9ff 0%, #f6f6ff 48%, #f3f8ff 100%);
+}
+
+/* Header mark + Add Teacher CTA (brand-driven, no hardcoded brand colour). */
+[data-sector="school"] .ss-teacherspage .ss-page-mark {
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.92), rgb(224 231 255 / 0.85));
+  color: #4f46e5;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7), 0 10px 26px -12px rgb(99 102 241 / 0.55);
+}
+[data-sector="school"] .ss-teacherspage .ss-teachers-cta {
+  border-radius: 0.75rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.82) 56%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 10px 24px -12px rgb(var(--brand) / 0.75), inset 0 1px 0 rgb(255 255 255 / 0.35);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+[data-sector="school"] .ss-teacherspage .ss-teachers-cta:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+  box-shadow: 0 16px 32px -14px rgb(var(--brand) / 0.85), inset 0 1px 0 rgb(255 255 255 / 0.4);
+}
+
+/* The branch filter: a frosted people-management toolbar, 40px control. */
+[data-sector="school"] .ss-teacherspage .ss-teachers-toolbar {
+  border-radius: 18px;
+  border: 1px solid rgb(255 255 255 / 0.75);
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.86), rgb(255 255 255 / 0.66));
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 18px 40px -30px rgb(15 23 42 / 0.28);
+}
+[data-sector="school"] .ss-teacherspage .ss-teachers-toolbar .input {
+  height: 2.5rem;
+  border-radius: 0.7rem;
+  border-color: rgb(203 213 225 / 0.9);
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+[data-sector="school"] .ss-teacherspage .ss-teachers-toolbar .input:focus {
+  border-color: rgb(var(--brand) / 0.7);
+  box-shadow: 0 0 0 3px rgb(var(--brand) / 0.15);
+}
+[data-sector="school"] .ss-teacherspage .ss-teachers-filter-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--color-slate-400);
+}
+
+/* The directory surface: crisp white plate with one calm layered shadow. */
+[data-sector="school"] .ss-teacherspage .ss-teachers-directory {
+  border-radius: 20px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 22px 48px -32px rgb(15 23 42 / 0.32);
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-grid {
+  padding: 1rem;
+}
+
+/* One teacher card: crisp white, brand rail on top, restrained hover lift. */
+[data-sector="school"] .ss-teacherspage .ss-teachercard {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid var(--color-slate-200);
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  padding: 1rem 1.05rem 1.1rem;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+[data-sector="school"] .ss-teacherspage .ss-teachercard::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 100%;
+  background: linear-gradient(90deg, rgb(var(--brand)), rgb(139 92 246 / 0.85) 45%, transparent 92%);
+  opacity: 0.85;
+}
+[data-sector="school"] .ss-teacherspage .ss-teachercard:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--brand) / 0.28);
+  box-shadow: 0 2px 4px rgb(15 23 42 / 0.05), 0 26px 52px -28px rgb(var(--brand) / 0.5);
+}
+
+/* Identity: a brand identity tile, a stronger name, muted email. */
+[data-sector="school"] .ss-teacherspage .ss-teacher-avatar {
+  border-radius: 0.85rem;
+  background-image: linear-gradient(140deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.78) 58%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 10px 22px -12px rgb(var(--brand) / 0.75), inset 0 1px 0 rgb(255 255 255 / 0.35);
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-name {
+  color: #0b1220;
+  letter-spacing: -0.01em;
+  /* A long name must never be cut mid-word: on narrow cards it wraps to a
+     second line instead of ellipsising (the email below keeps `truncate`). */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-email {
+  font-variant-numeric: tabular-nums;
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-status {
+  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.05);
+  flex-shrink: 0;
+}
+
+/* Meta block: hairline-separated, labels aligned into a quiet column. */
+[data-sector="school"] .ss-teacherspage .ss-teacher-meta {
+  margin-top: 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--color-slate-100);
+  color: var(--color-slate-600);
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-meta > div {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-meta > div > span:first-child {
+  flex: none;
+  min-width: 5.4rem;
+  font-weight: 600;
+  color: var(--color-slate-400);
+}
+
+/* Assignments: subject reads violet, class reads sky, in one soft pill. */
+[data-sector="school"] .ss-teacherspage .ss-teacher-assignments {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+  border-radius: 9999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: linear-gradient(150deg, #fff, rgb(237 233 254 / 0.7));
+  box-shadow: inset 0 0 0 1px rgb(139 92 246 / 0.18);
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-pill-subject {
+  color: #6d28d9;
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-pill-sep {
+  color: #cbd5e1;
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-pill-class {
+  color: #0369a1;
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-pill-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.05rem;
+  border-radius: 9999px;
+  padding: 0 0.15rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #94a3b8;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-pill-x:hover {
+  color: #e11d48;
+  background: rgb(244 63 94 / 0.12);
+}
+
+/* The per-card action: quiet secondary that warms to the brand on hover. */
+[data-sector="school"] .ss-teacherspage .ss-teacher-assign {
+  margin-top: 0.9rem;
+  border-radius: 0.7rem;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+[data-sector="school"] .ss-teacherspage .ss-teacher-assign:hover {
+  border-color: rgb(var(--brand) / 0.45);
+  color: rgb(var(--brand));
+  background: rgb(var(--brand) / 0.06);
+  box-shadow: 0 8px 18px -12px rgb(var(--brand) / 0.6);
+}
+
+/* Empty state: frosted sky tile. Same copy and same condition as before. */
+[data-sector="school"] .ss-teacherspage .ss-teachers-empty > div > div:first-child {
+  background: linear-gradient(150deg, #fff, rgb(224 242 254 / 0.75));
+  color: #0284c7;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7), inset 0 0 0 1.5px rgb(14 165 233 / 0.14), 0 10px 24px -14px rgb(14 165 233 / 0.5);
+}
+
+/* Print: back to a plain white page. */
+@media print {
+  [data-sector="school"] .ss-teacherspage {
+    background: #fff;
+    padding: 0;
+  }
+  [data-sector="school"] .ss-teacherspage .ss-teachers-toolbar {
+    background: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* --- New Admission: premium admission workspace (form-scoped) ---------
+   VISUAL ONLY. Gated on [data-sector="school"] AND scoped under
+   .ss-newadmissionpage, which is carried by the shared AdmissionIntakeForm —
+   the ONE form both entry points render (`/dashboard/admissions/new` and
+   `/dashboard/students/new`). Both are restyled together on purpose: the two
+   entry points of a single form must never look like different products.
+
+   The form keeps its six existing sections, their exact headings, every field,
+   option, default, validation rule, handler and API call. The redesign only
+   gives each section a frosted card with a semantic icon tile, a consistent
+   44px field rhythm, brand-coloured controls and a brand CTA footer.
+
+   The wash sits on the form's own centred sheet (max-w-4xl) rather than the
+   full viewport: this is a DOCUMENT to be completed, so a contained workspace
+   panel reads better than a full-bleed page — and it keeps the shared
+   component's DOM untouched (no wrapper element added). */
+[data-sector="school"] .ss-newadmissionpage {
+  position: relative;
+  border-radius: 26px;
+  padding: 1.15rem 1.15rem 1.5rem;
+  background:
+    radial-gradient(1100px 460px at 4% -16%, rgb(129 140 248 / 0.14), transparent 62%),
+    radial-gradient(900px 420px at 100% 0%, rgb(56 189 248 / 0.11), transparent 60%),
+    linear-gradient(165deg, #f6f9ff 0%, #f6f6ff 48%, #f3f8ff 100%);
+}
+
+/* Header mark + the back control (quiet glass, never competing with the CTA). */
+[data-sector="school"] .ss-newadmissionpage .ss-page-mark {
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.92), rgb(224 231 255 / 0.85));
+  color: #4f46e5;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7), 0 10px 26px -12px rgb(99 102 241 / 0.55);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-back {
+  border-radius: 0.7rem;
+  background: rgb(255 255 255 / 0.74);
+  border-color: rgb(203 213 225 / 0.8);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-back:hover {
+  background: #fff;
+  border-color: rgb(var(--brand) / 0.4);
+  color: rgb(var(--brand));
+}
+
+/* A section is one frosted card; its header is a tinted strip with a divider. */
+[data-sector="school"] .ss-newadmissionpage .ss-admission-section {
+  border-radius: 20px;
+  border: 1px solid rgb(255 255 255 / 0.78);
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.92), rgb(255 255 255 / 0.74));
+  -webkit-backdrop-filter: blur(12px) saturate(1.18);
+  backdrop-filter: blur(12px) saturate(1.18);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 22px 48px -34px rgb(15 23 42 / 0.32);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-section > div:first-child {
+  padding: 0.8rem 1.15rem;
+  border-bottom: 1px solid rgb(226 232 240 / 0.85);
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.5), rgb(248 250 255 / 0.28));
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-section > div:last-child {
+  padding: 1.15rem;
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-section .ss-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  color: #0b1220;
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-section .ss-card-sub {
+  margin-top: 0.25rem;
+  color: var(--color-slate-500);
+}
+
+/* Semantic icon tile per section (soft, never a saturated block). */
+[data-sector="school"] .ss-newadmissionpage .ss-admission-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.85rem;
+  width: 1.85rem;
+  flex-shrink: 0;
+  border-radius: 0.6rem;
+  background: linear-gradient(150deg, #fff, rgb(255 255 255 / 0.9));
+  color: rgb(var(--brand));
+  box-shadow: inset 0 0 0 1px rgb(var(--brand) / 0.16);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-as-student .ss-admission-section-icon {
+  color: #0284c7;
+  background: linear-gradient(150deg, #fff, rgb(224 242 254 / 0.92));
+  box-shadow: inset 0 0 0 1px rgb(14 165 233 / 0.2), 0 6px 14px -10px rgb(14 165 233 / 0.7);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-as-previous .ss-admission-section-icon {
+  color: #b45309;
+  background: linear-gradient(150deg, #fff, rgb(254 243 199 / 0.92));
+  box-shadow: inset 0 0 0 1px rgb(245 158 11 / 0.22), 0 6px 14px -10px rgb(245 158 11 / 0.7);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-as-guardian .ss-admission-section-icon {
+  color: #6d28d9;
+  background: linear-gradient(150deg, #fff, rgb(237 233 254 / 0.92));
+  box-shadow: inset 0 0 0 1px rgb(139 92 246 / 0.2), 0 6px 14px -10px rgb(139 92 246 / 0.7);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-as-sibling .ss-admission-section-icon {
+  color: #4f46e5;
+  background: linear-gradient(150deg, #fff, rgb(224 231 255 / 0.92));
+  box-shadow: inset 0 0 0 1px rgb(99 102 241 / 0.2), 0 6px 14px -10px rgb(99 102 241 / 0.7);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-as-fees .ss-admission-section-icon {
+  color: #047857;
+  background: linear-gradient(150deg, #fff, rgb(209 250 229 / 0.92));
+  box-shadow: inset 0 0 0 1px rgb(16 185 129 / 0.2), 0 6px 14px -10px rgb(16 185 129 / 0.7);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-as-kit .ss-admission-section-icon {
+  color: #0369a1;
+  background: linear-gradient(150deg, #fff, rgb(224 242 254 / 0.85));
+  box-shadow: inset 0 0 0 1px rgb(14 165 233 / 0.18), 0 6px 14px -10px rgb(14 165 233 / 0.6);
+}
+
+/* --- fields: one 44px rhythm, brand focus, no layout jump ------------- */
+[data-sector="school"] .ss-newadmissionpage .label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.002em;
+  color: var(--color-slate-700);
+  margin-bottom: 0.3rem;
+}
+[data-sector="school"] .ss-newadmissionpage .input {
+  height: 2.75rem;
+  border-radius: 0.7rem;
+  border-color: rgb(203 213 225 / 0.9);
+  background: rgb(255 255 255 / 0.94);
+  color: #0b1220;
+  box-shadow: inset 0 1px 1px rgb(15 23 42 / 0.02);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+[data-sector="school"] .ss-newadmissionpage textarea.input {
+  height: auto;
+  min-height: 5rem;
+  padding: 0.65rem 0.85rem;
+  line-height: 1.45;
+}
+[data-sector="school"] .ss-newadmissionpage .input::placeholder {
+  color: #94a3b8;
+}
+[data-sector="school"] .ss-newadmissionpage .input:focus {
+  border-color: rgb(var(--brand) / 0.65);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgb(var(--brand) / 0.14);
+}
+[data-sector="school"] .ss-newadmissionpage .input:disabled {
+  background: rgb(248 250 252 / 0.9);
+  color: var(--color-slate-400);
+}
+/* Native checkboxes take the tenant brand (they had no accent rule before). */
+[data-sector="school"] .ss-newadmissionpage input[type="checkbox"] {
+  accent-color: rgb(var(--brand));
+}
+
+/* --- money: the amount being collected is the loudest figure ---------- */
+[data-sector="school"] .ss-newadmissionpage .ss-admission-subpanel {
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.86), rgb(250 251 255 / 0.7));
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.03);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-subpanel-violet {
+  border-color: rgb(196 181 253 / 0.7);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-subpanel-emerald {
+  border-color: rgb(167 243 208 / 0.7);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-payable {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Kit + sibling rows and the kit's live-stock chips. */
+[data-sector="school"] .ss-newadmissionpage .ss-admission-kitrow {
+  border-radius: 12px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-sibling {
+  border-radius: 12px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+/* --- footer: glass secondary, brand-gradient primary ------------------ */
+[data-sector="school"] .ss-newadmissionpage .ss-admission-footer {
+  margin-top: 1.5rem;
+  padding: 1rem 1.15rem;
+  border-radius: 18px;
+  border: 1px solid rgb(255 255 255 / 0.78);
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.86), rgb(255 255 255 / 0.66));
+  -webkit-backdrop-filter: blur(12px) saturate(1.18);
+  backdrop-filter: blur(12px) saturate(1.18);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 22px 48px -34px rgb(15 23 42 / 0.3);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-cancel {
+  border-radius: 0.7rem;
+  background: rgb(255 255 255 / 0.9);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-cancel:hover {
+  border-color: rgb(var(--brand) / 0.4);
+  color: rgb(var(--brand));
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-cta {
+  height: 2.6rem;
+  border-radius: 0.7rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.82) 56%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 10px 24px -12px rgb(var(--brand) / 0.75), inset 0 1px 0 rgb(255 255 255 / 0.35);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+  box-shadow: 0 16px 32px -14px rgb(var(--brand) / 0.85), inset 0 1px 0 rgb(255 255 255 / 0.4);
+}
+[data-sector="school"] .ss-newadmissionpage .ss-admission-cta:disabled {
+  transform: none;
+  filter: grayscale(0.25);
+  box-shadow: none;
+}
+
+/* The validation note (message unchanged — only its frame is refined). */
+[data-sector="school"] .ss-newadmissionpage .ss-admission-error > div {
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.03);
+}
+
+/* Print: back to a plain white page. */
+@media print {
+  [data-sector="school"] .ss-newadmissionpage {
+    background: #fff;
+    padding: 0;
+  }
+  [data-sector="school"] .ss-newadmissionpage .ss-admission-section,
+  [data-sector="school"] .ss-newadmissionpage .ss-admission-footer {
+    background: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

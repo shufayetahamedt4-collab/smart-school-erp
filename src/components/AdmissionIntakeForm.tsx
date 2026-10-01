@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowLeft, Save, QrCode, Check, Users, Wallet, Package,
   TriangleAlert, Search, Receipt, IdCard, CircleAlert,
+  ClipboardList, School, UsersRound,
 } from "lucide-react";
 import { api, upload } from "@/lib/client";
 import { Card, CardHeader, Field, TextInput, Textarea, Select, PageHeader, ErrorNote, Badge } from "@/components/ui";
@@ -242,7 +243,7 @@ export default function AdmissionIntakeForm({
   // ------------------------------------------------------------------ success
   if (created) {
     return (
-      <div className="mx-auto max-w-3xl">
+      <div className="ss-newadmissionpage mx-auto max-w-3xl">
         <div className="card fade-up p-7">
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
@@ -362,7 +363,7 @@ export default function AdmissionIntakeForm({
     return (
       <div
         key={k.id}
-        className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-xs ${
+        className={`ss-admission-kitrow flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-xs ${
           out ? "border-slate-200 bg-slate-50 opacity-70" : now ? "border-emerald-200 bg-emerald-50" : later ? "border-amber-200 bg-amber-50" : "border-slate-200"
         }`}
       >
@@ -382,18 +383,19 @@ export default function AdmissionIntakeForm({
   };
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="ss-newadmissionpage mx-auto max-w-4xl">
       <PageHeader
+        icon={ClipboardList}
         title={title}
         subtitle={subtitle}
-        actions={<Link href={cancelHref} className="btn btn-secondary btn-sm"><ArrowLeft size={14} /> {cancelLabel}</Link>}
+        actions={<Link href={cancelHref} className="ss-admission-back btn btn-secondary btn-sm"><ArrowLeft size={14} /> {cancelLabel}</Link>}
       />
 
-      {error && <div className="mb-4"><ErrorNote message={error} /></div>}
+      {error && <div className="ss-admission-error mb-4"><ErrorNote message={error} /></div>}
 
       {/* ------------------------------------------------------------- student */}
-      <Card>
-        <CardHeader title="Student information" />
+      <Card className="ss-admission-section ss-as-student">
+        <CardHeader title={<><span className="ss-admission-section-icon"><ClipboardList size={15} /></span>Student information</>} />
         <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
           <Field label="Full name *"><TextInput value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
           <Field label="Full name (Bangla)"><TextInput value={form.nameBn} onChange={(e) => set("nameBn", e.target.value)} /></Field>
@@ -437,8 +439,8 @@ export default function AdmissionIntakeForm({
       </Card>
 
       {/* ------------------------------------------------------- previous school */}
-      <Card className="mt-5">
-        <CardHeader title="Previous school" />
+      <Card className="ss-admission-section ss-as-previous mt-5">
+        <CardHeader title={<><span className="ss-admission-section-icon"><School size={15} /></span>Previous school</>} />
         <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
           <Field label="School name"><TextInput value={form.previousSchoolName} onChange={(e) => set("previousSchoolName", e.target.value)} /></Field>
           <Field label="Last class attended"><TextInput value={form.previousClass} onChange={(e) => set("previousClass", e.target.value)} /></Field>
@@ -448,8 +450,8 @@ export default function AdmissionIntakeForm({
       </Card>
 
       {/* ------------------------------------------------------------ guardian */}
-      <Card className="mt-5">
-        <CardHeader title="Guardian information" />
+      <Card className="ss-admission-section ss-as-guardian mt-5">
+        <CardHeader title={<><span className="ss-admission-section-icon"><UsersRound size={15} /></span>Guardian information</>} />
         <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
           <Field label="Guardian name"><TextInput value={form.guardianName} onChange={(e) => set("guardianName", e.target.value)} /></Field>
           <Field label="Relation">
@@ -477,8 +479,8 @@ export default function AdmissionIntakeForm({
       </Card>
 
       {/* ------------------------------------------------------------- sibling */}
-      <Card className="mt-5">
-        <CardHeader title="Sibling already studying here?" subtitle="Links the family so one login sees every child, and opens the sibling discount" />
+      <Card className="ss-admission-section ss-as-sibling mt-5">
+        <CardHeader title={<><span className="ss-admission-section-icon"><Users size={15} /></span>Sibling already studying here?</>} subtitle="Links the family so one login sees every child, and opens the sibling discount" />
         <div className="p-5">
           <div className="relative max-w-md">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -492,7 +494,7 @@ export default function AdmissionIntakeForm({
                   key={s.id}
                   type="button"
                   onClick={() => chooseSibling(s)}
-                  className={`flex w-full flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-left text-xs ${
+                  className={`ss-admission-sibling flex w-full flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-left text-xs ${
                     siblingId === s.id ? "border-indigo-300 bg-indigo-50" : "border-slate-200 hover:border-indigo-200"
                   }`}
                 >
@@ -513,8 +515,8 @@ export default function AdmissionIntakeForm({
       </Card>
 
       {/* -------------------------------------------------------- fees & money */}
-      <Card className="mt-5">
-        <CardHeader title="Fees, discount & payment" />
+      <Card className="ss-admission-section ss-as-fees mt-5">
+        <CardHeader title={<><span className="ss-admission-section-icon"><Wallet size={15} /></span>Fees, discount & payment</>} />
         <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
           <Field
             label="Admission fee (৳)"
@@ -550,7 +552,7 @@ export default function AdmissionIntakeForm({
           ) : null}
 
           {/* discount */}
-          <div className="sm:col-span-2 rounded-xl border border-slate-200 p-4">
+          <div className="ss-admission-subpanel ss-subpanel-violet sm:col-span-2 rounded-xl border border-slate-200 p-4">
             <label className="flex items-center gap-2.5 text-sm font-semibold text-slate-700">
               <input type="checkbox" checked={form.discountOn} onChange={(e) => set("discountOn", e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
               <Wallet size={15} /> Apply a discount / scholarship
@@ -579,7 +581,7 @@ export default function AdmissionIntakeForm({
           </div>
 
           {/* payment */}
-          <div className="sm:col-span-2 rounded-xl border border-slate-200 p-4">
+          <div className="ss-admission-subpanel ss-subpanel-emerald sm:col-span-2 rounded-xl border border-slate-200 p-4">
             <label className="flex items-center gap-2.5 text-sm font-semibold text-slate-700">
               <input type="checkbox" checked={form.collect} onChange={(e) => set("collect", e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
               Collect the admission fee now
@@ -595,7 +597,7 @@ export default function AdmissionIntakeForm({
                 <Field label="Reference no. (optional)"><TextInput value={form.refNo} onChange={(e) => set("refNo", e.target.value)} /></Field>
                 <div className="flex flex-col justify-center text-xs">
                   <span className="font-bold uppercase tracking-wide text-slate-400">Collecting</span>
-                  <span className="text-lg font-black text-emerald-700">{fmtMoney(payable)}</span>
+                  <span className="ss-admission-payable text-lg font-black text-emerald-700">{fmtMoney(payable)}</span>
                   {form.discountOn && form.discountType === "FIXED" && Number(form.discountValue) > 0 && (
                     <span className="text-[10px] text-slate-400">a proposed discount needs approval before it counts</span>
                   )}
@@ -607,9 +609,9 @@ export default function AdmissionIntakeForm({
       </Card>
 
       {/* ------------------------------------------------------------------ kit */}
-      <Card className="mt-5">
+      <Card className="ss-admission-section ss-as-kit mt-5">
         <CardHeader
-          title="Books, uniform & ID card"
+          title={<><span className="ss-admission-section-icon"><Package size={15} /></span>Books, uniform &amp; ID card</>}
           subtitle={
             kit.length
               ? `${tickedNow} to hand over now · ${tickedLater} kept pending · live stock shown per item`
@@ -643,9 +645,9 @@ export default function AdmissionIntakeForm({
         </div>
       </Card>
 
-      <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
-        <Link href={cancelHref} className="btn btn-secondary">Cancel</Link>
-        <button className="btn btn-primary !px-6" onClick={submit} disabled={saving || !form.name || !form.classId}>
+      <div className="ss-admission-footer mt-6 flex flex-wrap items-center justify-end gap-2">
+        <Link href={cancelHref} className="ss-admission-cancel btn btn-secondary">Cancel</Link>
+        <button className="ss-admission-cta btn btn-primary !px-6" onClick={submit} disabled={saving || !form.name || !form.classId}>
           <Save size={15} /> {saving ? "Admitting…" : "Admit student"}
         </button>
       </div>

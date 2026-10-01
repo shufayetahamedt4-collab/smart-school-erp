@@ -78,13 +78,13 @@ export default function TeachersPage() {
   const selClass = classes.find((c) => c.id === assignForm.classId);
 
   return (
-    <div>
-      <PageHeader title="Teachers" subtitle={`${teachers.length} teachers on staff`} actions={<button className="btn btn-primary" onClick={() => setOpen(true)}><Plus size={16} /> Add Teacher</button>} />
+    <div className="ss-teacherspage">
+      <PageHeader icon={Users} title="Teachers" subtitle={`${teachers.length} teachers on staff`} actions={<button className="btn btn-primary ss-teachers-cta" onClick={() => setOpen(true)}><Plus size={16} /> Add Teacher</button>} />
 
       {branches.length > 0 && (
-        <Card className="mb-4 p-4">
+        <Card className="ss-teachers-toolbar mb-4 p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Branch</span>
+            <span className="ss-teachers-filter-label text-xs font-semibold uppercase tracking-widest text-slate-400">Branch</span>
             <Select className="max-w-xs" value={branchId} onChange={(e) => { setBranchId(e.target.value); setLoading(true); load(e.target.value); }}>
               <option value="">All branches (whole school)</option>
               {branches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
@@ -93,36 +93,40 @@ export default function TeachersPage() {
         </Card>
       )}
 
-      <Card>
+      <Card className="ss-teachers-directory">
         {teachers.length === 0 ? (
-          <EmptyState icon={Users} title="No teachers yet" description="Add your first teacher to start assigning classes." />
+          <div className="ss-teachers-empty">
+            <EmptyState icon={Users} title="No teachers yet" description="Add your first teacher to start assigning classes." />
+          </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="ss-teacher-grid grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
             {teachers.map((t) => (
-              <div key={t.id} className="rounded-2xl border border-slate-200 p-4 transition hover:border-indigo-200 hover:shadow-md">
+              <div key={t.id} className="ss-teachercard rounded-2xl border border-slate-200 p-4 transition hover:border-indigo-200 hover:shadow-md">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-black text-white">{initials(t.user.name)}</div>
+                  <div className="ss-teacher-avatar flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-black text-white">{initials(t.user.name)}</div>
                   <div className="min-w-0">
-                    <div className="truncate font-bold text-slate-800">{t.user.name}</div>
-                    <div className="truncate text-xs text-slate-400">{t.user.email}</div>
+                    <div className="ss-teacher-name truncate font-bold text-slate-800">{t.user.name}</div>
+                    <div className="ss-teacher-email truncate text-xs text-slate-400">{t.user.email}</div>
                   </div>
-                  <Badge tone={t.user.active ? "green" : "red"}>{t.user.active ? "Active" : "Inactive"}</Badge>
+                  <Badge tone={t.user.active ? "green" : "red"} className="ss-teacher-status">{t.user.active ? "Active" : "Inactive"}</Badge>
                 </div>
-                <div className="mt-3 space-y-0.5 text-xs text-slate-500">
+                <div className="ss-teacher-meta mt-3 space-y-0.5 text-xs text-slate-500">
                   <div><span className="font-semibold text-slate-400">Designation:</span> {t.designation || "—"}</div>
                   <div><span className="font-semibold text-slate-400">Qualification:</span> {t.qualification || "—"}</div>
                   <div><span className="font-semibold text-slate-400">Joined:</span> {fmtDate(t.joinDate)}</div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
+                <div className="ss-teacher-assignments mt-3 flex flex-wrap gap-1.5">
                   {t.assignments.map((a, i) => (
-                    <span key={i} className="badge bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
-                      {a.subject.name} · {a.classRoom.name}
-                      <button onClick={() => removeAssignment(a.id)} className="ml-1 hover:text-rose-500">×</button>
+                    <span key={i} className="ss-teacher-pill badge bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
+                      <span className="ss-teacher-pill-subject">{a.subject.name}</span>
+                      <span aria-hidden className="ss-teacher-pill-sep">·</span>
+                      <span className="ss-teacher-pill-class">{a.classRoom.name}</span>
+                      <button onClick={() => removeAssignment(a.id)} className="ss-teacher-pill-x ml-1 hover:text-rose-500">×</button>
                     </span>
                   ))}
                   {!t.assignments.length && <span className="text-xs text-slate-400">No assignments yet</span>}
                 </div>
-                <button className="btn btn-secondary btn-sm mt-3 w-full" onClick={() => setAssignOpen(t.id)}>
+                <button className="ss-teacher-assign btn btn-secondary btn-sm mt-3 w-full" onClick={() => setAssignOpen(t.id)}>
                   <BookOpen size={14} /> Assign classes / subjects
                 </button>
               </div>
