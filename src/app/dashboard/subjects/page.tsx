@@ -7,6 +7,11 @@ import { Card, Field, TextInput, Modal, PageHeader, EmptyState, LoadingScreen, E
 
 interface Subject { id: string; name: string; code: string | null; _count: { assignments: number; homeworks: number } }
 
+/* Presentation only: a fixed accent rotation so the subject grid reads as a set
+   (indigo, violet, sky, emerald, amber, rose, then repeat). Keyed off the array
+   index, so no data, order or expression changes. */
+const TONE_CYCLE = ["indigo", "violet", "sky", "emerald", "amber", "rose"] as const;
+
 export default function SubjectsPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,31 +39,34 @@ export default function SubjectsPage() {
   if (loading) return <LoadingScreen />;
 
   return (
-    <div>
-      <PageHeader title="Subjects" subtitle={`${subjects.length} subjects`} actions={<button className="btn btn-primary" onClick={() => setOpen(true)}><Plus size={16} /> New Subject</button>} />
+    <div className="ss-subjectpage">
+      <PageHeader icon={BookOpen} title="Subjects" subtitle={`${subjects.length} subjects`} actions={<button className="btn btn-primary ss-subject-cta" onClick={() => setOpen(true)}><Plus size={16} /> New Subject</button>} />
 
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {subjects.map((s) => (
-          <Card key={s.id} className="group p-5">
+        {subjects.map((s, i) => {
+          const tone = TONE_CYCLE[i % TONE_CYCLE.length];
+          return (
+          <Card key={s.id} className={`group ss-subjectcard ss-st-${tone}`}>
             <div className="flex items-start justify-between">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"><BookOpen size={18} /></div>
+              <div className="ss-subject-tile"><BookOpen size={18} /></div>
               <button
-                className="rounded-lg p-1.5 text-slate-300 opacity-0 transition group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-500"
+                className="ss-subject-del opacity-0 transition group-hover:opacity-100"
                 onClick={() => { if (confirm(`Delete subject ${s.name}?`)) api(`/api/subjects?id=${s.id}`, { method: "DELETE" }).then(load).catch((e) => setError(e.message)); }}
               >
                 <Trash2 size={14} />
               </button>
             </div>
-            <div className="mt-3 font-bold text-slate-800">{s.name}</div>
-            <div className="text-xs text-slate-400">Code: {s.code || "—"}</div>
-            <div className="mt-2 flex gap-3 text-[11px] text-slate-400">
-              <span>{s._count.assignments} assignments</span>
-              <span>{s._count.homeworks} homeworks</span>
+            <div className="ss-subject-name">{s.name}</div>
+            <div className="ss-subject-code">Code: {s.code || "—"}</div>
+            <div className="ss-subject-meta">
+              <span className="ss-subject-pill ss-subject-pill-a">{s._count.assignments} assignments</span>
+              <span className="ss-subject-pill ss-subject-pill-h">{s._count.homeworks} homeworks</span>
             </div>
           </Card>
-        ))}
+          );
+        })}
         {!subjects.length && <Card><EmptyState icon={BookOpen} title="No subjects yet" description="Add subjects to start building routines and exams." /></Card>}
       </div>
 
