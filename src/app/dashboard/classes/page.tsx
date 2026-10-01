@@ -11,6 +11,11 @@ interface ClassRow {
   sections: { id: string; name: string; _count: { students: number } }[];
 }
 
+/* Presentation only: a fixed accent rotation so neighbouring class cards read as
+   a set (1 indigo, 2 violet, 3 sky, 4 emerald, then repeat). Keyed off the array
+   index, so no data, order or expression changes. */
+const TONE_CYCLE = ["indigo", "violet", "sky", "emerald"] as const;
+
 export default function ClassesPage() {
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,47 +55,51 @@ export default function ClassesPage() {
   if (loading) return <LoadingScreen />;
 
   return (
-    <div>
-      <PageHeader title="Classes & Sections" subtitle="Academic structure of your school" actions={<button className="btn btn-primary" onClick={() => setOpen(true)}><Plus size={16} /> New Class</button>} />
+    <div className="ss-classpage">
+      <PageHeader icon={BookOpen} title="Classes & Sections" subtitle="Academic structure of your school" actions={<button className="btn btn-primary ss-class-cta" onClick={() => setOpen(true)}><Plus size={16} /> New Class</button>} />
 
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {classes.map((c) => (
-          <Card key={c.id} className="overflow-hidden">
-            <div className="flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-3.5 text-white">
-              <div className="flex items-center gap-2.5">
-                <BookOpen size={17} />
-                <span className="font-extrabold">{c.name}</span>
+        {classes.map((c, i) => {
+          const tone = TONE_CYCLE[i % TONE_CYCLE.length];
+          return (
+          <Card key={c.id} className={`ss-classcard ss-ct-${tone}`}>
+            <div className="ss-classhead">
+              <div className="ss-class-id">
+                <span className="ss-class-tile"><BookOpen size={17} /></span>
+                <span className="ss-class-name">{c.name}</span>
               </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="rounded-full bg-white/20 px-2 py-0.5 font-bold">{c._count.students} students</span>
-                <button className="rounded p-1 hover:bg-white/20" onClick={() => { if (confirm(`Delete ${c.name}?`)) api(`/api/classes?id=${c.id}`, { method: "DELETE" }).then(load).catch((e) => setError(e.message)); }}>
+              <div className="ss-class-meta">
+                <span className="ss-class-pill">{c._count.students} students</span>
+                <button className="ss-class-del" onClick={() => { if (confirm(`Delete ${c.name}?`)) api(`/api/classes?id=${c.id}`, { method: "DELETE" }).then(load).catch((e) => setError(e.message)); }}>
                   <Trash2 size={13} />
                 </button>
               </div>
             </div>
-            <div className="divide-y divide-slate-100">
+            <div className="ss-sectlist">
               {c.sections.map((s) => (
-                <div key={s.id} className="flex items-center justify-between px-5 py-3 text-sm">
-                  <div>
-                    <span className="font-bold text-slate-700">Section {s.name}</span>
-                    <span className="ml-2 text-xs text-slate-400">{s._count.students} students</span>
+                <div key={s.id} className="ss-sectrow">
+                  <div className="ss-sect-left">
+                    <span className="ss-sect-dot" aria-hidden />
+                    <span className="ss-sect-name">Section {s.name}</span>
+                    <span className="ss-sect-count">{s._count.students} students</span>
                   </div>
                   <button
-                    className="rounded-lg p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500"
+                    className="ss-sect-del"
                     onClick={() => { if (confirm(`Delete section ${s.name}?`)) api(`/api/sections?id=${s.id}`, { method: "DELETE" }).then(load).catch((e) => setError(e.message)); }}
                   >
                     <Trash2 size={14} />
                   </button>
                 </div>
               ))}
-              <button className="w-full px-5 py-2.5 text-left text-xs font-bold text-indigo-600 hover:bg-indigo-50" onClick={() => setSecOpen(c.id)}>
-                + Add section
+              <button className="ss-add-sect" onClick={() => setSecOpen(c.id)}>
+                <span className="ss-add-sect-plus">+</span> Add section
               </button>
             </div>
           </Card>
-        ))}
+          );
+        })}
         {!classes.length && <Card><EmptyState icon={BookOpen} title="No classes yet" description="Create your first class to start structuring the school." /></Card>}
       </div>
 
