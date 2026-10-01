@@ -225,7 +225,7 @@ export default function AdmissionsPage() {
   ];
 
   return (
-    <div>
+    <div className="ss-admissionspage">
       <PageHeader
         title="Admissions"
         subtitle="Enquiry to enrolment — pipeline, documents and seat confirmation"
@@ -233,14 +233,14 @@ export default function AdmissionsPage() {
         actions={
           // §4.2 — the same intake form the Students module uses, so the two
           // entry points can never ask for different information.
-          <Link href="/dashboard/admissions/new" className="btn btn-primary btn-sm">
+          <Link href="/dashboard/admissions/new" className="btn btn-primary btn-sm ss-admissions-cta">
             <Plus size={14} /> New admission
           </Link>
         }
       />
 
       {/* pipeline — four semantic summary cards, one per stage */}
-      <section className="ss-surface mb-8">
+      <section className="ss-surface ss-admissions-pipeline mb-8">
         <div className="ss-section">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className="ss-section-tile"><ClipboardList size={16} /></span>
@@ -250,7 +250,7 @@ export default function AdmissionsPage() {
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="ss-admission-stages grid grid-cols-1 gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-4">
           {metrics.map((m) => (
             <SoftStatCard key={m.key} icon={m.icon} label={m.label} value={m.value} sub={m.sub} tone={m.tone} />
           ))}
@@ -260,7 +260,7 @@ export default function AdmissionsPage() {
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 
       {/* applications: one surface — heading, a flat filter toolbar, the table */}
-      <section className="ss-surface">
+      <section className="ss-surface ss-admissions-apps">
         <div className="ss-section">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className="ss-section-tile"><Users size={16} /></span>
@@ -271,7 +271,7 @@ export default function AdmissionsPage() {
           </div>
         </div>
 
-        <div className="ss-toolbar">
+        <div className="ss-toolbar ss-admission-toolbar">
           {branches.length > 0 && (
             <div className="flex w-full items-center gap-3">
               <span className="ss-toolbar-label">Branch</span>
@@ -309,8 +309,8 @@ export default function AdmissionsPage() {
         </div>
 
         {items.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="ss-admission-tablewrap overflow-x-auto">
+            <table className="ss-admission-table w-full">
               <thead>
                 <tr>
                   <th className="th">Applicant</th>
@@ -324,7 +324,7 @@ export default function AdmissionsPage() {
               </thead>
               <tbody>
                 {items.map((a) => (
-                  <tr key={a.id} className="tr-hover cursor-pointer" onClick={() => openDetail(a)}>
+                  <tr key={a.id} className="tr-hover ss-admission-row cursor-pointer" onClick={() => openDetail(a)}>
                     <td className="td">
                       {/* Same presentational avatar the Students list uses, and the
                           same initials() helper — the cell's data is unchanged.
@@ -332,35 +332,37 @@ export default function AdmissionsPage() {
                           table already wraps its Guardian column at that size, so
                           narrow screens keep exactly the density they had before. */}
                       <div className="flex items-center gap-2.5">
-                        <div className="ss-accent-soft hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold xl:flex">{initials(a.fullName)}</div>
+                        <div className="ss-accent-soft ss-admission-avatar hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold xl:flex">{initials(a.fullName)}</div>
                         <div className="min-w-0">
-                          <div className="truncate font-bold text-slate-800">{a.fullName}</div>
-                          <div className="truncate text-[11px] text-slate-400">{a.fullNameBn || ""} {a.admissionNo ? `· ${a.admissionNo}` : ""}</div>
+                          <div className="ss-admission-name truncate font-bold text-slate-800">{a.fullName}</div>
+                          <div className="ss-admission-sub truncate text-[11px] text-slate-400">{a.fullNameBn || ""} {a.admissionNo ? `· ${a.admissionNo}` : ""}</div>
                         </div>
                       </div>
                     </td>
                     <td className="td">
-                      <div className="text-xs font-semibold text-slate-700">{a.guardianName || "—"}</div>
-                      <div className="text-[11px] text-slate-400">{a.guardianPhone}</div>
+                      <div className="ss-admission-guardian text-xs font-semibold text-slate-700">{a.guardianName || "—"}</div>
+                      <div className="ss-admission-phone text-[11px] text-slate-400">{a.guardianPhone}</div>
                     </td>
-                    <td className="td text-xs text-slate-600">{a.previousSchoolName || "—"}{a.previousClass ? ` (${a.previousClass})` : ""}</td>
-                    <td className="td text-xs">{a.classRoom?.name || "TBD"}</td>
-                    <td className="td"><Badge tone={a.status === "REJECTED" ? "red" : a.status === "ENROLLED" ? "green" : a.status === "ENQUIRY" || a.status === "APPLIED" ? "blue" : "amber"}>{prettyStatus(a.status)}</Badge></td>
-                    <td className="td text-xs">
+                    <td className="td ss-admission-prev text-xs text-slate-600">{a.previousSchoolName || "—"}{a.previousClass ? ` (${a.previousClass})` : ""}</td>
+                    <td className="td ss-admission-class text-xs">{a.classRoom?.name || "TBD"}</td>
+                    <td className="td"><Badge tone={a.status === "REJECTED" ? "red" : a.status === "ENROLLED" ? "green" : a.status === "ENQUIRY" || a.status === "APPLIED" ? "blue" : "amber"} className="ss-admission-status">{prettyStatus(a.status)}</Badge></td>
+                    <td className="td ss-admission-discounts text-xs">
                       {a.discounts.length ? a.discounts.map((d) => (
-                        <Badge key={d.id} tone={d.status === "APPROVED" ? "green" : d.status === "REJECTED" ? "red" : "amber"} className="mr-1">
+                        <Badge key={d.id} tone={d.status === "APPROVED" ? "green" : d.status === "REJECTED" ? "red" : "amber"} className="ss-admission-discount mr-1">
                           {d.reason} {d.status === "APPROVED" ? fmtMoney(d.amount) : `(${prettyStatus(d.status)})`}
                         </Badge>
                       )) : "—"}
                     </td>
-                    <td className="td text-right text-sm font-bold tabular-nums text-slate-900">{a.payableAmount != null ? fmtMoney(a.payableAmount) : "—"}</td>
+                    <td className="td ss-admission-payable text-right text-sm font-bold tabular-nums text-slate-900">{a.payableAmount != null ? fmtMoney(a.payableAmount) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <EmptyState icon={ClipboardList} title="No admissions yet" description="New enquiries from the public form and walk-ins appear here." />
+          <div className="ss-admissions-empty">
+            <EmptyState icon={ClipboardList} title="No admissions yet" description="New enquiries from the public form and walk-ins appear here." />
+          </div>
         )}
       </section>
 
