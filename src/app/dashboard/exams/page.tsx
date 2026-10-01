@@ -37,34 +37,34 @@ export default function ExamsPage() {
   const selClass = classes.find((c) => c.id === form.classId);
 
   return (
-    <div>
-      <PageHeader title="Exams & Results" subtitle={`${exams.length} exams`} actions={<button className="btn btn-primary" onClick={() => setOpen(true)}><Plus size={16} /> New Exam</button>} />
+    <div className="ss-examspage">
+      <PageHeader icon={FileText} title="Exams & Results" subtitle={`${exams.length} exams`} actions={<button className="btn btn-primary ss-exams-cta" onClick={() => setOpen(true)}><Plus size={16} /> New Exam</button>} />
 
-      {error && <div className="mb-4"><ErrorNote message={error} /></div>}
+      {error && <div className="ss-exams-error mb-4"><ErrorNote message={error} /></div>}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="ss-exam-grid grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {exams.map((e) => (
-          <Card key={e.id} className="overflow-hidden">
-            <div className="border-b border-slate-100 p-5">
+          <Card key={e.id} className="ss-examcard overflow-hidden">
+            <div className="ss-examcard-head border-b border-slate-100 p-5">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600"><FileText size={18} /></div>
-                  <div>
-                    <div className="font-extrabold text-slate-800">{e.name}</div>
-                    <div className="text-xs text-slate-400">{e.classRoom.name}{e.section ? ` · Section ${e.section.name}` : ""} · {e.year}</div>
+                  <div className="ss-exam-icon flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600"><FileText size={18} /></div>
+                  <div className="min-w-0">
+                    <div className="ss-exam-name font-extrabold text-slate-800">{e.name}</div>
+                    <div className="ss-exam-sub text-xs text-slate-400">{e.classRoom.name}{e.section ? ` · Section ${e.section.name}` : ""} · {e.year}</div>
                   </div>
                 </div>
-                <Badge tone={e.published ? "green" : "amber"}>{e.published ? "Published" : "Draft"}</Badge>
+                <Badge tone={e.published ? "green" : "amber"} className="ss-exam-status">{e.published ? "Published" : "Draft"}</Badge>
               </div>
-              <div className="mt-3 flex items-center gap-4 text-xs text-slate-400">
+              <div className="ss-exam-meta mt-3 flex items-center gap-4 text-xs text-slate-400">
                 <span>{e._count.marks} marks entered</span>
                 {e.startDate && <span>{fmtDate(e.startDate)} → {fmtDate(e.endDate)}</span>}
               </div>
             </div>
-            <div className="flex gap-2 px-5 py-3">
-              <Link href={`/dashboard/exams/${e.id}`} className="btn btn-primary btn-sm flex-1"><Eye size={14} /> Open</Link>
+            <div className="ss-exam-actions flex gap-2 px-5 py-3">
+              <Link href={`/dashboard/exams/${e.id}`} className="ss-exam-open btn btn-primary btn-sm flex-1"><Eye size={14} /> Open</Link>
               <button
-                className="btn btn-ghost btn-sm text-rose-500 hover:bg-rose-50"
+                className="ss-exam-delete btn btn-ghost btn-sm text-rose-500 hover:bg-rose-50"
                 onClick={() => { if (confirm(`Delete exam ${e.name}? This removes all its marks.`)) api(`/api/exams/${e.id}`, { method: "DELETE" }).then(load); }}
               >
                 <Trash2 size={14} />
@@ -72,7 +72,7 @@ export default function ExamsPage() {
             </div>
           </Card>
         ))}
-        {!exams.length && <Card><EmptyState icon={FileText} title="No exams yet" description="Create an exam to start entering marks and publishing results." /></Card>}
+        {!exams.length && <Card className="ss-exams-empty"><EmptyState icon={FileText} title="No exams yet" description="Create an exam to start entering marks and publishing results." /></Card>}
       </div>
 
       <Modal open={open} onClose={() => setOpen(false)} title="New exam">
@@ -94,9 +94,9 @@ export default function ExamsPage() {
             <Field label="Start date"><TextInput type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></Field>
             <Field label="End date"><TextInput type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} /></Field>
           </div>
-          <div className="flex justify-end gap-2">
-            <button className="btn btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={create} disabled={!form.name || !form.classId}>Create exam</button>
+          <div className="ss-exam-modal-actions flex justify-end gap-2">
+            <button className="btn btn-secondary ss-exam-modal-cancel" onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn btn-primary ss-exam-modal-cta" onClick={create} disabled={!form.name || !form.classId}>Create exam</button>
           </div>
         </div>
       </Modal>

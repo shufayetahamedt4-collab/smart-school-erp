@@ -2785,3 +2785,522 @@ body {
     backdrop-filter: none;
   }
 }
+
+/* --- Exams & Results: exam cards + the marks sheet (page-scoped) -------
+   VISUAL ONLY. Two wrappers, each gated on [data-sector="school"] and scoped
+   to its own page: .ss-examspage (/dashboard/exams) and .ss-examdetailpage
+   (/dashboard/exams/[id]). Neither can reach another School Admin screen or
+   the Teacher / Guardian / Platform apps.
+
+   The list is an exam CARD grid (name, class/section, marks-entered count,
+   dates, publish state) and the detail is a two-part marks sheet: editable
+   subject columns and the students x subjects entry grid. Both structures,
+   their columns and their row counts are unchanged — only the surfaces are
+   refined.
+
+   DELIBERATE NON-OVERRIDES on the mark input (.ss-exam-mark): it carries a
+   conditional `border-rose-300 text-rose-700` when a mark fails, and this
+   block must not out-specify those utilities. It therefore sets NO default
+   border-color or color, only geometry/background — so the failing red state
+   survives. The focus ring is re-declared here because a scoped rule would
+   otherwise beat `.input:focus`. */
+
+/* ---------- /dashboard/exams : the exam grid ---------- */
+[data-sector="school"] .ss-examspage {
+  position: relative;
+  border-radius: 26px;
+  padding: 1.15rem 1.15rem 1.4rem;
+  background:
+    radial-gradient(1100px 460px at 2% -18%, rgb(167 139 250 / 0.14), transparent 62%),
+    radial-gradient(940px 420px at 100% 0%, rgb(129 140 248 / 0.11), transparent 60%),
+    linear-gradient(165deg, #f8f7ff 0%, #f5f6ff 48%, #f3f6ff 100%);
+}
+[data-sector="school"] .ss-examspage .ss-page-mark {
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.92), rgb(237 233 254 / 0.88));
+  color: #7c3aed;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7), 0 10px 26px -12px rgb(124 58 237 / 0.55);
+}
+[data-sector="school"] .ss-examspage .ss-exams-cta {
+  border-radius: 0.75rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.82) 56%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 10px 24px -12px rgb(var(--brand) / 0.75), inset 0 1px 0 rgb(255 255 255 / 0.35);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+[data-sector="school"] .ss-examspage .ss-exams-cta:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+  box-shadow: 0 16px 32px -14px rgb(var(--brand) / 0.85), inset 0 1px 0 rgb(255 255 255 / 0.4);
+}
+[data-sector="school"] .ss-examspage .ss-examcard {
+  /* Column flow so a two-line exam name cannot push this card's action strip
+     lower than its neighbours' — the footer sits on the card's floor. */
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  border: 1px solid rgb(255 255 255 / 0.78);
+  background: linear-gradient(165deg, rgb(255 255 255 / 0.94), rgb(255 255 255 / 0.78));
+  -webkit-backdrop-filter: blur(10px) saturate(1.16);
+  backdrop-filter: blur(10px) saturate(1.16);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 20px 44px -32px rgb(15 23 42 / 0.3);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+[data-sector="school"] .ss-examspage .ss-examcard-head {
+  flex: 1 1 auto;
+}
+[data-sector="school"] .ss-examspage .ss-examcard:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--brand) / 0.22);
+  box-shadow: 0 2px 4px rgb(15 23 42 / 0.05), 0 28px 56px -32px rgb(15 23 42 / 0.36);
+}
+[data-sector="school"] .ss-examspage .ss-examcard-head {
+  border-bottom-color: rgb(226 232 240 / 0.7);
+}
+[data-sector="school"] .ss-examspage .ss-exam-icon {
+  flex: none;
+  border-radius: 0.7rem;
+  background: linear-gradient(150deg, rgb(237 233 254), rgb(224 231 255));
+  color: #6d28d9;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7), 0 8px 18px -10px rgb(109 40 217 / 0.6);
+}
+[data-sector="school"] .ss-examspage .ss-exam-name {
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+[data-sector="school"] .ss-examspage .ss-exam-sub {
+  font-size: 0.72rem;
+}
+[data-sector="school"] .ss-examspage .ss-exam-status {
+  flex: none;
+}
+[data-sector="school"] .ss-examspage .ss-exam-meta {
+  font-size: 0.72rem;
+  row-gap: 0.15rem;
+  flex-wrap: wrap;
+}
+[data-sector="school"] .ss-examspage .ss-exam-actions {
+  margin-top: auto;
+  border-top: 1px solid rgb(241 245 249 / 0.9);
+  background: rgb(250 251 255 / 0.6);
+}
+[data-sector="school"] .ss-examspage .ss-exam-open {
+  border-radius: 0.6rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.84) 58%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 8px 18px -12px rgb(var(--brand) / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.3);
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+[data-sector="school"] .ss-examspage .ss-exam-open:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+}
+[data-sector="school"] .ss-examspage .ss-exam-delete {
+  border-radius: 0.6rem;
+}
+[data-sector="school"] .ss-examspage .ss-exam-delete:hover {
+  background: rgb(255 241 242);
+  color: #e11d48;
+}
+[data-sector="school"] .ss-examspage .ss-exams-empty {
+  border-radius: 20px;
+  border: 1px dashed rgb(203 213 225 / 0.9);
+  background: rgb(255 255 255 / 0.7);
+}
+[data-sector="school"] .ss-examspage .ss-exams-error > div {
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.03);
+}
+[data-sector="school"] .ss-examspage .ss-exam-modal-cancel {
+  border-radius: 0.7rem;
+}
+[data-sector="school"] .ss-examspage .ss-exam-modal-cta {
+  border-radius: 0.7rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.84) 58%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 10px 22px -12px rgb(var(--brand) / 0.7);
+}
+
+/* ---------- /dashboard/exams/[id] : the marks sheet ---------- */
+[data-sector="school"] .ss-examdetailpage {
+  position: relative;
+  border-radius: 26px;
+  padding: 1.15rem 1.15rem 1.4rem;
+  background:
+    radial-gradient(1100px 460px at 2% -18%, rgb(129 140 248 / 0.13), transparent 62%),
+    radial-gradient(940px 420px at 100% 0%, rgb(56 189 248 / 0.1), transparent 60%),
+    linear-gradient(165deg, #f7f9ff 0%, #f5f6ff 48%, #f2f7ff 100%);
+}
+[data-sector="school"] .ss-examdetailpage .ss-page-mark {
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.92), rgb(224 231 255 / 0.85));
+  color: #4f46e5;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7), 0 10px 26px -12px rgb(99 102 241 / 0.55);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-back {
+  border-radius: 0.65rem;
+  background: rgb(255 255 255 / 0.9);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-back:hover {
+  border-color: rgb(var(--brand) / 0.4);
+  color: rgb(var(--brand));
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-save {
+  border-radius: 0.65rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.84) 58%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 8px 18px -12px rgb(var(--brand) / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.3);
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-save:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-save:disabled {
+  transform: none;
+  filter: grayscale(0.25);
+  box-shadow: none;
+}
+/* The publish toggle keeps its two existing variants — it just gains polish. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-publish {
+  border-radius: 0.65rem;
+  transition: transform 0.15s ease, filter 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-publish.btn-primary {
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.84) 58%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 8px 18px -12px rgb(var(--brand) / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.3);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-publish.btn-secondary {
+  background: rgb(255 255 255 / 0.9);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-publish:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+/* Published / draft banners (copy unchanged — only the frame is refined). */
+[data-sector="school"] .ss-examdetailpage .ss-exam-banner {
+  border-radius: 14px;
+  -webkit-backdrop-filter: blur(8px) saturate(1.1);
+  backdrop-filter: blur(8px) saturate(1.1);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.03);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-banner-published {
+  border-color: rgb(16 185 129 / 0.35);
+  background: linear-gradient(150deg, rgb(236 253 245 / 0.96), rgb(209 250 229 / 0.72));
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-banner-draft {
+  border-color: rgb(251 191 36 / 0.45);
+  background: linear-gradient(150deg, rgb(255 251 235 / 0.96), rgb(254 243 199 / 0.72));
+}
+
+/* Section cards: subject columns and the marks sheet. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-section {
+  border-radius: 20px;
+  border: 1px solid rgb(255 255 255 / 0.78);
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.92), rgb(255 255 255 / 0.74));
+  -webkit-backdrop-filter: blur(12px) saturate(1.18);
+  backdrop-filter: blur(12px) saturate(1.18);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 22px 48px -34px rgb(15 23 42 / 0.3);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-section .ss-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-section > div:first-child {
+  border-bottom-color: rgb(226 232 240 / 0.7);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex: none;
+  border-radius: 0.55rem;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7), 0 6px 14px -8px rgb(15 23 42 / 0.45);
+}
+[data-sector="school"] .ss-examdetailpage .ss-es-columns .ss-exam-section-icon {
+  color: #6d28d9;
+  background: linear-gradient(150deg, rgb(237 233 254), rgb(224 231 255));
+}
+[data-sector="school"] .ss-examdetailpage .ss-es-marks .ss-exam-section-icon {
+  color: #0369a1;
+  background: linear-gradient(150deg, rgb(224 242 254), rgb(219 234 254));
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-columns-actions {
+  flex-wrap: wrap;
+  row-gap: 0.4rem;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-grades-link {
+  border-radius: 0.6rem;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-addcol {
+  border-radius: 0.6rem;
+  background: rgb(255 255 255 / 0.9);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-savecol {
+  border-radius: 0.6rem;
+  background-image: linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand) / 0.84) 58%, rgb(139 92 246 / 0.92) 100%);
+  box-shadow: 0 8px 18px -12px rgb(var(--brand) / 0.7);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-savecol:disabled {
+  box-shadow: none;
+  filter: grayscale(0.25);
+}
+
+/* Two-up, so nine subjects read as five rows rather than nine tall ones.
+   Each cell still holds the whole row (select + full marks + badge + remove),
+   and .ss-exam-column keeps its own flex-wrap for the narrow single-column
+   case. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-cols {
+  display: grid;
+  /* Capped at two: the minimum track is half the row (less half the gap), so a
+     second cell only appears when it genuinely fits beside the first. The 22rem
+     floor drops the row back to one column before the cells get so narrow that
+     the row's own controls wrap and the section ends up TALLER than the single
+     column it replaced. Driven by the available width, not the viewport, so the
+     sidebar (whose width has nothing to do with the window) can't skew it. */
+  grid-template-columns: repeat(auto-fit, minmax(max(50% - 0.375rem, min(22rem, 100%)), 1fr));
+  gap: 0.75rem;
+}
+
+/* Two cells per row only leaves the subject select ~190px, and the badge then
+   needed six more pixels than the row had — it dropped to a second line and made
+   the badge rows 130px against 86px for the rest, so the section came out 652px
+   tall where 476px was achievable. 11rem still shows "Social Studies" whole. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-cols .ss-exam-col-subject {
+  min-width: 11rem;
+}
+
+/* One editable subject column. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-column {
+  border-radius: 14px;
+  border-color: rgb(226 232 240 / 0.9);
+  background: linear-gradient(160deg, rgb(248 250 252 / 0.9), rgb(255 255 255 / 0.7));
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-column:focus-within {
+  border-color: rgb(var(--brand) / 0.45);
+  box-shadow: 0 0 0 3px rgb(var(--brand) / 0.12);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-label {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-select {
+  height: 2.4rem;
+  border-radius: 0.7rem;
+  border-color: rgb(203 213 225 / 0.9);
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-select:disabled {
+  background: rgb(248 250 252 / 0.85);
+  color: var(--color-slate-400);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-fullmarks {
+  height: 2.4rem;
+  border-radius: 0.7rem;
+  border-color: rgb(203 213 225 / 0.9);
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  font-variant-numeric: tabular-nums;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-fullmarks:disabled {
+  background: rgb(248 250 252 / 0.85);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-col-badge {
+  flex: none;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-col-del {
+  border-radius: 0.6rem;
+  flex: none;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-col-empty {
+  font-size: 0.82rem;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-problem,
+[data-sector="school"] .ss-examdetailpage .ss-exam-notice {
+  border-radius: 12px;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-note > div {
+  border-radius: 12px;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-footnote {
+  line-height: 1.65;
+}
+
+/* The entry grid. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-thead {
+  background: linear-gradient(180deg, rgb(248 250 252), rgb(241 245 249 / 0.8));
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-th,
+[data-sector="school"] .ss-examdetailpage .ss-exam-th-pin {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--color-slate-600);
+  white-space: nowrap;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-th-sub {
+  font-weight: 400;
+  letter-spacing: 0;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-student-cell {
+  background: rgb(250 251 255 / 0.7);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-student {
+  font-size: 0.82rem;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-roll {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+/* Geometry/background only: the conditional rose border/text on a failing
+   mark is a Tailwind utility and must keep winning. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-mark {
+  height: 2.1rem;
+  border-radius: 0.6rem;
+  background: rgb(255 255 255 / 0.94);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-mark:focus {
+  border-color: rgb(var(--brand) / 0.7);
+  box-shadow: 0 0 0 3px rgb(var(--brand) / 0.14);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-mark:disabled {
+  background: rgb(248 250 252 / 0.85);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-grade,
+[data-sector="school"] .ss-examdetailpage .ss-exam-gpa {
+  font-variant-numeric: tabular-nums;
+}
+/* The sheet is wider than the viewport (9 subject columns), so the Student
+   column is pinned. Tailwind's preflight sets border-collapse: collapse, which
+   stops position: sticky working on table cells in Chrome — the table has to be
+   separated for the pin to take effect at all. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-th-pin {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-student-cell {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  /* Opaque: a translucent wash would let the subject columns show through
+     once they scroll underneath. */
+  background: #fafbff;
+  box-shadow: inset -1px 0 0 var(--color-slate-200);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-row:hover .ss-exam-student-cell {
+  background: var(--color-slate-50);
+}
+/* Now that the column is pinned, its width is charged against the screen on
+   every scroll position — 13rem would leave a phone barely one mark column
+   wide. 10rem still holds the name and roll on single lines. */
+@media (max-width: 640px) {
+  [data-sector="school"] .ss-examdetailpage .ss-exam-th-pin {
+    min-width: 10rem;
+  }
+  [data-sector="school"] .ss-examdetailpage .ss-exam-student {
+    font-size: 0.78rem;
+  }
+  [data-sector="school"] .ss-examdetailpage .ss-exam-roll {
+    font-size: 0.64rem;
+  }
+}
+
+/* Report-card strip. The heading is dressed like the two section headers above
+   it (same 0.9rem/700 and icon chip) instead of the weaker text-sm it had. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-reports-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-slate-900);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-reports-title .ss-exam-section-icon {
+  color: #b45309;
+  background: linear-gradient(150deg, rgb(254 243 199), rgb(253 230 138));
+}
+/* Column count from the SPACE AVAILABLE, not the viewport. The sidebar leaves
+   this strip far narrower than the window, so the viewport breakpoints would
+   pack three ~210px cards where only two fit — that is what crushed the names. */
+[data-sector="school"] .ss-examdetailpage .ss-exam-reports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-reportcard {
+  /* STACKED on purpose. These cards sit in a 3-up grid (~350px), which is
+     narrower than the two print buttons it has to hold. A row layout can only
+     resolve that by crushing the student's name to a one-character column
+     (or overflowing the card), so the identity sits on top and the reports sit
+     on their own full-width row. */
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.7rem;
+  border-radius: 16px;
+  border: 1px solid rgb(255 255 255 / 0.78);
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.94), rgb(255 255 255 / 0.78));
+  -webkit-backdrop-filter: blur(10px) saturate(1.16);
+  backdrop-filter: blur(10px) saturate(1.16);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 16px 36px -28px rgb(15 23 42 / 0.28);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-reportcard:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgb(15 23 42 / 0.05), 0 22px 44px -28px rgb(15 23 42 / 0.32);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-report-avatar {
+  flex: none;
+  border-radius: 0.6rem;
+  background: linear-gradient(150deg, rgb(var(--brand) / 0.14), rgb(139 92 246 / 0.14));
+  color: rgb(var(--brand));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7);
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-report-name {
+  line-height: 1.25;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-report-meta {
+  font-size: 0.7rem;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-report-actions {
+  flex-wrap: wrap;
+  row-gap: 0.35rem;
+  justify-content: flex-end;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-report-btn {
+  border-radius: 0.6rem;
+  background: rgb(255 255 255 / 0.9);
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+[data-sector="school"] .ss-examdetailpage .ss-exam-report-btn:hover {
+  border-color: rgb(var(--brand) / 0.4);
+  color: rgb(var(--brand));
+  transform: translateY(-1px);
+}
+
+/* Print: back to a plain white page. */
+@media print {
+  [data-sector="school"] .ss-examspage,
+  [data-sector="school"] .ss-examdetailpage {
+    background: #fff;
+    padding: 0;
+  }
+  [data-sector="school"] .ss-examspage .ss-examcard,
+  [data-sector="school"] .ss-examdetailpage .ss-exam-section,
+  [data-sector="school"] .ss-examdetailpage .ss-exam-reportcard,
+  [data-sector="school"] .ss-examdetailpage .ss-exam-banner {
+    background: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
