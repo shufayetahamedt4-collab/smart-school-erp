@@ -9,7 +9,9 @@ import { fmtDate } from "@/lib/utils";
 interface Notice { id: string; title: string; body: string; category: string; date: string; school: { name: string } }
 
 const CATEGORIES = ["GENERAL", "HOLIDAY", "EXAM", "MEETING", "EVENT", "PICNIC"];
-const CATEGORY_TONES: Record<string, any> = { GENERAL: "slate", HOLIDAY: "red", EXAM: "violet", MEETING: "blue", EVENT: "emerald", PICNIC: "amber" };
+// "green" is the Badge tone key for the emerald shade — passing "emerald"
+// silently renders an untinted badge (the primitive has no such class).
+const CATEGORY_TONES: Record<string, any> = { GENERAL: "slate", HOLIDAY: "red", EXAM: "violet", MEETING: "blue", EVENT: "green", PICNIC: "amber" };
 
 export default function NoticesPage() {
   const [notices, setNotices] = useState<Notice[]>([]);

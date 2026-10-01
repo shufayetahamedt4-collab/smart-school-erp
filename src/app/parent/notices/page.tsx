@@ -6,7 +6,9 @@ import { api } from "@/lib/client";
 import { Card, Badge, PageHeader, LoadingScreen, EmptyState } from "@/components/ui";
 import { fmtDate } from "@/lib/utils";
 
-const TONES: Record<string, any> = { GENERAL: "slate", HOLIDAY: "red", EXAM: "violet", MEETING: "blue", EVENT: "emerald", PICNIC: "amber" };
+// "green" is the Badge tone key for the emerald shade — passing "emerald"
+// silently renders an untinted badge (the primitive has no such class).
+const TONES: Record<string, any> = { GENERAL: "slate", HOLIDAY: "red", EXAM: "violet", MEETING: "blue", EVENT: "green", PICNIC: "amber" };
 
 export default function ParentNoticesPage() {
   const [notices, setNotices] = useState<any[]>([]);
