@@ -3348,6 +3348,13 @@ body {
   margin-top: 0;
 }
 
+/* The same neutraliser for the Parents App. The guardian screens use the identical
+   hook class, so without this rule the teacher-only one above left the 20px
+   margin in place above the first section of 14 guardian screens. */
+[data-sector="guardian"] .ss-flush-top {
+  margin-top: 0;
+}
+
 @media screen and (max-width: 767.98px) {
   /* ================================================================ chrome */
   /* The bottom tab bar is position:fixed over the viewport, so the last thing in
@@ -3431,6 +3438,42 @@ body {
   /* the cover pickers: full-height controls so a relief period is easy to file */
   [data-sector="teacher"] .ss-classes-cover .input,
   [data-sector="teacher"] .ss-classes-cover .btn {
+    min-height: 44px;
+  }
+
+  /* ================================================================ Parents App
+     The guardian screens share the notification centre and the header bell with
+     the Teacher App, so the same touch minimum applies to the same controls.
+     Guardian-scoped, so no teacher measurement moves and the School Admin console
+     (which also renders the bell, under [data-sector="school"]) is untouched. */
+  [data-sector="guardian"] .ss-notifpage button,
+  [data-sector="guardian"] .ss-notifpage .input {
+    min-height: 44px;
+  }
+
+  /* icon-only actions in the notification rows */
+  [data-sector="guardian"] .ss-notif-actions > * {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* The header bell's row actions are hover-only on a pointer device, which makes
+     them unreachable by thumb. On a phone they are always painted and thumb-sized.
+     Scoped to the two phone-first apps, so the console's bell keeps its hover
+     behaviour and teacher desktop is unchanged. */
+  [data-sector="teacher"] .ss-bell-actions,
+  [data-sector="guardian"] .ss-bell-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+  }
+  [data-sector="teacher"] .ss-bell-actions > *,
+  [data-sector="guardian"] .ss-bell-actions > * {
+    min-width: 44px;
     min-height: 44px;
   }
 }

@@ -11,7 +11,7 @@ import { ChatPanel } from "@/components/ChatPanel";
  */
 export default function ParentMessagesPage() {
   return (
-    <div className="ss-messagespage">
+    <div>
       <ChatPanel appearance="guardian" />
     </div>
   );

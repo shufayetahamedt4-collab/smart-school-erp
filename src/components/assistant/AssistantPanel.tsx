@@ -26,11 +26,13 @@ const nextId = () => `m${++seq}`;
  * written until the user taps Confirm, and confirming calls the action's own
  * EXISTING endpoint, so the portal's validation/permission/audit all still run.
  */
-export function AssistantPanel({ role, appearance = "default" }: { role: "TEACHER" | "GUARDIAN"; appearance?: "default" | "teacher" }) {
+export function AssistantPanel({ role, appearance = "default" }: { role: "TEACHER" | "GUARDIAN"; appearance?: "default" | "teacher" | "guardian" }) {
   // Presentation only: the Teacher App already names this screen in its dark app
   // bar, so the panel drops its duplicate heading there. Nothing about the reads,
   // the intents, the responses or the confirm-to-write flow changes.
-  const teacher = appearance === "teacher";
+  // Both phone-first apps (Teacher, Parents) share the app presentation: the dark
+  // app bar is the title, and the controls are real touch targets.
+  const teacher = appearance === "teacher" || appearance === "guardian";
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -83,7 +85,7 @@ export function AssistantPanel({ role, appearance = "default" }: { role: "TEACHE
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col">
-      {/* Teacher only: the app bar is the title, so the panel does not repeat it. */}
+      {/* Both apps: the app bar is the title, so the panel does not repeat it. */}
       {!teacher && (
         <div className="flex items-center gap-3">
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-600/20">

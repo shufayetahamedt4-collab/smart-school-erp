@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BookOpen, CheckCircle2, Clock, Paperclip } from "lucide-react";
 import { api } from "@/lib/client";
-import { Badge, LoadingScreen } from "@/components/ui";
+import { Badge, ErrorNote, LoadingScreen } from "@/components/ui";
 import { EmptyState, ErrorState, SectionHeader, Surface } from "@/components/app-ui";
 import { fmtDate } from "@/lib/utils";
 
@@ -18,6 +18,8 @@ export default function ParentHomeworkPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -32,8 +34,18 @@ export default function ParentHomeworkPage() {
   }, [load]);
 
   const markDone = async (id: string) => {
-    await api(`/api/homework/${id}/submit`, { method: "POST", body: JSON.stringify({ status: "SUBMITTED" }) });
-    setItems((xs) => xs.map((x) => (x.id === id ? { ...x, myStatus: "SUBMITTED" } : x)));
+    setWriteError("");
+    setSavingId(id);
+    try {
+      await api(`/api/homework/${id}/submit`, { method: "POST", body: JSON.stringify({ status: "SUBMITTED" }) });
+      // Only flip the row once the write actually landed — otherwise a failed
+      // submit would leave the item looking done and the server disagreeing.
+      setItems((xs) => xs.map((x) => (x.id === id ? { ...x, myStatus: "SUBMITTED" } : x)));
+    } catch (e: any) {
+      setWriteError(e?.message || "Couldn't mark that as done. Please try again.");
+    } finally {
+      setSavingId(null);
+    }
   };
 
   if (loading) return <LoadingScreen />;
@@ -42,6 +54,11 @@ export default function ParentHomeworkPage() {
   return (
     <div>
       <SectionHeader title="Assignments for the class" className="ss-flush-top" />
+      {writeError && (
+        <div className="mb-3">
+          <ErrorNote message={writeError} />
+        </div>
+      )}
       {items.length ? (
         <div className="space-y-3">
           {items.map((h) => {
@@ -72,8 +89,12 @@ export default function ParentHomeworkPage() {
                   </a>
                 )}
                 {h.myStatus !== "SUBMITTED" && (
-                  <button onClick={() => markDone(h.id)} className="btn btn-primary mt-3 w-full min-h-11">
-                    <CheckCircle2 size={14} /> Mark as done
+                  <button
+                    onClick={() => markDone(h.id)}
+                    disabled={savingId === h.id}
+                    className="btn btn-primary mt-3 w-full min-h-11"
+                  >
+                    {savingId === h.id ? "Saving…" : <><CheckCircle2 size={14} /> Mark as done</>}
                   </button>
                 )}
               </Surface>

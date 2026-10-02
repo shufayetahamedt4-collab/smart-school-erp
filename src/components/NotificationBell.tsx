@@ -181,7 +181,7 @@ export function NotificationBell({
                         <span className="mt-0.5 block text-[10px] text-slate-400">{relativeTime(n.createdAt)}</span>
                       </span>
                     </button>
-                    <div className="absolute right-2 top-2.5 hidden items-center gap-0.5 group-hover:flex">
+                    <div className="ss-bell-actions absolute right-2 top-2.5 hidden items-center gap-0.5 group-hover:flex">
                       <button
                         onClick={() => void markOne(n.id, !n.readAt)}
                         title={n.readAt ? "Mark unread" : "Mark read"}

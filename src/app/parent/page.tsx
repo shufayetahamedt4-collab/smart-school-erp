@@ -71,7 +71,7 @@ export default function ParentDashboard() {
   const BAR_COLORS = ["#4f46e5", "#7c3aed", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444"];
 
   return (
-    <div className="ss-home">
+    <div>
       {/* ------------------------------- greeting ------------------------------- */}
       <div className="flex items-center gap-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-sky-50 text-[13px] font-extrabold text-sky-700">
