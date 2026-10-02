@@ -1,19 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Plus, Trash2, Send, BarChart3, HelpCircle } from "lucide-react";
 import { api } from "@/lib/client";
-import {
-  Card, Badge, Field, TextInput, Select, Textarea, Modal, PageHeader,
-  LoadingScreen, EmptyState, ErrorNote,
-} from "@/components/ui";
+import { Badge, Field, TextInput, Select, Textarea, LoadingScreen, ErrorNote } from "@/components/ui";
+import { EmptyState, ErrorState, IconTile, ListCard } from "@/components/app-ui";
+import { MobileSheet } from "@/components/MobileSheet";
 import { fmtDate } from "@/lib/utils";
 
 /**
  * PRD §7.2 — MCQ quiz authoring (teacher): build questions with options and
  * the correct answer, publish to the class, watch attempts + averages.
+ *
+ * Same read, same POST/PATCH/DELETE calls and bodies, same create sheet, same
+ * gates. The card grid became hairline-separated rows with a full-width action
+ * line, so Publish and Delete stay thumb-sized instead of crowding the title.
+ *
+ * Also added: a read-failure state with retry. A failed GET previously fell
+ * through to an error note above an empty grid, with no way to try again.
  */
-
 interface QuizRow {
   id: string; title: string; description: string | null; published: boolean; allowRetake: boolean;
   durationMin: number | null; createdAt: string;
@@ -32,18 +37,36 @@ export default function TeacherQuizzesPage() {
   const [classes, setClasses] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<any[]>([]);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<any>({ title: "", description: "", classId: "", subjectId: "", durationMin: "10", allowRetake: false });
   const [questions, setQuestions] = useState<QDraft[]>([{ text: "", options: ["", "", "", ""], correctIndex: 0, marks: 1 }]);
 
-  const load = () => api<QuizRow[]>("/api/quizzes?mine=1").then(setQuizzes).catch((e) => setError(e.message));
+  const load = useCallback(
+    () =>
+      api<QuizRow[]>("/api/quizzes?mine=1")
+        .then((rows) => {
+          setQuizzes(rows);
+          setLoadError("");
+        })
+        .catch((e: any) => setLoadError(e?.message || "Couldn't load your quizzes.")),
+    [],
+  );
+
   useEffect(() => {
     load();
     api<any[]>("/api/classes").then(setClasses).catch(() => null);
     api<any[]>("/api/subjects").then(setSubjects).catch(() => null);
-  }, []);
+  }, [load]);
+
+  const retry = () => {
+    // Clearing the read error puts the page back on its loading state; the read
+    // itself is the same call as before.
+    setLoadError("");
+    load();
+  };
 
   const create = async () => {
     setBusy(true); setError("");
@@ -74,57 +97,74 @@ export default function TeacherQuizzesPage() {
   const updQ = (i: number, patch: Partial<QDraft>) =>
     setQuestions((qs) => qs.map((q, idx) => (idx === i ? { ...q, ...patch } : q)));
 
-  if (!quizzes && !error) return <LoadingScreen label="Loading quizzes…" />;
+  if (!quizzes && !loadError) return <LoadingScreen label="Loading quizzes…" />;
+  // Only for the initial read: a failed refresh after a successful mutation keeps
+  // the list the user is looking at, and never replaces it with an error screen.
+  if (!quizzes && loadError) return <ErrorState message={loadError} onRetry={retry} />;
 
   return (
-    <div>
-      <PageHeader
-        title="MCQ Quizzes"
-        subtitle="Auto-graded online tests for your classes (PRD §7.2)"
-        actions={<button className="btn btn-primary" onClick={() => setOpen(true)}><Plus size={16} /> New quiz</button>}
-      />
-      {error && <div className="mb-4"><ErrorNote message={error} /></div>}
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {(quizzes || []).map((q) => {
-          const taken = q.attempts.length;
-          const avg = taken
-            ? Math.round(
-                q.attempts.reduce((a, x) => a + (Number(x.totalMarks) ? (Number(x.score) / Number(x.totalMarks)) * 100 : 0), 0) / taken
-              )
-            : null;
-          return (
-            <Card key={q.id} className="flex flex-col p-5">
-              <div className="flex items-start justify-between gap-2">
-                <Badge tone={q.published ? "green" : "amber"}>{q.published ? "Published" : "Draft"}</Badge>
-                <span className="text-[11px] text-slate-400">{q.questions.length} Qs{q.durationMin ? ` · ${q.durationMin} min` : ""}</span>
-              </div>
-              <h3 className="mt-2 font-extrabold text-slate-900">{q.title}</h3>
-              <p className="mt-0.5 flex-1 text-xs text-slate-400">
-                {q.classRoom?.name || "All classes"}{q.subject ? ` · ${q.subject.name}` : ""} · created {fmtDate(q.createdAt)}
-              </p>
-              <div className="mt-3 flex items-center gap-3 text-xs">
-                <span className="flex items-center gap-1 font-bold text-slate-600"><BarChart3 size={13} /> {taken} attempt(s)</span>
-                {avg !== null && <span className="font-bold text-indigo-600">avg {avg}%</span>}
-                {q.allowRetake && <Badge tone="gray">retakes on</Badge>}
-              </div>
-              <div className="mt-3 flex gap-1.5">
-                <button className="btn btn-secondary btn-sm flex-1" onClick={() => togglePublish(q)}>
-                  <Send size={12} /> {q.published ? "Unpublish" : "Publish"}
-                </button>
-                <button className="btn btn-danger btn-sm" onClick={() => del(q)}><Trash2 size={12} /></button>
-              </div>
-            </Card>
-          );
-        })}
-        {quizzes && !quizzes.length && (
-          <Card className="md:col-span-2 xl:col-span-3">
-            <EmptyState icon={HelpCircle} title="No quizzes yet" description="Create an auto-graded MCQ quiz for your class." />
-          </Card>
-        )}
+    <div className="ss-quizpage">
+      {/* First block: no leading mt — the app's own top padding is the rhythm. */}
+      <div className="mb-2 flex items-center justify-between gap-2 px-1">
+        <h2 className="text-[13px] font-extrabold uppercase tracking-[0.05em] text-slate-500">
+          {(quizzes || []).length} quizzes
+        </h2>
+        <button className="btn btn-primary btn-sm" onClick={() => setOpen(true)}>
+          <Plus size={15} /> New quiz
+        </button>
       </div>
+      {error && (
+        <div className="mb-3">
+          <ErrorNote message={error} />
+        </div>
+      )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New MCQ quiz">
+      {(quizzes || []).length ? (
+        <ListCard>
+          {(quizzes || []).map((q) => {
+            const taken = q.attempts.length;
+            const avg = taken
+              ? Math.round(
+                  q.attempts.reduce((a, x) => a + (Number(x.totalMarks) ? (Number(x.score) / Number(x.totalMarks)) * 100 : 0), 0) / taken
+                )
+              : null;
+            return (
+              <li key={q.id} className="px-3.5 py-3">
+                <div className="flex items-start gap-3">
+                  <IconTile icon={HelpCircle} tone="indigo" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="break-words text-[14px] font-bold leading-snug text-slate-800">{q.title}</span>
+                      <Badge tone={q.published ? "green" : "amber"}>{q.published ? "Published" : "Draft"}</Badge>
+                      {q.allowRetake && <Badge tone="slate">retakes on</Badge>}
+                    </div>
+                    <p className="mt-0.5 break-words text-[12px] leading-snug text-slate-400">
+                      {q.classRoom?.name || "All classes"}{q.subject ? ` · ${q.subject.name}` : ""} · {q.questions.length} Qs
+                      {q.durationMin ? ` · ${q.durationMin} min` : ""} · created {fmtDate(q.createdAt)}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[11.5px]">
+                      <span className="flex items-center gap-1 font-bold text-slate-600"><BarChart3 size={13} /> {taken} attempt(s)</span>
+                      {avg !== null && <span className="font-bold text-indigo-600">avg {avg}%</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-2.5 flex gap-2">
+                  <button className="btn btn-secondary btn-sm flex-1" onClick={() => togglePublish(q)}>
+                    <Send size={12} /> {q.published ? "Unpublish" : "Publish"}
+                  </button>
+                  <button className="btn btn-danger btn-sm" onClick={() => del(q)} aria-label="Delete quiz">
+                    <Trash2 size={12} /> Delete
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ListCard>
+      ) : (
+        <EmptyState icon={HelpCircle} title="No quizzes yet" hint="Create an auto-graded MCQ quiz for your class." />
+      )}
+
+      <MobileSheet open={open} onClose={() => setOpen(false)} title="New MCQ quiz">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Title"><TextInput value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Chapter 3 quick test" /></Field>
@@ -197,7 +237,7 @@ export default function TeacherQuizzesPage() {
             <button className="btn btn-primary" onClick={create} disabled={busy || !form.title || !form.classId}>Create draft</button>
           </div>
         </div>
-      </Modal>
+      </MobileSheet>
     </div>
   );
 }

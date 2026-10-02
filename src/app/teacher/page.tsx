@@ -1,85 +1,175 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { ClipboardList, BookOpen, FileText, Users, ArrowRight, GraduationCap } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { BookOpen, ClipboardList, FileText, GraduationCap, LayoutGrid, Users } from "lucide-react";
 import { api } from "@/lib/client";
-import { StatCard, Card, PageHeader, LoadingScreen } from "@/components/ui";
-import { fmtDate } from "@/lib/utils";
+import { LoadingScreen } from "@/components/ui";
+import { useMe } from "@/components/Shell";
+import {
+  EmptyState,
+  ErrorState,
+  ListCard,
+  ListRow,
+  OverviewTile,
+  QuickAction,
+  SectionHeader,
+} from "@/components/app-ui";
+import { fmtDate, initials } from "@/lib/utils";
 
+/**
+ * Teacher Home.
+ *
+ * Same data as before — one `api("/api/stats")` read, the same four stat values,
+ * the same class and homework lists, and the same destinations (each class row
+ * still opens Attendance, each homework row still opens Homework). What changed
+ * is the shape: a greeting, a 2×2 tile overview, and inset list rows instead of
+ * bordered cards with buttons in them.
+ *
+ * Also added: an error state. Previously a failed read left `stats` null, so the
+ * page showed "Loading teacher dashboard…" forever.
+ */
 export default function TeacherDashboard() {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { me } = useMe();
+  // Time-based greeting is computed after mount so the server and client frames
+  // cannot disagree about what time it is.
+  const [greeting, setGreeting] = useState("Welcome");
 
-  useEffect(() => {
-    api("/api/stats").then(setStats).finally(() => setLoading(false));
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    api("/api/stats")
+      .then(setStats)
+      .catch((e: any) => setError(e?.message || "Couldn't load your dashboard."))
+      .finally(() => setLoading(false));
   }, []);
 
-  if (loading || !stats) return <LoadingScreen label="Loading teacher dashboard…" />;
+  useEffect(load, [load]);
+
+  useEffect(() => {
+    const h = new Date().getHours();
+    setGreeting(h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening");
+  }, []);
+
+  if (loading) return <LoadingScreen label="Loading teacher dashboard…" />;
+  if (error || !stats) return <ErrorState message={error || undefined} onRetry={load} />;
 
   const totalStudents = stats.myClasses.reduce((a: number, c: any) => a + c._count.students, 0);
+  const name = me?.user?.name || "";
 
   return (
-    <div>
-      <PageHeader title="Teacher Dashboard" subtitle="Your classes, homework and today's work" />
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={GraduationCap} label="My classes" value={stats.myClasses.length} sub={`${totalStudents} students`} tone="indigo" />
-        <StatCard icon={Users} label="Assignments" value={stats.assignments.length} sub="class & subject duties" tone="sky" />
-        <StatCard icon={BookOpen} label="Homeworks" value={stats.homeworks.length} sub="posted this term" tone="violet" />
-        <StatCard icon={ClipboardList} label="Today's marks" value={stats.attendanceToday} sub="attendance records submitted" tone="emerald" />
+    <div className="ss-home">
+      {/* ------------------------------- greeting ------------------------------- */}
+      <div className="flex items-center gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-50 text-[13px] font-extrabold text-indigo-700">
+          {me?.user?.photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={me.user.photoUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            initials(name) || <GraduationCap size={18} />
+          )}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[13px] text-slate-500">{greeting}</p>
+          <p className="truncate text-[17px] font-extrabold leading-tight text-slate-900">{name || "Teacher"}</p>
+          <p className="truncate text-[12px] text-slate-400">Teacher{me?.school?.name ? ` · ${me.school.name}` : ""}</p>
+        </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card className="p-5">
-          <h3 className="text-sm font-bold text-slate-800">My classes</h3>
-          <div className="mt-3 space-y-3">
-            {stats.myClasses.map((c: any) => (
-              <div key={c.id} className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
-                <div>
-                  <div className="text-sm font-bold text-slate-800">{c.name}</div>
-                  <div className="text-xs text-slate-400">
-                    {c._count.students} students · sections {c.sections.map((s: any) => s.name).join(", ") || "—"}
-                  </div>
-                </div>
-                <Link href="/teacher/attendance" className="btn btn-secondary btn-sm">
-                  Attendance <ArrowRight size={13} />
-                </Link>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="p-5">
-          <h3 className="text-sm font-bold text-slate-800">Recent homework</h3>
-          <div className="mt-3 space-y-3">
-            {stats.homeworks.length ? stats.homeworks.map((h: any) => (
-              <div key={h.id} className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
-                <div>
-                  <div className="text-sm font-bold text-slate-800">{h.title}</div>
-                  <div className="text-xs text-slate-400">Due {fmtDate(h.dueDate)}</div>
-                </div>
-                <Link href="/teacher/homework" className="btn btn-ghost btn-sm text-indigo-600">Manage</Link>
-              </div>
-            )) : <p className="text-sm text-slate-400">No homework posted yet.</p>}
-          </div>
-        </Card>
+      {/* --------------------------- today's overview --------------------------- */}
+      <SectionHeader title="Today's Overview" />
+      <div className="ss-tiles grid grid-cols-2 gap-3">
+        <OverviewTile
+          icon={GraduationCap}
+          tone="indigo"
+          value={stats.myClasses.length}
+          label="My classes"
+          sub={`${totalStudents} students`}
+        />
+        <OverviewTile
+          icon={Users}
+          tone="sky"
+          value={stats.assignments.length}
+          label="Assignments"
+          sub="class & subject duties"
+        />
+        <OverviewTile
+          icon={BookOpen}
+          tone="violet"
+          value={stats.homeworks.length}
+          label="Homeworks"
+          sub="posted this term"
+        />
+        <OverviewTile
+          icon={ClipboardList}
+          tone="emerald"
+          value={stats.attendanceToday}
+          label="Today's marks"
+          sub="attendance records submitted"
+        />
       </div>
 
-      <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[
-          { href: "/teacher/attendance", icon: ClipboardList, label: "Take Attendance", tone: "from-indigo-500 to-indigo-600" },
-          { href: "/teacher/remarks", icon: FileText, label: "Daily Remarks", tone: "from-violet-500 to-violet-600" },
-          { href: "/teacher/homework", icon: BookOpen, label: "Homework", tone: "from-emerald-500 to-emerald-600" },
-          { href: "/teacher/marks", icon: GraduationCap, label: "Enter Marks", tone: "from-amber-500 to-amber-600" },
-        ].map((q) => (
-          <Link key={q.href} href={q.href} className={`group flex items-center gap-3 rounded-2xl bg-gradient-to-br ${q.tone} px-4 py-4 text-white shadow-lg transition hover:-translate-y-0.5`}>
-            <q.icon size={20} />
-            <div className="text-sm font-bold">{q.label}</div>
-            <ArrowRight size={15} className="ml-auto opacity-60 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
-          </Link>
-        ))}
+      {/* ---------------------------- quick actions ---------------------------- */}
+      <SectionHeader title="Quick Actions" />
+      <div className="ss-quick grid grid-cols-4 gap-2.5">
+        <QuickAction href="/teacher/attendance" icon={ClipboardList} tone="indigo" label="Attendance" />
+        <QuickAction href="/teacher/remarks" icon={FileText} tone="violet" label="Remarks" />
+        <QuickAction href="/teacher/homework" icon={BookOpen} tone="emerald" label="Homework" />
+        <QuickAction href="/teacher/marks" icon={GraduationCap} tone="amber" label="Marks" />
       </div>
+
+      {/* --------------------------- today's classes --------------------------- */}
+      <SectionHeader title="My Classes" actionHref="/teacher/classes" actionLabel="View all" />
+      {stats.myClasses.length ? (
+        <ListCard>
+          {stats.myClasses.map((c: any) => (
+            <ListRow
+              key={c.id}
+              href="/teacher/attendance"
+              icon={LayoutGrid}
+              tone="indigo"
+              title={c.name}
+              subtitle={`${c._count.students} students · sections ${c.sections.map((s: any) => s.name).join(", ") || "—"}`}
+            />
+          ))}
+        </ListCard>
+      ) : (
+        <EmptyState
+          icon={LayoutGrid}
+          title="No classes assigned yet"
+          hint="Once your school assigns you a class it will show up here."
+        />
+      )}
+
+      {/* --------------------------- recent homework --------------------------- */}
+      <SectionHeader title="Recent Homework" actionHref="/teacher/homework" actionLabel="View all" />
+      {stats.homeworks.length ? (
+        <ListCard>
+          {stats.homeworks.map((h: any) => (
+            <ListRow
+              key={h.id}
+              href="/teacher/homework"
+              icon={BookOpen}
+              tone="violet"
+              title={h.title}
+              subtitle={`Due ${fmtDate(h.dueDate)}`}
+            />
+          ))}
+        </ListCard>
+      ) : (
+        <EmptyState
+          icon={BookOpen}
+          title="No homework posted yet"
+          hint="Homework you set for your classes will appear here."
+          actionHref="/teacher/homework"
+          actionLabel="Create homework"
+        />
+      )}
+
+      {/* Clears the fixed phone tab bar so the last row is never tapped by accident. */}
+      <div className="h-2" aria-hidden />
     </div>
   );
 }

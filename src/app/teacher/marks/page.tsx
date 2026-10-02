@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Save, Check, FileText, Award } from "lucide-react";
 import { api } from "@/lib/client";
-import { Card, Select, PageHeader, LoadingScreen, ErrorNote } from "@/components/ui";
+import { Select, LoadingScreen, ErrorNote } from "@/components/ui";
+import { Surface, EmptyState } from "@/components/app-ui";
 import { initials } from "@/lib/utils";
 import { gradeForScheme, type GradingScheme } from "@/lib/grading";
 
@@ -134,24 +135,22 @@ export default function TeacherMarksPage() {
   if (loading && exams.length === 0) return <LoadingScreen />;
 
   return (
-    <div>
-      <PageHeader
-        title="Marks Entry"
-        subtitle={
-          column
+    <div className="ss-markspage">
+      {/* header strip — the app bar owns the title; this carries the count and Save */}
+      <div className="mb-3 flex items-center justify-between gap-3 px-1">
+        <p className="min-w-0 text-[12px] font-semibold text-slate-500">
+          {column
             ? `${entered}/${students.length} students entered for ${column.name} (out of ${fullMarks})`
-            : "Select an exam to load its subject sheet"
-        }
-        actions={
-          <button className="btn btn-primary" onClick={save} disabled={saving || !students.length || entered === 0 || locked}>
-            {saved ? <Check size={15} /> : <Save size={15} />} {saved ? "Saved!" : saving ? "Saving…" : "Save marks"}
-          </button>
-        }
-      />
+            : "Select an exam to load its subject sheet"}
+        </p>
+        <button className="btn btn-primary btn-sm min-h-11 shrink-0" onClick={save} disabled={saving || !students.length || entered === 0 || locked}>
+          {saved ? <Check size={15} /> : <Save size={15} />} {saved ? "Saved!" : saving ? "Saving…" : "Save marks"}
+        </button>
+      </div>
 
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 
-      <Card className="mb-4 p-4">
+      <Surface>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
           <div className="sm:col-span-2">
             <label className="label">Exam</label>
@@ -189,81 +188,73 @@ export default function TeacherMarksPage() {
             {scheme.passPercent}% · GPA out of {scheme.gpaScale.toFixed(2)}
           </p>
         )}
-      </Card>
+      </Surface>
 
-      <Card>
+      <div className="mt-4">
         {sheetLoading ? (
           <LoadingScreen label="Loading the exam sheet…" />
         ) : students.length && column ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="th">Student</th>
-                  <th className="th">Roll</th>
-                  <th className="th w-40 text-center">Marks (out of {fullMarks})</th>
-                  <th className="th text-center">Grade</th>
-                  <th className="th text-center">GPA</th>
-                </tr>
-              </thead>
-              <tbody>
-                {students.map((s) => {
-                  const val = marks[`${s.studentId}|${subjectId}`] ?? "";
-                  const num = Number(val);
-                  const enteredRow = val !== "" && Number.isFinite(num);
-                  const res = enteredRow && scheme ? gradeForScheme(scheme, num, fullMarks) : null;
-                  return (
-                    <tr key={s.studentId} className="tr-hover">
-                      <td className="td">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-[10px] font-bold text-indigo-600">
-                            {initials(s.name)}
-                          </div>
-                          <div className="font-bold text-slate-800">{s.name}</div>
-                        </div>
-                      </td>
-                      <td className="td font-semibold">{s.roll ?? "—"}</td>
-                      <td className="td">
-                        <input
-                          className={`input !w-28 !px-2 text-center ${res && !res.pass ? "border-rose-300 text-rose-700" : ""}`}
-                          type="number"
-                          min={0}
-                          max={fullMarks}
-                          value={val}
-                          placeholder="–"
-                          onChange={(e) => setMarks((m) => ({ ...m, [`${s.studentId}|${subjectId}`]: e.target.value }))}
-                          disabled={locked}
-                        />
-                      </td>
-                      <td className="td text-center">
-                        <span
-                          className={`badge ring-1 ring-inset ${
-                            !res
-                              ? "bg-slate-100 text-slate-500 ring-slate-500/20"
-                              : res.pass
-                                ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20"
-                                : "bg-rose-50 text-rose-700 ring-rose-600/20"
-                          }`}
-                        >
-                          {res ? res.grade : "—"}
-                        </span>
-                      </td>
-                      <td className="td text-center font-semibold text-slate-600">
-                        {res ? res.gpa.toFixed(2) : "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/5">
+            {students.map((s) => {
+              const val = marks[`${s.studentId}|${subjectId}`] ?? "";
+              const num = Number(val);
+              const enteredRow = val !== "" && Number.isFinite(num);
+              const res = enteredRow && scheme ? gradeForScheme(scheme, num, fullMarks) : null;
+              return (
+                <li key={s.studentId} className="ss-marks-row px-3.5 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-[11px] font-bold text-indigo-600">
+                      {initials(s.name)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[14px] font-bold leading-snug text-slate-800">{s.name}</div>
+                      <div className="mt-0.5 text-[11px] text-slate-400">Roll {s.roll ?? "—"}</div>
+                    </div>
+                    <span
+                      className={`badge shrink-0 ring-1 ring-inset ${
+                        !res
+                          ? "bg-slate-100 text-slate-500 ring-slate-500/20"
+                          : res.pass
+                            ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20"
+                            : "bg-rose-50 text-rose-700 ring-rose-600/20"
+                      }`}
+                    >
+                      {res ? res.grade : "—"}
+                    </span>
+                  </div>
+                  <div className="mt-2.5 flex items-end gap-3">
+                    <label className="min-w-0 flex-1">
+                      <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.06em] text-slate-400">
+                        Marks (out of {fullMarks})
+                      </span>
+                      <input
+                        className={`input min-h-11 w-full text-center ${res && !res.pass ? "border-rose-300 text-rose-700" : ""}`}
+                        type="number"
+                        min={0}
+                        max={fullMarks}
+                        value={val}
+                        placeholder="–"
+                        onChange={(e) => setMarks((m) => ({ ...m, [`${s.studentId}|${subjectId}`]: e.target.value }))}
+                        disabled={locked}
+                      />
+                    </label>
+                    <div className="flex w-14 shrink-0 flex-col items-center">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.06em] text-slate-400">GPA</span>
+                      <span className="text-sm font-bold text-slate-600">{res ? res.gpa.toFixed(2) : "—"}</span>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         ) : (
-          <div className="py-14 text-center text-sm text-slate-400">
-            <FileText className="mx-auto mb-2 text-slate-300" size={30} />
-            Select an exam to load its subject sheet.
-          </div>
+          <EmptyState
+            icon={FileText}
+            title="No sheet loaded"
+            hint="Select an exam to load its subject sheet."
+          />
         )}
-      </Card>
+      </div>
     </div>
   );
 }

@@ -1,16 +1,19 @@
 "use client";
 
-import { PageHeader } from "@/components/ui";
 import { NotificationsCenter } from "@/components/NotificationsCenter";
 
+/**
+ * Teacher → Notifications.
+ *
+ * The dark app bar already names this screen, so the old `PageHeader` (which
+ * repeated "Notifications" under it) is gone. The centre itself is unchanged in
+ * every functional respect — same reads, filters, mark read/unread, delete and
+ * clear-read calls — and only asked for its Teacher surface presentation.
+ */
 export default function NotificationsPage() {
   return (
-    <div>
-      <PageHeader
-        title="Notifications"
-        subtitle="Notices, leave decisions, PTM bookings and messages from the office and your families."
-      />
-      <NotificationsCenter />
+    <div className="ss-notifpage">
+      <NotificationsCenter appearance="teacher" />
     </div>
   );
 }

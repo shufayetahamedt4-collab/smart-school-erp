@@ -1,0 +1,72 @@
+/*
+ * App-shell styles.
+ *
+ * Kept in a CSS module on purpose: `globals.css` is shared with every other
+ * sector and is NOT touched by this work. Everything here is shell chrome only.
+ */
+
+/* The rail widens on hover/focus (width is set with utilities); this rule only
+   exists so the class is exported and can carry the label transition scope. */
+.rail {
+  will-change: width;
+}
+
+/* The content column clears the fixed rail on desktop and the fixed bottom tab
+   bar on phones (64px bar + the device's home-indicator inset). */
+.content {
+  padding-bottom: 0;
+}
+@media (min-width: 1024px) {
+  .content {
+    padding-left: 72px;
+  }
+}
+@media (max-width: 1023.98px) {
+  .content {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+  /* Teacher only. The bar measures ~64.7px once its top border and the 2xl
+     corner are counted, so a 64px reserve leaves the last row a hair under it —
+     and the Teacher App has no footer now, so this column is the only thing
+     holding content clear of the bar. The Parents App keeps `.content` and its
+     own footer-driven clearance, untouched. */
+  .contentApp {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  }
+}
+
+/* The bottom tab bar sits above the home-indicator. */
+.tabbar {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* The More sheet rises from the bottom edge — a short, readable rise. */
+@keyframes appShellSheetIn {
+  from {
+    transform: translateY(14px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.sheetIn {
+  animation: appShellSheetIn 0.22s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheetIn {
+    animation: none;
+  }
+}
+
+/* The rail's label fades in as the rail widens, so it never jumps. */
+.railLabel {
+  opacity: 0;
+  transition: opacity 0.14s ease-out;
+  white-space: nowrap;
+}
+.rail:hover .railLabel,
+.rail:focus-within .railLabel {
+  opacity: 1;
+}

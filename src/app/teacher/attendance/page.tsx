@@ -3,10 +3,26 @@
 import { useEffect, useState } from "react";
 import { ClipboardList, Save, Check } from "lucide-react";
 import { api, qs } from "@/lib/client";
-import { Card, Select, PageHeader, LoadingScreen, ErrorNote } from "@/components/ui";
+import { Select, LoadingScreen, ErrorNote } from "@/components/ui";
+import { Surface, EmptyState } from "@/components/app-ui";
 import { todayISO, initials } from "@/lib/utils";
 
 const STATUSES = ["PRESENT", "ABSENT", "LATE", "LEAVE"];
+
+/**
+ * The status names, shown on each student's own control: the roster is a stack
+ * of cards, so the buttons need naming. Presentation only — the values POSTed to
+ * the server are the STATUSES above, unchanged.
+ */
+const STATUS_LABELS: Record<string, string> = { PRESENT: "Present", ABSENT: "Absent", LATE: "Late", LEAVE: "Leave" };
+
+/** The fill each status takes when chosen — the same four tones as before. */
+const STATUS_TONE: Record<string, string> = {
+  PRESENT: "border-emerald-500 bg-emerald-500 text-white",
+  ABSENT: "border-rose-500 bg-rose-500 text-white",
+  LATE: "border-amber-500 bg-amber-500 text-white",
+  LEAVE: "border-sky-500 bg-sky-500 text-white",
+};
 
 interface RosterRow { id: string; name: string; roll: number | null; admissionNo: string; photoUrl: string | null; status: string; remark: string }
 
@@ -66,20 +82,20 @@ export default function AttendancePage() {
   const marked = rows.filter((r) => r.status !== "UNMARKED").length;
 
   return (
-    <div>
-      <PageHeader
-        title="Attendance"
-        subtitle={rows.length ? `${marked}/${rows.length} students marked` : "Select class and date to begin"}
-        actions={
-          <button className="btn btn-primary" onClick={save} disabled={saving || !rows.length || marked === 0}>
-            {saved ? <Check size={15} /> : <Save size={15} />} {saved ? "Saved!" : saving ? "Saving…" : "Save attendance"}
-          </button>
-        }
-      />
+    <div className="ss-attpage">
+      {/* header strip — the app bar owns the title; this carries the count and Save */}
+      <div className="mb-3 flex items-center justify-between gap-3 px-1">
+        <p className="min-w-0 text-[12px] font-semibold text-slate-500">
+          {rows.length ? `${marked}/${rows.length} students marked` : "Select class and date to begin"}
+        </p>
+        <button className="btn btn-primary btn-sm min-h-11 shrink-0" onClick={save} disabled={saving || !rows.length || marked === 0}>
+          {saved ? <Check size={15} /> : <Save size={15} />} {saved ? "Saved!" : saving ? "Saving…" : "Save attendance"}
+        </button>
+      </div>
 
       {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 
-      <Card className="mb-4 p-4">
+      <Surface>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
           <div>
             <label className="label">Class</label>
@@ -103,71 +119,52 @@ export default function AttendancePage() {
             <button className="btn btn-secondary w-full" onClick={loadRoster}><ClipboardList size={15} /> Load roster</button>
           </div>
         </div>
-      </Card>
+      </Surface>
 
-      <Card>
+      <div className="mt-4">
         {loading ? (
           <LoadingScreen label="Loading roster…" />
         ) : rows.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="th">Student</th>
-                  <th className="th">Roll</th>
-                  <th className="th text-center">Present</th>
-                  <th className="th text-center">Absent</th>
-                  <th className="th text-center">Late</th>
-                  <th className="th text-center">Leave</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="tr-hover">
-                    <td className="td">
-                      <div className="flex items-center gap-3">
-                        {r.photoUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={r.photoUrl} alt="" className="h-8 w-8 rounded-lg object-cover" />
-                        ) : (
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-[10px] font-bold text-indigo-600">{initials(r.name)}</div>
-                        )}
-                        <div>
-                          <div className="font-bold text-slate-800">{r.name}</div>
-                          <div className="text-[11px] text-slate-400">{r.admissionNo}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="td font-semibold">{r.roll ?? "—"}</td>
-                    {STATUSES.map((s) => (
-                      <td key={s} className="td text-center">
-                        <button
-                          onClick={() => setStatus(r.id, s)}
-                          className={`h-9 w-9 rounded-full border-2 text-xs font-black transition ${
-                            r.status === s
-                              ? s === "PRESENT" ? "border-emerald-500 bg-emerald-500 text-white"
-                                : s === "ABSENT" ? "border-rose-500 bg-rose-500 text-white"
-                                : s === "LATE" ? "border-amber-500 bg-amber-500 text-white"
-                                : "border-sky-500 bg-sky-500 text-white"
-                              : "border-slate-200 text-slate-400 hover:border-slate-300"
-                          }`}
-                        >
-                          {s[0]}
-                        </button>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/5">
+            {rows.map((r) => (
+              <li key={r.id} className="ss-att-row px-3.5 py-3">
+                <div className="flex items-center gap-3">
+                  {r.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={r.photoUrl} alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+                  ) : (
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-[11px] font-bold text-indigo-600">{initials(r.name)}</div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[14px] font-bold leading-snug text-slate-800">{r.name}</div>
+                    <div className="mt-0.5 text-[11px] text-slate-400">{r.admissionNo} · Roll {r.roll ?? "—"}</div>
+                  </div>
+                </div>
+                <div className="mt-2.5 grid grid-cols-4 gap-1.5" role="group" aria-label={`Attendance for ${r.name}`}>
+                  {STATUSES.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setStatus(r.id, s)}
+                      aria-pressed={r.status === s}
+                      className={`min-h-11 rounded-xl border-2 text-[11px] font-bold transition ${
+                        r.status === s ? STATUS_TONE[s] : "border-slate-200 text-slate-400 hover:border-slate-300"
+                      }`}
+                    >
+                      {STATUS_LABELS[s]}
+                    </button>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
         ) : (
-          <div className="py-14 text-center text-sm text-slate-400">
-            <ClipboardList className="mx-auto mb-2 text-slate-300" size={30} />
-            Select a class and date, then load the roster.
-          </div>
+          <EmptyState
+            icon={ClipboardList}
+            title="No roster loaded"
+            hint="Select a class and date, then load the roster."
+          />
         )}
-      </Card>
+      </div>
     </div>
   );
 }

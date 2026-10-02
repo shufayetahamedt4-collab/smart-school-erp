@@ -1,20 +1,48 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CalendarCheck, Plus } from "lucide-react";
 import { api } from "@/lib/client";
-import { Card, CardHeader, Badge, Field, TextInput, Select, PageHeader, LoadingScreen, EmptyState } from "@/components/ui";
+import { Badge, Field, LoadingScreen, Select, TextInput } from "@/components/ui";
+import { EmptyState, ErrorState, ListCard, ListRow, SectionHeader, Surface } from "@/components/app-ui";
 import { fmtDate } from "@/lib/utils";
 
-/** PRD §7.1 — PTM slots (teacher view: publish + see bookings). */
+/**
+ * PRD §7.1 — PTM slots (teacher view: publish + see bookings).
+ *
+ * Same read, same POST body, same gate on Publish. The form is an inset surface
+ * and the slots are hairline-separated rows, with the Active/Hidden pill as the
+ * row's trailing element.
+ *
+ * Also added: a read-failure state — a rejected GET previously left the page on
+ * its spinner, because `load` had no `catch`. Retry repeats the same read.
+ */
 export default function TeacherMeetingsPage() {
   const [slots, setSlots] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<any>({ title: "Parent-Teacher Meeting", durationMin: 15, mode: "IN_PERSON" });
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
-  const load = () => api<any[]>("/api/meetings").then(setSlots).finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
+  const load = useCallback(
+    () =>
+      api<any[]>("/api/meetings")
+        .then((rows) => {
+          setSlots(rows);
+          setLoadError("");
+        })
+        .catch((e: any) => setLoadError(e?.message || "Couldn't load your PTM slots."))
+        .finally(() => setLoading(false)),
+    [],
+  );
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const retry = () => {
+    setLoading(true);
+    load();
+  };
 
   const publish = async () => {
     if (!form.startAt) return;
@@ -29,46 +57,54 @@ export default function TeacherMeetingsPage() {
   };
 
   if (loading) return <LoadingScreen />;
+  // Only when there is nothing on screen: a failed refresh after a successful
+  // publish must not replace the list the user just added to.
+  if (loadError && !slots.length) return <ErrorState message={loadError} onRetry={retry} />;
 
   return (
-    <div className="space-y-4">
-      <PageHeader title="PTM Slots" subtitle="Publish meeting slots — guardians book and you get notified (PRD §7.1)" />
-
-      <Card className="p-4">
-        <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-4">
-          <Field label="Title"><TextInput value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
-          <Field label="Starts at"><TextInput type="datetime-local" value={form.startAt || ""} onChange={(e) => setForm({ ...form, startAt: e.target.value })} /></Field>
-          <Field label="Mode">
+    <div className="ss-meetingspage">
+      <SectionHeader title="Publish a slot" className="ss-flush-top" />
+      <Surface>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Title">
+            <TextInput value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          </Field>
+          <Field label="Starts at">
+            <TextInput type="datetime-local" value={form.startAt || ""} onChange={(e) => setForm({ ...form, startAt: e.target.value })} />
+          </Field>
+          <Field label="Mode" className="sm:col-span-2">
             <Select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}>
-              <option value="IN_PERSON">In person</option><option value="ONLINE">Online</option>
+              <option value="IN_PERSON">In person</option>
+              <option value="ONLINE">Online</option>
             </Select>
           </Field>
-          <button className="btn btn-primary" onClick={publish} disabled={busy || !form.startAt}><Plus size={15} /> Publish</button>
         </div>
-      </Card>
+        <button className="btn btn-primary mt-3 w-full" onClick={publish} disabled={busy || !form.startAt}>
+          <Plus size={15} /> Publish
+        </button>
+      </Surface>
 
-      <Card>
-        <CardHeader title="My slots" subtitle={`${slots.length} published`} />
-        {slots.length ? (
-          <div className="divide-y divide-slate-100">
-            {slots.map((s) => (
-              <div key={s.id} className="flex items-center justify-between px-5 py-3">
-                <div>
-                  <p className="text-sm font-bold text-slate-800">{fmtDate(s.startAt, true)}</p>
-                  <p className="text-xs text-slate-500">
-                    {s.bookings?.length
-                      ? s.bookings.map((b: any) => `${b.student?.name || "?"} (${b.guardian?.name || "?"})`).join(", ")
-                      : "No bookings yet"}
-                  </p>
-                </div>
-                <Badge tone={s.active ? "green" : "slate"}>{s.active ? "Active" : "Hidden"}</Badge>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState icon={CalendarCheck} title="No slots yet" description="Publish a slot above." />
-        )}
-      </Card>
+      <SectionHeader title="My slots" />
+      {slots.length ? (
+        <ListCard>
+          {slots.map((s) => (
+            <ListRow
+              key={s.id}
+              icon={CalendarCheck}
+              tone="sky"
+              title={fmtDate(s.startAt, true)}
+              subtitle={
+                s.bookings?.length
+                  ? s.bookings.map((b: any) => `${b.student?.name || "?"} (${b.guardian?.name || "?"})`).join(", ")
+                  : "No bookings yet"
+              }
+              trailing={<Badge tone={s.active ? "green" : "slate"}>{s.active ? "Active" : "Hidden"}</Badge>}
+            />
+          ))}
+        </ListCard>
+      ) : (
+        <EmptyState icon={CalendarCheck} title="No slots yet" hint="Publish a slot above." />
+      )}
     </div>
   );
 }

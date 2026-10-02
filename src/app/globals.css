@@ -3304,3 +3304,133 @@ body {
     backdrop-filter: none;
   }
 }
+
+/* ------------------------------------------------------------------ Teacher App mobile
+   The whole phone treatment for the Teacher App lives in ONE <768px block below.
+   Every rule is teacher-scoped ([data-sector="teacher"]), so no other portal and
+   no other width is touched; at 768px and above the desktop measurements the T0
+   baseline recorded survive unchanged.
+
+   The five wide sheets — attendance, marks, remarks, classes and grades — are now
+   the same inset list/card surfaces at every width, so their old "table becomes
+   cards" scaffold (the §shared rules plus each sheet's own column map) has been
+   retired. What remains here is only touch-target sizing for the app's own
+   controls and the footer clearance for the bottom bar.
+
+   Sections: chrome · homework & quizzes · other pages. */
+
+/* The More sheet rises from the bottom edge. The shared .fade-up nudge (6px) is
+   too small to read as a sheet, so it gets its own short rise. */
+@keyframes ssSheetIn {
+  from {
+    transform: translateY(14px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.ss-sheet-in {
+  animation: ssSheetIn 0.22s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ss-sheet-in {
+    animation: none;
+  }
+}
+
+/* The FIRST section header on a Teacher screen sits flush with the app's own top
+   padding. The component's mt-5 is for headers BETWEEN blocks; as a page's first
+   child its margin collapses out of the page root and adds 20px of dead space the
+   other screens do not have. Unlayered, so it out-ranks the utility layer. */
+[data-sector="teacher"] .ss-flush-top {
+  margin-top: 0;
+}
+
+@media screen and (max-width: 767.98px) {
+  /* ================================================================ chrome */
+  /* The bottom tab bar is position:fixed over the viewport, so the last thing in
+     the scroll needs clearance: the footer's own 16px, plus the 64px bar, plus the
+     device's home-indicator inset. */
+  [data-sector="teacher"] footer {
+    padding-bottom: calc(16px + 64px + env(safe-area-inset-bottom));
+  }
+
+  /* ================================================================ homework & quizzes
+     The two authoring pages are card grids at every width, so on phones only the
+     controls change: the page's own buttons and fields grow to a real touch
+     target, and the homework card's delete control — which is hover-only (and so
+     in fact unreachable) on desktop — is always visible. The create forms open in
+     `MobileSheet`, which is a bottom sheet here and the same centred card above
+     768px, so no rule here touches the sheet's own shape. */
+  /* the header CTA, the card actions and the sheet's own buttons and fields */
+  [data-sector="teacher"] .ss-hwpage .btn,
+  [data-sector="teacher"] .ss-quizpage .btn,
+  [data-sector="teacher"] .ss-hwpage .input,
+  [data-sector="teacher"] .ss-quizpage .input {
+    min-height: 44px;
+  }
+  /* the homework delete control: 44px and always painted on a phone */
+  [data-sector="teacher"] .ss-hwpage .ss-hwdel {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    opacity: 1;
+  }
+
+  /* ================================================================ leaves, meetings, results, resources, notifications & grades
+     These are list/form pages that already stack on a phone, so their treatment is
+     the touch targets: the page's own buttons and fields, and the icon-only row
+     actions in the resources and notification lists, all become 44px. Every rule is
+     inside <768px and teacher-scoped, so the School Admin console keeps its own
+     desktop sizing untouched. */
+  [data-sector="teacher"] .ss-attpage .btn,
+  [data-sector="teacher"] .ss-attpage .input,
+  [data-sector="teacher"] .ss-rmkpage .btn,
+  [data-sector="teacher"] .ss-rmkpage .input,
+  [data-sector="teacher"] .ss-markspage .btn,
+  [data-sector="teacher"] .ss-markspage .input,
+  [data-sector="teacher"] .ss-classespage .btn,
+  [data-sector="teacher"] .ss-classespage .input,
+  [data-sector="teacher"] .ss-leavespage .btn,
+  [data-sector="teacher"] .ss-leavespage .input,
+  [data-sector="teacher"] .ss-meetingspage .btn,
+  [data-sector="teacher"] .ss-meetingspage .input,
+  [data-sector="teacher"] .ss-resultspage .btn,
+  [data-sector="teacher"] .ss-resourcespage .btn,
+  [data-sector="teacher"] .ss-resourcespage .input,
+  [data-sector="teacher"] .ss-gradespage .btn,
+  [data-sector="teacher"] .ss-gradespage .input,
+  [data-sector="teacher"] .ss-notifpage .input {
+    min-height: 44px;
+  }
+
+  /* the native file picker is not a `.input` — give it a thumb-sized box too */
+  [data-sector="teacher"] .ss-resourcespage input[type="file"] {
+    min-height: 44px;
+  }
+
+  /* the notification centre's own buttons: filter chips, mark-read, load more */
+  [data-sector="teacher"] .ss-notifpage button {
+    min-height: 44px;
+  }
+
+  /* icon-only actions in the resources and notification rows */
+  [data-sector="teacher"] .ss-res-actions > *,
+  [data-sector="teacher"] .ss-notif-actions > * {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* the cover pickers: full-height controls so a relief period is easy to file */
+  [data-sector="teacher"] .ss-classes-cover .input,
+  [data-sector="teacher"] .ss-classes-cover .btn {
+    min-height: 44px;
+  }
+}

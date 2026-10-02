@@ -38,7 +38,25 @@ type Filter = "all" | "unread" | "read";
  * controls. Reads bypass the client memo (`no-store`): a notification list that
  * lies about being fresh is worse than one that is slow.
  */
-export function NotificationsCenter() {
+/**
+ * The list surface. The portal's bordered `Card` by default; the Teacher App's
+ * inset panel — a hairline ring instead of a border — when asked for. Purely a
+ * wrapper: the children are identical either way.
+ *
+ * A separate element rather than a `className` on `Card`, because `.card` is an
+ * unlayered global rule and would out-rank the utility overrides that would be
+ * needed to strip its border and shadow.
+ */
+function CenterSurface({ teacher, children }: { teacher: boolean; children: React.ReactNode }) {
+  if (teacher) return <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/5">{children}</div>;
+  return <Card>{children}</Card>;
+}
+
+export function NotificationsCenter({ appearance = "default" }: { appearance?: "default" | "teacher" } = {}) {
+  // Presentation only. The Teacher App renders the same centre on the app's inset
+  // panel with a pill filter; every other portal keeps the default branch exactly
+  // as it was, and no read, filter or action changes either way.
+  const teacher = appearance === "teacher";
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [unread, setUnread] = useState(0);
   const [total, setTotal] = useState(0);
@@ -164,21 +182,36 @@ export function NotificationsCenter() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      <CenterSurface teacher={teacher}>
         <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-          <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1">
+          <div className={cn("flex items-center gap-1 bg-slate-100 p-1", teacher ? "w-full rounded-full" : "rounded-xl")}>
             {(["all", "unread", "read"] as Filter[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
                 className={cn(
-                  "rounded-lg px-3 py-1.5 text-xs font-bold capitalize transition",
-                  filter === f ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  "font-bold capitalize transition",
+                  teacher
+                    ? cn(
+                        "flex min-h-11 flex-1 items-center justify-center rounded-full px-3 text-[13px]",
+                        filter === f ? "brand-bg text-white shadow-sm" : "text-slate-500"
+                      )
+                    : cn(
+                        "rounded-lg px-3 py-1.5 text-xs",
+                        filter === f ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                      )
                 )}
               >
                 {f}
                 {f === "unread" && unread > 0 && (
-                  <span className="ml-1.5 rounded-full bg-rose-500 px-1.5 text-[10px] font-bold text-white">{unread > 99 ? "99+" : unread}</span>
+                  <span
+                    className={cn(
+                      "ml-1.5 rounded-full px-1.5 text-[10px] font-bold",
+                      teacher && filter === f ? "bg-white/25 text-white" : "bg-rose-500 text-white"
+                    )}
+                  >
+                    {unread > 99 ? "99+" : unread}
+                  </span>
                 )}
               </button>
             ))}
@@ -210,11 +243,11 @@ export function NotificationsCenter() {
             <Trash2 size={14} /> Clear read
           </button>
         </div>
-      </Card>
+      </CenterSurface>
 
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
-      <Card>
+      <CenterSurface teacher={teacher}>
         {loading ? (
           <div className="flex items-center justify-center gap-2 px-6 py-16 text-sm text-slate-400">
             <Loader2 size={16} className="animate-spin" /> Loading notifications…
@@ -273,7 +306,7 @@ export function NotificationsCenter() {
                       </span>
                     </button>
 
-                    <div className="flex shrink-0 items-center gap-0.5">
+                    <div className="ss-notif-actions flex shrink-0 items-center gap-0.5">
                       {unreadRow ? (
                         <button
                           onClick={() => void markOneRead(n.id)}
@@ -321,7 +354,7 @@ export function NotificationsCenter() {
             </div>
           </>
         )}
-      </Card>
+      </CenterSurface>
     </div>
   );
 }

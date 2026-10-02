@@ -129,10 +129,27 @@ export function InstallBanner() {
   const [showIOSHelp, setShowIOSHelp] = useState(false);
   const pathname = usePathname();
 
-  // Hidden on print pages, and on a school's Parents App entry (/s/<slug>),
-  // which has its own install step and its own per-school manifest — a generic
-  // "Install Amar E School" banner there would offer the wrong app.
-  if (installed || dismissed || pathname?.startsWith("/print") || pathname?.startsWith("/s/")) return null;
+  // Hidden on print pages, on a school's Parents App entry (/s/<slug>) — which
+  // has its own install step and its own per-school manifest, so a generic
+  // "Install Amar E School" banner would offer the wrong app — and throughout
+  // the Teacher App.
+  //
+  // The Teacher App now has its own chrome (a top app bar and a bottom tab bar)
+  // and the banner floats over both: it covered the last row of every page and,
+  // on narrower laptops, sat across the tab bar. Inside an app there is no place
+  // for a floating install promo, so the Teacher App does not show one at all.
+  //
+  // This is presentation only. The hooks above have already run, so the service
+  // worker is still registered and the manifest and installability are exactly
+  // as they were — a teacher can still install from the browser's own menu.
+  if (
+    installed ||
+    dismissed ||
+    pathname?.startsWith("/print") ||
+    pathname?.startsWith("/s/") ||
+    pathname?.startsWith("/teacher")
+  )
+    return null;
 
   const installable = canPrompt || isIOS;
 

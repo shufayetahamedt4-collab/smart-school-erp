@@ -37,7 +37,22 @@ interface ConvDetail {
   messages: ThreadMessage[];
 }
 
-export function ChatPanel() {
+/**
+ * The conversation surface. The portal's bordered `Card` by default; the Teacher
+ * App's inset panel for the app. A wrapper only — the children are identical
+ * either way. A separate element rather than a `className` on `Card`, because
+ * `.card` is an unlayered global rule and would out-rank utility overrides.
+ */
+function Panel({ teacher, className, children }: { teacher: boolean; className?: string; children: React.ReactNode }) {
+  if (teacher) return <div className={cn("rounded-2xl bg-white ring-1 ring-slate-900/5", className)}>{children}</div>;
+  return <Card className={className}>{children}</Card>;
+}
+
+export function ChatPanel({ appearance = "default" }: { appearance?: "default" | "teacher" } = {}) {
+  // Presentation only: the Teacher App puts the same chat on the inset panel. No
+  // route, send, unread or conversation behaviour changes, and the default branch
+  // is what every other portal still gets, verbatim.
+  const teacher = appearance === "teacher";
   const { me } = useMe();
   const [convs, setConvs] = useState<ConvSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -129,12 +144,17 @@ export function ChatPanel() {
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       {/* conversation list */}
-      <Card className={cn("h-fit overflow-hidden lg:col-span-1", activeId && "hidden lg:block")}>
+      <Panel teacher={teacher} className={cn("h-fit overflow-hidden lg:col-span-1", activeId && "hidden lg:block")}>
         <div className="border-b border-slate-100 px-5 py-4">
           <h3 className="text-sm font-bold text-slate-800">Conversations</h3>
           <div className="relative mt-2">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input className="input !py-1.5 !pl-8 text-xs" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input
+              className={cn("input !py-1.5 !pl-8 text-xs", teacher && "min-h-11")}
+              placeholder="Search…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
           </div>
         </div>
         {error && <div className="p-3"><ErrorNote message={error} /></div>}
@@ -173,14 +193,20 @@ export function ChatPanel() {
             ))}
           </div>
         )}
-      </Card>
+      </Panel>
 
       {/* thread */}
-      <Card className="flex min-h-[480px] flex-col overflow-hidden lg:col-span-2">
+      <Panel teacher={teacher} className="flex min-h-[480px] flex-col overflow-hidden lg:col-span-2">
         {activeId && detail ? (
           <>
             <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
-              <button onClick={() => { setActiveId(null); setDetail(null); }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 lg:hidden">
+              <button
+                onClick={() => { setActiveId(null); setDetail(null); }}
+                className={cn(
+                  "rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 lg:hidden",
+                  teacher && "flex min-h-11 min-w-11 items-center justify-center"
+                )}
+              >
                 <ArrowLeft size={18} />
               </button>
               <div>
@@ -207,13 +233,13 @@ export function ChatPanel() {
             <div className="border-t border-slate-100 p-4">
               <div className="flex gap-2">
                 <input
-                  className="input"
+                  className={cn("input", teacher && "min-h-11")}
                   placeholder="Type a message…"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())}
                 />
-                <button onClick={send} disabled={sending || !draft.trim()} className="btn btn-primary">
+                <button onClick={send} disabled={sending || !draft.trim()} className={cn("btn btn-primary", teacher && "min-h-11")}>
                   {sending ? <Spinner className="h-4 w-4 border-white/40 border-t-white" /> : <Send size={15} />}
                 </button>
               </div>
@@ -232,7 +258,7 @@ export function ChatPanel() {
             </p>
           </div>
         )}
-      </Card>
+      </Panel>
     </div>
   );
 }

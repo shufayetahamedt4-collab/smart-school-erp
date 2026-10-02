@@ -1,13 +1,18 @@
 "use client";
 
-import { PageHeader } from "@/components/ui";
 import { ChatPanel } from "@/components/ChatPanel";
 
+/**
+ * Teacher → Messages.
+ *
+ * The dark app bar already names this screen, so the old `PageHeader` is gone.
+ * The panel keeps every conversation route, send and unread behaviour exactly as
+ * it was and only takes its Teacher surface presentation.
+ */
 export default function TeacherMessagesPage() {
   return (
-    <div>
-      <PageHeader title="Messages" subtitle="Live chat with guardians (PRD §7.1 two-way chat)" />
-      <ChatPanel />
+    <div className="ss-messagespage">
+      <ChatPanel appearance="teacher" />
     </div>
   );
 }

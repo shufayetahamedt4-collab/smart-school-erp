@@ -18,7 +18,24 @@ import type { NotificationRow } from "@/components/NotificationsCenter";
  * focus (a tab left open all day must still be right when the user looks back),
  * while the list itself is re-read only when the panel opens.
  */
-export function NotificationBell({ viewAllHref = "/dashboard/notifications" }: { viewAllHref?: string }) {
+export function NotificationBell({
+  viewAllHref = "/dashboard/notifications",
+  appearance = "light",
+}: {
+  viewAllHref?: string;
+  /**
+   * Visual variant of the TRIGGER only, and opt-in.
+   *
+   * The default, "light", is exactly what this component has always rendered, so
+   * every existing caller — the School Admin and Super Admin shells — is byte-for-
+   * byte unchanged. "dark" exists solely for the Teacher App's dark navy app bar,
+   * where the light trigger would sit at slate-500 on a near-black surface.
+   *
+   * The panel is deliberately NOT variant-ed: it is a menu that floats over the
+   * page rather than part of the bar, so it stays light and readable in both.
+   */
+  appearance?: "light" | "dark";
+}) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [unread, setUnread] = useState(0);
@@ -107,7 +124,12 @@ export function NotificationBell({ viewAllHref = "/dashboard/notifications" }: {
           setOpen(nextOpen);
           if (nextOpen) void load();
         }}
-        className="relative rounded-lg p-2 text-slate-500 transition hover:bg-slate-100"
+        className={cn(
+          "relative rounded-lg p-2 transition",
+          appearance === "dark"
+            ? "text-slate-300 hover:bg-white/10 hover:text-white"
+            : "text-slate-500 hover:bg-slate-100",
+        )}
         title="Notifications"
         aria-label="Notifications"
         aria-haspopup="menu"

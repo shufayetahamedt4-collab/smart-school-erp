@@ -332,3 +332,55 @@ export const PROFILE_HREF: Record<string, string> = {
 export function isSchoolPanelRole(role: string | null | undefined): boolean {
   return !!role && SCHOOL_PANEL_ROLES.includes(role);
 }
+
+/* ------------------------------------------------------------------ mobile */
+
+/**
+ * Mobile bottom-nav tabs, per role.
+ *
+ * Every href here ALREADY exists in `NAVS[role]` — this registry adds no route,
+ * renames no route and removes no route. Only the tab's short label is new. The
+ * icon is not repeated: it is read from the role's own nav item, so the bottom
+ * bar and the sidebar can never disagree about what a destination looks like.
+ */
+export const MOBILE_TAB_HREFS: Record<string, { href: string; label: string }[]> = {
+  TEACHER: [
+    { href: "/teacher", label: "Home" },
+    { href: "/teacher/classes", label: "Academics" },
+    { href: "/teacher/homework", label: "Classwork" },
+    { href: "/teacher/messages", label: "Messages" },
+  ],
+};
+
+/**
+ * The bottom bar's tabs, resolved against the role's own nav array: same href
+ * object, same icon, only the label swapped for its short form. An href that is
+ * NOT present in the role's nav is dropped rather than rendered, so the bar can
+ * never surface a page the role is not allowed to reach.
+ *
+ * Returns an empty array for any role with no mobile tabs configured, which is
+ * every role except TEACHER — so nothing else in the app is affected.
+ */
+export function mobileTabsFor(role: string): NavItem[] {
+  const items = NAVS[role];
+  const tabs = MOBILE_TAB_HREFS[role];
+  if (!items || !tabs) return [];
+  return tabs
+    .map((tab) => {
+      const item = items.find((n) => n.href === tab.href);
+      return item ? { ...item, label: tab.label } : null;
+    })
+    .filter((x): x is NavItem => x !== null);
+}
+
+/**
+ * Everything the role can reach that is NOT already a tab — the contents of the
+ * "More" sheet. Derived from the same array, so a nav item added later shows up
+ * in More with no second edit and can never be orphaned between the two.
+ */
+export function moreItemsFor(role: string): NavItem[] {
+  const items = NAVS[role];
+  if (!items) return [];
+  const tabHrefs = new Set((MOBILE_TAB_HREFS[role] || []).map((t) => t.href));
+  return items.filter((n) => !tabHrefs.has(n.href));
+}

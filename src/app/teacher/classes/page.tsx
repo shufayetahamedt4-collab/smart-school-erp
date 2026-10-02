@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Play, Square, Radio, Clock, Check, X, CalendarClock } from "lucide-react";
 import { api } from "@/lib/client";
-import { Card, CardHeader, Badge, Select, Textarea, Field, PageHeader, LoadingScreen, ErrorNote, EmptyState, Modal } from "@/components/ui";
+import { Badge, Select, Textarea, Field, LoadingScreen, ErrorNote, Modal } from "@/components/ui";
+import { Surface, ListCard, ListRow, EmptyState } from "@/components/app-ui";
 
 /**
  * A teacher's day, as a list. The timetable the office already built is the
@@ -66,6 +67,19 @@ interface SectionRow { id: string; classId: string; name: string }
 interface SubjectRow { id: string; name: string }
 
 const POLL_MS = 25_000;
+
+/** A panel title in the app's section voice, with the old header's subtitle. */
+function PanelHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) {
+  return (
+    <div className="mb-2 flex items-end justify-between gap-3 px-1">
+      <div className="min-w-0">
+        <h2 className="text-[13px] font-extrabold uppercase tracking-[0.05em] text-slate-500">{title}</h2>
+        {subtitle ? <p className="mt-0.5 text-[11px] leading-snug text-slate-400">{subtitle}</p> : null}
+      </div>
+      {action}
+    </div>
+  );
+}
 
 export default function MyClassesPage() {
   const [data, setData] = useState<Console | null>(null);
@@ -214,18 +228,19 @@ export default function MyClassesPage() {
   if (loading) return <LoadingScreen />;
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="My Classes"
-        subtitle={`Your classes for ${todayName}. Tap Yes when you walk in and Finish class when it is over.`}
-      />
+    <div className="ss-classespage space-y-5">
+      <div className="px-1">
+        <p className="text-[12px] leading-snug text-slate-500">
+          Your classes for {todayName}. Tap Yes when you walk in and Finish class when it is over.
+        </p>
+      </div>
 
       {error && <ErrorNote message={error} />}
 
       {active && (
-        <Card className="border-emerald-200 bg-emerald-50/60">
+        <Surface className="ss-classes-live border border-emerald-200 bg-emerald-50/60 ring-0">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <Badge tone="green">
                   <Radio className="mr-1 inline h-3 w-3" /> In class now
@@ -241,18 +256,18 @@ export default function MyClassesPage() {
                 <Clock className="h-3.5 w-3.5" /> Started {active.startedClock} · running {active.durationMin} min
               </p>
             </div>
-            <button className="btn btn-danger" onClick={() => setConfirmEnd(true)} disabled={!!busyId}>
+            <button className="btn btn-danger min-h-11" onClick={() => setConfirmEnd(true)} disabled={!!busyId}>
               <Square className="mr-1.5 h-4 w-4" /> Finish class
             </button>
           </div>
           <p className="mt-4 text-xs text-slate-500">
             If it is never finished, the office board closes it automatically after {Math.round((data?.liveMaxMinutes || 240) / 60)} hours.
           </p>
-        </Card>
+        </Surface>
       )}
 
-      <Card>
-        <CardHeader
+      <div>
+        <PanelHeader
           title="Today's classes"
           subtitle="From the school routine — tap Yes when you enter, Finish class when the lesson ends."
         />
@@ -260,130 +275,107 @@ export default function MyClassesPage() {
           <EmptyState
             icon={CalendarClock}
             title="No classes on your timetable today"
-            description="If you are covering another teacher's class, use the panel below."
+            hint="If you are covering another teacher's class, use the panel below."
           />
         ) : (
-          <div className="divide-y divide-slate-100">
+          <ListCard className="ss-classes-roster">
             {roster.map((r) => {
               const busy = busyId === r.routineId;
               return (
-                <div
+                <li
                   key={r.routineId}
-                  className={`flex flex-wrap items-center justify-between gap-3 px-4 py-3 ${
+                  className={`ss-classes-row px-3.5 py-3 ${
                     r.state === "inClass" ? "bg-emerald-50/50" : r.isNow && r.state === "upcoming" ? "bg-amber-50/40" : ""
                   }`}
                 >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate font-semibold text-slate-900">{r.subjectName || r.className}</span>
-                      {r.isNow && r.state === "upcoming" && <Badge tone="amber">now</Badge>}
-                      {r.state === "inClass" && (
-                        <Badge tone="green">
-                          <Radio className="mr-1 inline h-3 w-3" /> In class
-                        </Badge>
-                      )}
-                      {r.state === "done" && <Badge tone="slate">Done</Badge>}
-                      {r.state === "declined" && <Badge tone="amber">Not taken</Badge>}
-                    </div>
-                    <p className="truncate text-sm text-slate-600">
-                      {r.className}
-                      {r.sectionName ? ` · Section ${r.sectionName}` : ""}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {r.periodLabel}
-                      {r.state === "done" && r.durationMin ? ` · ran ${r.durationMin} min` : ""}
-                    </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="min-w-0 truncate text-[14px] font-bold text-slate-900">{r.subjectName || r.className}</span>
+                    {r.isNow && r.state === "upcoming" && <Badge tone="amber">now</Badge>}
+                    {r.state === "inClass" && (
+                      <Badge tone="green">
+                        <Radio className="mr-1 inline h-3 w-3" /> In class
+                      </Badge>
+                    )}
+                    {r.state === "done" && <Badge tone="slate">Done</Badge>}
+                    {r.state === "declined" && <Badge tone="amber">Not taken</Badge>}
                   </div>
+                  <p className="mt-0.5 truncate text-[12px] text-slate-500">
+                    {r.className}
+                    {r.sectionName ? ` · Section ${r.sectionName}` : ""} · {r.periodLabel}
+                    {r.state === "done" && r.durationMin ? ` · ran ${r.durationMin} min` : ""}
+                  </p>
 
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
                     {r.state === "upcoming" && (
                       <>
-                        <button className="btn btn-primary btn-sm" onClick={() => enter(r)} disabled={!!busyId || !!active}>
+                        <button className="btn btn-primary btn-sm min-h-11" onClick={() => enter(r)} disabled={!!busyId || !!active}>
                           <Check className="mr-1 h-3.5 w-3.5" /> {busy ? "Starting…" : "Yes"}
                         </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => decline(r)} disabled={!!busyId}>
+                        <button className="btn btn-secondary btn-sm min-h-11" onClick={() => decline(r)} disabled={!!busyId}>
                           <X className="mr-1 h-3.5 w-3.5" /> No
                         </button>
                       </>
                     )}
                     {r.state === "inClass" && (
-                      <button className="btn btn-danger btn-sm" onClick={() => setConfirmEnd(true)} disabled={!!busyId}>
+                      <button className="btn btn-danger btn-sm min-h-11" onClick={() => setConfirmEnd(true)} disabled={!!busyId}>
                         <Square className="mr-1 h-3.5 w-3.5" /> Finish class
                       </button>
                     )}
                     {r.state === "declined" && (
                       <>
                         <span className="text-xs text-slate-400">Not taken</span>
-                        <button className="btn btn-secondary btn-sm" onClick={() => enter(r)} disabled={!!busyId || !!active}>
+                        <button className="btn btn-secondary btn-sm min-h-11" onClick={() => enter(r)} disabled={!!busyId || !!active}>
                           <Check className="mr-1 h-3.5 w-3.5" /> {busy ? "Starting…" : "I am teaching it"}
                         </button>
                       </>
                     )}
                     {r.state === "done" && <span className="text-xs text-slate-400">{r.endedClock ? `ended ${r.endedClock}` : ""}</span>}
                   </div>
-                </div>
+                </li>
               );
             })}
-          </div>
+          </ListCard>
         )}
-      </Card>
+      </div>
 
       {otherSessions.length > 0 && (
-        <Card>
-          <CardHeader title="Other classes today" subtitle="Classes you started that are not on your timetable." />
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th className="th">Class</th>
-                  <th className="th">Subject</th>
-                  <th className="th">Start</th>
-                  <th className="th">End</th>
-                  <th className="th">Duration</th>
-                  <th className="th">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {otherSessions.map((s) => (
-                  <tr key={s.id} className="tr-hover">
-                    <td className="td">
-                      {s.className}
-                      {s.sectionName ? ` · ${s.sectionName}` : ""}
-                    </td>
-                    <td className="td">{s.subjectName || "—"}</td>
-                    <td className="td">{s.startedClock || "—"}</td>
-                    <td className="td">{s.status === "OPEN" ? "—" : s.endedClock || "—"}</td>
-                    <td className="td">{s.durationMin} min</td>
-                    <td className="td">
-                      {s.status === "OPEN" ? (
-                        <Badge tone="green">In class</Badge>
-                      ) : s.autoEnded ? (
-                        <Badge tone="amber">Auto-closed</Badge>
-                      ) : (
-                        <Badge tone="slate">Ended</Badge>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <div>
+          <PanelHeader title="Other classes today" subtitle="Classes you started that are not on your timetable." />
+          <ListCard className="ss-classes-other">
+            {otherSessions.map((s) => (
+              <ListRow
+                key={s.id}
+                icon={Clock}
+                tone="slate"
+                title={`${s.className}${s.sectionName ? ` · ${s.sectionName}` : ""}`}
+                subtitle={`${s.subjectName || "—"} · ${s.startedClock || "—"}–${s.status === "OPEN" ? "—" : s.endedClock || "—"} · ${s.durationMin} min`}
+                trailing={
+                  s.status === "OPEN" ? (
+                    <Badge tone="green">In class</Badge>
+                  ) : s.autoEnded ? (
+                    <Badge tone="amber">Auto-closed</Badge>
+                  ) : (
+                    <Badge tone="slate">Ended</Badge>
+                  )
+                }
+              />
+            ))}
+          </ListCard>
+        </div>
       )}
 
-      <Card>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-800">Covering another class?</h3>
-            <p className="text-xs text-slate-500">Start a class that is not on your timetable — a relief period, or a class taught elsewhere.</p>
-          </div>
-          <button className="btn btn-secondary btn-sm" onClick={() => setCoverOpen((v) => !v)}>
-            {coverOpen ? "Hide" : "Show"}
-          </button>
-        </div>
-
+      <div>
+        <PanelHeader
+          title="Covering another class?"
+          subtitle="Start a class that is not on your timetable — a relief period, or a class taught elsewhere."
+          action={
+            <button className="btn btn-secondary btn-sm min-h-11 shrink-0" onClick={() => setCoverOpen((v) => !v)}>
+              {coverOpen ? "Hide" : "Show"}
+            </button>
+          }
+        />
         {coverOpen && (
-          <div className="mt-4">
+          <Surface className="ss-classes-cover">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Field label="Class">
                 <Select
@@ -435,14 +427,14 @@ export default function MyClassesPage() {
               />
             </Field>
             <div className="mt-4 flex items-center gap-3">
-              <button className="btn btn-primary" onClick={startCover} disabled={!pick.classId || !!busyId}>
+              <button className="btn btn-primary min-h-11" onClick={startCover} disabled={!pick.classId || !!busyId}>
                 <Play className="mr-1.5 h-4 w-4" /> {busyId === "cover" ? "Starting…" : "Start class"}
               </button>
               {!pick.classId && <span className="text-xs text-slate-400">Choose a class to begin.</span>}
             </div>
-          </div>
+          </Surface>
         )}
-      </Card>
+      </div>
 
       <Modal open={confirmEnd} onClose={() => setConfirmEnd(false)} title="Finish this class?">
         <p className="text-sm text-slate-600">
@@ -450,10 +442,10 @@ export default function MyClassesPage() {
           The office board and parents will show the class as finished.
         </p>
         <div className="mt-5 flex justify-end gap-2">
-          <button className="btn btn-secondary" onClick={() => setConfirmEnd(false)} disabled={!!busyId}>
+          <button className="btn btn-secondary min-h-11" onClick={() => setConfirmEnd(false)} disabled={!!busyId}>
             Cancel
           </button>
-          <button className="btn btn-danger" onClick={finish} disabled={!!busyId}>
+          <button className="btn btn-danger min-h-11" onClick={finish} disabled={!!busyId}>
             {busyId === active?.id ? "Finishing…" : "Finish class"}
           </button>
         </div>
