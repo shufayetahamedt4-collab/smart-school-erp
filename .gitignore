@@ -40,6 +40,9 @@ npm-debug.log*
 
 # freebuff thread-local artifacts
 .freebuff/
+
+# local audit/report artifacts (not product source)
+.final/
 dev-server.log
 dev-server.pid
 dev-server-restart.log
