@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Timer, Award, ListChecks, Info } from "lucide-react";
+import { Award, CheckCircle2, Info, ListChecks } from "lucide-react";
 import { api } from "@/lib/client";
-import { Card, Badge, PageHeader, LoadingScreen, EmptyState, ErrorNote } from "@/components/ui";
+import { Badge, ErrorNote, LoadingScreen } from "@/components/ui";
+import { EmptyState, ListCard, ListRow, SectionHeader } from "@/components/app-ui";
+import { MobileSheet } from "@/components/MobileSheet";
 
 /**
  * Parents App — quizzes.
@@ -12,6 +14,10 @@ import { Card, Badge, PageHeader, LoadingScreen, EmptyState, ErrorNote } from "@
  * opened here on the guardian's device. Everything is scoped server-side to
  * this guardian's own child, and grading happens on the server — the answer key
  * is never sent to the browser.
+ *
+ * Presentation only: the same reads and writes (available list, attempt GET/POST,
+ * retake prefill, review) — the take-quiz dialog is now the app's bottom sheet,
+ * matching the Teacher App.
  */
 
 interface QuizCard {
@@ -42,12 +48,7 @@ export default function ParentQuizzesPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Quizzes"
-        subtitle="Online MCQ tests your child takes on this device — instant auto-graded results"
-      />
-
-      <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs text-slate-600">
+      <div className="mb-3 flex items-start gap-2.5 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-[12px] text-slate-600">
         <Info size={15} className="mt-0.5 shrink-0 text-sky-600" />
         <p>
           Hand the device to your child for the quiz itself. Answers are graded on the school&apos;s server and the
@@ -56,67 +57,61 @@ export default function ParentQuizzesPage() {
       </div>
 
       {error && (
-        <div className="mb-4">
+        <div className="mb-3">
           <ErrorNote message={error} />
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {pending.map((q) => (
-          <Card key={q.id} className="flex flex-col p-5">
-            <div className="flex items-start justify-between">
-              <Badge tone="emerald">{q.subject || "General"}</Badge>
-              {q.durationMin ? (
-                <span className="flex items-center gap-1 text-[11px] font-bold text-slate-400">
-                  <Timer size={12} /> {q.durationMin} min
-                </span>
-              ) : null}
-            </div>
-            <h3 className="mt-2 font-extrabold text-slate-900">{q.title}</h3>
-            <p className="mt-1 flex-1 text-xs text-slate-500">{q.description || "Answer all questions and submit."}</p>
-            <div className="mt-2 text-[11px] font-bold text-slate-400">{q.questionCount} questions</div>
-            <button className="btn btn-primary btn-sm mt-3" onClick={() => setActive(q)}>
-              Start quiz
-            </button>
-          </Card>
-        ))}
+      {quizzes && !quizzes.length ? (
+        <EmptyState icon={ListChecks} title="No quizzes right now" hint="Quizzes published by your child's teachers appear here." />
+      ) : null}
 
-        {done.map((q) => {
-          const pct =
-            q.attempt && Number(q.attempt.totalMarks)
-              ? Math.round((Number(q.attempt.score) / Number(q.attempt.totalMarks)) * 100)
-              : 0;
-          return (
-            <Card key={q.id} className="flex flex-col p-5 opacity-90">
-              <div className="flex items-start justify-between">
-                <Badge tone="gray">{q.subject || "General"}</Badge>
-                <Badge tone={pct >= 60 ? "green" : pct >= 40 ? "amber" : "red"}>
-                  <Award size={12} /> {pct}%
-                </Badge>
-              </div>
-              <h3 className="mt-2 font-extrabold text-slate-900">{q.title}</h3>
-              <p className="mt-1 flex-1 text-xs text-slate-400">
-                Completed — {q.attempt?.score}/{q.attempt?.totalMarks} marks
-              </p>
-              {q.attempt && (
-                <button className="btn btn-secondary btn-sm mt-3" onClick={() => setActive(q)}>
-                  Review answers
-                </button>
-              )}
-            </Card>
-          );
-        })}
+      {pending.length > 0 && (
+        <>
+          <SectionHeader title={`Available · ${pending.length}`} className="ss-flush-top" />
+          <ListCard>
+            {pending.map((q) => (
+              <ListRow
+                key={q.id}
+                icon={ListChecks}
+                tone="emerald"
+                title={q.title}
+                subtitle={`${q.subject || "General"} · ${q.questionCount} questions${q.durationMin ? ` · ${q.durationMin} min` : ""}`}
+                trailing={
+                  <button className="btn btn-primary btn-sm min-h-11 shrink-0" onClick={() => setActive(q)}>
+                    Start quiz
+                  </button>
+                }
+              />
+            ))}
+          </ListCard>
+        </>
+      )}
 
-        {quizzes && !quizzes.length && (
-          <Card className="md:col-span-2 xl:col-span-3">
-            <EmptyState
-              icon={ListChecks}
-              title="No quizzes right now"
-              description="Quizzes published by your child's teachers appear here."
-            />
-          </Card>
-        )}
-      </div>
+      {done.length > 0 && (
+        <>
+          <SectionHeader title={`Completed · ${done.length}`} />
+          <ListCard>
+            {done.map((q) => {
+              const pct =
+                q.attempt && Number(q.attempt.totalMarks)
+                  ? Math.round((Number(q.attempt.score) / Number(q.attempt.totalMarks)) * 100)
+                  : 0;
+              return (
+                <ListRow
+                  key={q.id}
+                  onClick={() => setActive(q)}
+                  icon={Award}
+                  tone={pct >= 60 ? "emerald" : pct >= 40 ? "amber" : "rose"}
+                  title={q.title}
+                  subtitle={`${q.subject || "General"} · ${q.attempt?.score}/${q.attempt?.totalMarks} marks`}
+                  trailing={<Badge tone={pct >= 60 ? "green" : pct >= 40 ? "amber" : "red"}>{pct}%</Badge>}
+                />
+              );
+            })}
+          </ListCard>
+        </>
+      )}
 
       {active && (
         <TakeQuiz
@@ -174,122 +169,100 @@ function TakeQuiz({ quiz, onClose }: { quiz: QuizCard; onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm">
-      <div className="mx-auto max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-black text-slate-900">{quiz.title}</h2>
-            <p className="text-xs text-slate-400">
-              {quiz.subject || "General"} · {quiz.questionCount} questions
-            </p>
-          </div>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>
-            ✕
-          </button>
+    <MobileSheet open onClose={onClose} title={quiz.title}>
+      <p className="-mt-2 mb-3 text-[12px] text-slate-400">
+        {quiz.subject || "General"} · {quiz.questionCount} questions
+      </p>
+
+      {error && (
+        <div className="mb-3">
+          <ErrorNote message={error} />
         </div>
+      )}
 
-        {error && (
-          <div className="mt-3">
-            <ErrorNote message={error} />
-          </div>
-        )}
-
-        {result ? (
-          <div className="mt-4">
-            <div className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 p-5 text-white">
-              <div className="text-xs font-bold uppercase tracking-widest text-emerald-100">
-                {result.retake ? "Previous attempt" : "Quiz submitted"}
-              </div>
-              <div className="mt-1 text-3xl font-black">
-                {result.pct !== null && result.pct !== undefined ? `${result.pct}%` : ""}
-                {result.totalMarks ? ` ${result.score}/${result.totalMarks}` : ""}
-              </div>
-              {result.retake && <div className="mt-1 text-xs text-emerald-100">Submit again to record a new score.</div>}
+      {result ? (
+        <div>
+          <div className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 p-5 text-white">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-100">
+              {result.retake ? "Previous attempt" : "Quiz submitted"}
             </div>
-            {result.review && (
-              <div className="mt-4 space-y-3">
-                {result.review.map((r: any, i: number) => (
-                  <div
-                    key={r.questionId}
-                    className={`rounded-xl border p-3 ${
-                      r.correct ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"
+            <div className="mt-1 text-3xl font-black">
+              {result.pct !== null && result.pct !== undefined ? `${result.pct}%` : ""}
+              {result.totalMarks ? ` ${result.score}/${result.totalMarks}` : ""}
+            </div>
+            {result.retake && <div className="mt-1 text-xs text-emerald-100">Submit again to record a new score.</div>}
+          </div>
+          {result.review && (
+            <div className="mt-4 space-y-3">
+              {result.review.map((r: any, i: number) => (
+                <div key={r.questionId} className={`rounded-xl border p-3 ${r.correct ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
+                  <div className="text-[13px] font-bold text-slate-800">
+                    Q{i + 1}. {r.text}
+                  </div>
+                  <div className="mt-1 text-[12px] text-slate-500">
+                    Answer: {r.given !== null && r.given !== undefined ? r.options[r.given] : "—"}
+                    {!r.correct && (
+                      <>
+                        {" "}
+                        · Correct: <b>{r.options[r.correctIndex]}</b>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 flex justify-end gap-2">
+            <button className="btn btn-secondary min-h-11" onClick={onClose}>
+              Close
+            </button>
+            {result.retake && (
+              <button className="btn btn-primary min-h-11" onClick={() => setResult(null)}>
+                Attempt again
+              </button>
+            )}
+          </div>
+        </div>
+      ) : data ? (
+        <div className="space-y-4">
+          {data.questions.map((q: any, i: number) => (
+            <div key={q.id} className="rounded-xl border border-slate-200 p-4">
+              <div className="text-[13px] font-bold text-slate-800">
+                Q{i + 1}. {q.text} <span className="text-[10px] font-bold text-slate-400">({q.marks} mk)</span>
+              </div>
+              <div className="mt-2 space-y-1.5">
+                {q.options.map((opt: string, oi: number) => (
+                  <label
+                    key={oi}
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-[13px] transition ${
+                      answers[q.id] === oi ? "border-sky-500 bg-sky-50 font-bold text-sky-700" : "border-slate-200 hover:bg-slate-50"
                     }`}
                   >
-                    <div className="text-sm font-bold text-slate-800">
-                      Q{i + 1}. {r.text}
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      Answer: {r.given !== null && r.given !== undefined ? r.options[r.given] : "—"}
-                      {!r.correct && (
-                        <>
-                          {" "}
-                          · Correct: <b>{r.options[r.correctIndex]}</b>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                    <input type="radio" name={`q-${q.id}`} checked={answers[q.id] === oi} onChange={() => setAnswers({ ...answers, [q.id]: oi })} />
+                    {opt}
+                  </label>
                 ))}
               </div>
-            )}
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="btn btn-secondary" onClick={onClose}>
-                Close
-              </button>
-              {result.retake && (
-                <button className="btn btn-primary" onClick={() => setResult(null)}>
-                  Attempt again
-                </button>
+            </div>
+          ))}
+          <div className="flex justify-end gap-2 pb-2">
+            <button className="btn btn-secondary min-h-11" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="btn btn-primary min-h-11" onClick={submit} disabled={busy}>
+              {busy ? (
+                "Submitting…"
+              ) : (
+                <>
+                  <CheckCircle2 size={15} /> Submit quiz
+                </>
               )}
-            </div>
+            </button>
           </div>
-        ) : data ? (
-          <div className="mt-4 space-y-4">
-            {data.questions.map((q: any, i: number) => (
-              <div key={q.id} className="rounded-xl border border-slate-200 p-4">
-                <div className="text-sm font-bold text-slate-800">
-                  Q{i + 1}. {q.text} <span className="text-[10px] font-bold text-slate-400">({q.marks} mk)</span>
-                </div>
-                <div className="mt-2 space-y-1.5">
-                  {q.options.map((opt: string, oi: number) => (
-                    <label
-                      key={oi}
-                      className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
-                        answers[q.id] === oi
-                          ? "border-indigo-500 bg-indigo-50 font-bold text-indigo-700"
-                          : "border-slate-200 hover:bg-slate-50"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name={`q-${q.id}`}
-                        checked={answers[q.id] === oi}
-                        onChange={() => setAnswers({ ...answers, [q.id]: oi })}
-                      />
-                      {opt}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ))}
-            <div className="flex justify-end gap-2 pb-2">
-              <button className="btn btn-secondary" onClick={onClose}>
-                Cancel
-              </button>
-              <button className="btn btn-primary" onClick={submit} disabled={busy}>
-                {busy ? (
-                  "Submitting…"
-                ) : (
-                  <>
-                    <CheckCircle2 size={15} /> Submit quiz
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <LoadingScreen label="Loading quiz…" />
-        )}
-      </div>
-    </div>
+        </div>
+      ) : (
+        <LoadingScreen label="Loading quiz…" />
+      )}
+    </MobileSheet>
   );
 }

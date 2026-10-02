@@ -48,11 +48,12 @@ function Panel({ teacher, className, children }: { teacher: boolean; className?:
   return <Card className={className}>{children}</Card>;
 }
 
-export function ChatPanel({ appearance = "default" }: { appearance?: "default" | "teacher" } = {}) {
+export function ChatPanel({ appearance = "default" }: { appearance?: "default" | "teacher" | "guardian" } = {}) {
   // Presentation only: the Teacher App puts the same chat on the inset panel. No
   // route, send, unread or conversation behaviour changes, and the default branch
   // is what every other portal still gets, verbatim.
-  const teacher = appearance === "teacher";
+  // Both phone-first apps (Teacher, Parents) share the app-surface presentation.
+  const teacher = appearance === "teacher" || appearance === "guardian";
   const { me } = useMe();
   const [convs, setConvs] = useState<ConvSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);

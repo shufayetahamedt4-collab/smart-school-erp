@@ -48,9 +48,11 @@ export function AppShell({ role, children }: { role: string; children: React.Rea
   const effRole = me?.user?.role || role;
   const app = sectorForRole(effRole);
   const sectorKey = app?.key;
-  // The native-app chrome is the Teacher App's: the Parents App keeps the
-  // original bar, footer and background until its own pass.
-  const isTeacher = effRole === "TEACHER";
+  // Both phone-first apps (Teacher App, Parents App) share the one native-app
+  // chrome: dark bar, back affordance below the root, no marketing footer, and
+  // the inset content background. The admin/super sectors never render this
+  // shell — they keep the shared `Shell` untouched.
+  const isApp = effRole === "TEACHER" || effRole === "GUARDIAN";
 
   const tabs = useMemo(() => appTabsFor(effRole), [effRole]);
   const more = useMemo(() => appMoreItemsFor(effRole), [effRole]);
@@ -67,27 +69,27 @@ export function AppShell({ role, children }: { role: string; children: React.Rea
   const moreActive = more.some((n) => n.href === active);
   const activeLabel = [...tabs, ...more].find((n) => n.href === active)?.label;
 
-  // The teacher app bar: the school as the title on the root screen, and the
-  // screen's own name with the school beneath it once you are below the root.
+  // The app bar: the school as the title on the root screen, and the screen's
+  // own name with the school beneath it once you are below the root.
   const rootHref = app?.home || "/";
   const atRoot = pathname === rootHref;
-  const barTitle = isTeacher
+  const barTitle = isApp
     ? atRoot
       ? me?.school?.name || app?.app || "Amar E School"
       : activeLabel || app?.app || "Teacher App"
     : activeLabel || me?.school?.name || app?.app || "Amar E School";
-  const barSub = isTeacher
+  const barSub = isApp
     ? atRoot
       ? app?.app || "Teacher App"
       : me?.school?.name || ""
     : me?.school?.name || app?.app || effRole.replace("_", " ");
 
   if (loading) {
-    return <ShellSkeleton sectorKey={sectorKey} dark={isTeacher} />;
+    return <ShellSkeleton sectorKey={sectorKey} dark={isApp} />;
   }
 
   return (
-    <div className={cn("min-h-screen", isTeacher ? "bg-[#F6F7FB]" : "bg-white")} data-sector={sectorKey}>
+    <div className={cn("min-h-screen", isApp ? "bg-[#F6F7FB]" : "bg-white")} data-sector={sectorKey}>
       {/* ------------------------------ desktop icon rail ------------------------------ */}
       <aside
         className={cn(
@@ -140,19 +142,19 @@ export function AppShell({ role, children }: { role: string; children: React.Rea
         className={cn(
           "ss-app-content flex min-h-screen flex-col",
           styles.content,
-          isTeacher && styles.contentApp,
+          isApp && styles.contentApp,
         )}
       >
         <header
           className={cn(
             "no-print sticky top-0 z-30 flex h-14 items-center gap-3 border-b px-3 backdrop-blur md:px-5",
-            // The Teacher App bar is the reference mockup's dark navy chrome;
-            // every other sector keeps the original light bar untouched.
-            isTeacher ? "border-white/10 bg-[#0F172A]" : "border-slate-200 bg-white/85",
+            // The app bar is the reference mockup's dark navy chrome; the
+            // admin/super sectors keep the original light bar untouched.
+            isApp ? "border-white/10 bg-[#0F172A]" : "border-slate-200 bg-white/85",
           )}
         >
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
-            {isTeacher && !atRoot ? (
+            {isApp && !atRoot ? (
               // A native bar carries a back affordance on every screen below the
               // root. The rail (desktop) and the tab bar (phone) already own
               // primary navigation, so this only walks back to the app root.
@@ -172,7 +174,7 @@ export function AppShell({ role, children }: { role: string; children: React.Rea
               </span>
             )}
             <div className="min-w-0">
-              <div className={cn("truncate text-sm font-bold", isTeacher ? "text-white" : "text-slate-800")}>
+              <div className={cn("truncate text-sm font-bold", isApp ? "text-white" : "text-slate-800")}>
                 {barTitle}
               </div>
               <div className="hidden truncate text-[11px] uppercase tracking-widest text-slate-400 sm:block">{barSub}</div>
@@ -183,20 +185,20 @@ export function AppShell({ role, children }: { role: string; children: React.Rea
             <div className="flex items-center gap-2">
               <NotificationBell
                 viewAllHref={NOTIFICATIONS_HREF[effRole] || "/teacher/notifications"}
-                appearance={isTeacher ? "dark" : "light"}
+                appearance={isApp ? "dark" : "light"}
               />
-              <AccountMenu me={me} role={effRole} appearance={isTeacher ? "dark" : "light"} />
+              <AccountMenu me={me} role={effRole} appearance={isApp ? "dark" : "light"} />
             </div>
           )}
         </header>
 
-        <main className={cn("flex-1", isTeacher ? "px-4 py-4 md:px-8 md:py-6" : "px-4 py-6 md:px-8")}>
+        <main className={cn("flex-1", isApp ? "px-4 py-4 md:px-8 md:py-6" : "px-4 py-6 md:px-8")}>
           {children}
         </main>
 
-        {/* The Teacher App has no footer: a marketing strip inside an app is a
+        {/* The apps have no footer: a marketing strip inside an app is a
             website tell, and the phone tab bar already reserves the space. */}
-        {!isTeacher && (
+        {!isApp && (
           <footer className="no-print border-t border-slate-200 px-6 py-4 text-center text-xs text-slate-400">
             {app ? `${app.app} · ` : ""}Amar E School · Multi-Tenant SaaS
           </footer>

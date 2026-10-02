@@ -1,13 +1,18 @@
 "use client";
 
-import { PageHeader } from "@/components/ui";
 import { ChatPanel } from "@/components/ChatPanel";
 
+/**
+ * Guardian → Messages.
+ *
+ * The app bar already names this screen, so the old `PageHeader` is gone. The
+ * panel keeps every conversation route, send and unread behaviour exactly as it
+ * was and only takes the app-surface presentation.
+ */
 export default function ParentMessagesPage() {
   return (
-    <div>
-      <PageHeader title="Messages" subtitle="Live chat with your child's teachers (PRD §7.1 two-way chat)" />
-      <ChatPanel />
+    <div className="ss-messagespage">
+      <ChatPanel appearance="guardian" />
     </div>
   );
 }

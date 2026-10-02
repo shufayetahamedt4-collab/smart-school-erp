@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Wallet, CreditCard, BadgeCheck, Receipt, Smartphone, Landmark, HandCoins, CircleAlert } from "lucide-react";
+import { Wallet, CreditCard, BadgeCheck, Smartphone, Landmark, HandCoins, CircleAlert } from "lucide-react";
 import { api } from "@/lib/client";
-import { Card, CardHeader, Badge, Field, TextInput, Select, Modal, PageHeader, LoadingScreen, EmptyState, ErrorNote, statusTone, prettyStatus } from "@/components/ui";
+import { Badge, ErrorNote, Field, LoadingScreen, Select, TextInput, statusTone, prettyStatus } from "@/components/ui";
+import { EmptyState, ListCard, ListRow, OverviewTile, SectionHeader, Surface } from "@/components/app-ui";
+import { MobileSheet } from "@/components/MobileSheet";
 import { fmtMoney, fmtDate, feeDue, sumMoney } from "@/lib/utils";
 import { usableChannels, channelForMethod, channelDestination, type PaymentChannel } from "@/lib/fee-channels";
 
@@ -18,6 +20,11 @@ import { usableChannels, channelForMethod, channelDestination, type PaymentChann
  *  - That a PARTIAL payment is fine. Part-payment is the norm in Bangladesh:
  *    against a ৳500 fee the guardian may pay ৳200 today and owe ৳300. That is a
  *    first-class button, not a number they have to work out themselves.
+ *
+ * Presentation only: the reads, the payment intent + mock-complete calls, the
+ * amount validation, the child filter and every computed figure are unchanged.
+ * The table becomes hairline-separated rows and the checkout becomes the app's
+ * bottom sheet.
  */
 
 interface FeeRow {
@@ -59,7 +66,9 @@ export default function ParentFeesPage() {
         setPaymentNote(d.settings?.paymentNote || "");
       })
       .finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   // A filter can outlive its child (the rows reload after a payment). Fall back
   // to "All" rather than showing an empty table for a child that has no rows.
@@ -96,8 +105,14 @@ export default function ParentFeesPage() {
     if (!payFor) return;
     const due = feeDue(payFor);
     const amt = Number(amount) || 0;
-    if (amt <= 0) { setError("Enter the amount you are paying."); return; }
-    if (amt > due) { setError(`That is more than the ${fmtMoney(due)} still due on this fee.`); return; }
+    if (amt <= 0) {
+      setError("Enter the amount you are paying.");
+      return;
+    }
+    if (amt > due) {
+      setError(`That is more than the ${fmtMoney(due)} still due on this fee.`);
+      return;
+    }
     setPaying(true);
     setError("");
     try {
@@ -145,38 +160,41 @@ export default function ParentFeesPage() {
 
   return (
     <div>
-      <PageHeader title="Fees" subtitle="Live dues, installments and payment history (PRD §10)" />
-
-      <div className="mb-4 grid grid-cols-2 gap-4">
-        <Card className="p-5">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Total billed</div>
-          <div className="mt-1 text-2xl font-black text-slate-900">{fmtMoney(billed)}</div>
-          {manyChildren && (
-            <div className="mt-1 text-[11px] font-semibold text-slate-400">{childFilter === "ALL" ? `all ${childGroups.length} children` : childLabel}</div>
-          )}
-        </Card>
-        <Card className="p-5">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Outstanding due</div>
-          <div className={`mt-1 text-2xl font-black ${due > 0 ? "text-rose-600" : "text-emerald-600"}`}>{fmtMoney(due)}</div>
-          {manyChildren && (
-            <div className="mt-1 text-[11px] font-semibold text-slate-400">{childFilter === "ALL" ? "across all your children" : childLabel}</div>
-          )}
-        </Card>
+      <SectionHeader title="Summary" className="ss-flush-top" />
+      <div className="ss-tiles grid grid-cols-2 gap-3">
+        <OverviewTile
+          icon={Wallet}
+          tone="indigo"
+          value={fmtMoney(billed)}
+          label="Total billed"
+          sub={manyChildren ? (childFilter === "ALL" ? `all ${childGroups.length} children` : childLabel) : undefined}
+        />
+        <OverviewTile
+          icon={Wallet}
+          tone={due > 0 ? "rose" : "emerald"}
+          value={fmtMoney(due)}
+          label="Outstanding due"
+          sub={manyChildren ? (childFilter === "ALL" ? "across all your children" : childLabel) : undefined}
+        />
       </div>
 
       {receipt && (
-        <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+        <div className="mt-3 flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] font-semibold text-emerald-700">
           <BadgeCheck size={16} /> Payment confirmed — receipt {receipt}. Check notifications for details.
         </div>
       )}
-      {error && <div className="mb-4"><ErrorNote message={error} /></div>}
+      {error && (
+        <div className="mt-3">
+          <ErrorNote message={error} />
+        </div>
+      )}
 
       {channels.length > 0 && (
-        <Card className="mb-4">
-          <CardHeader title="How to pay" subtitle="Your school's own collection accounts (§10.2)" />
-          <div className="space-y-3 p-5">
+        <>
+          <SectionHeader title="How to pay" />
+          <Surface>
             {paymentNote && (
-              <p className="flex items-start gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              <p className="mb-3 flex items-start gap-2 rounded-xl bg-slate-50 px-4 py-3 text-[13px] text-slate-600">
                 <CircleAlert size={15} className="mt-0.5 shrink-0 text-slate-400" /> {paymentNote}
               </p>
             )}
@@ -184,201 +202,166 @@ export default function ParentFeesPage() {
               {channels.map((c) => {
                 const Icon = KIND_ICON[c.kind] || Wallet;
                 return (
-                  <div key={c.id} className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                  <div key={c.id} className="flex items-start gap-3 rounded-xl border border-slate-200 p-3.5">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
                       <Icon size={16} />
                     </span>
                     <div className="min-w-0">
-                      <div className="text-sm font-bold text-slate-800">{c.label}</div>
-                      <div className="mt-0.5 text-xs font-semibold text-slate-600">{channelDestination(c) || "At the school office"}</div>
+                      <div className="text-[13px] font-bold text-slate-800">{c.label}</div>
+                      <div className="mt-0.5 text-[12px] font-semibold text-slate-600">{channelDestination(c) || "At the school office"}</div>
                       {c.instructions && <div className="mt-1 text-[11px] text-slate-400">{c.instructions}</div>}
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-        </Card>
+          </Surface>
+        </>
       )}
 
       {manyChildren && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button
-            className={`btn btn-sm ${childFilter === "ALL" ? "btn-primary" : "btn-secondary"}`}
-            onClick={() => setChildFilter("ALL")}
-          >
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button className={`btn btn-sm min-h-11 ${childFilter === "ALL" ? "btn-primary" : "btn-secondary"}`} onClick={() => setChildFilter("ALL")}>
             All children · {fmtMoney(sumMoney(fees, (f) => feeDue(f)))} due
           </button>
           {childGroups.map((c) => (
             <button
               key={c.id}
-              className={`btn btn-sm ${childFilter === c.id ? "btn-primary" : "btn-secondary"}`}
+              className={`btn btn-sm min-h-11 ${childFilter === c.id ? "btn-primary" : "btn-secondary"}`}
               onClick={() => setChildFilter(c.id)}
             >
-              {c.name}{c.klass ? ` · ${c.klass}` : ""} · {fmtMoney(sumMoney(fees.filter((f) => f.student?.id === c.id), (f) => feeDue(f)))} due
+              {c.name}
+              {c.klass ? ` · ${c.klass}` : ""} · {fmtMoney(sumMoney(fees.filter((f) => f.student?.id === c.id), (f) => feeDue(f)))} due
             </button>
           ))}
         </div>
       )}
 
-      <Card>
-        <CardHeader
-          title="Fee records"
-          subtitle={childFilter === "ALL" ? "Breakdown, installments and receipts (§10.3)" : `${childLabel} — breakdown, installments and receipts (§10.3)`}
-        />
-        {visibleFees.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  {manyChildren && <th className="th">Student</th>}
-                  <th className="th">Fee</th><th className="th">Amount</th><th className="th">Paid</th><th className="th">Due date</th><th className="th">Installments</th><th className="th">Status</th><th className="th text-right">Pay</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleFees.map((f) => {
-                  const rowDue = feeDue(f);
-                  return (
-                    <tr key={f.id} className="tr-hover">
-                      {manyChildren && (
-                        <td className="td">
-                          <div className="font-semibold text-slate-800">{f.student?.name || "—"}</div>
-                          <div className="text-[11px] text-slate-400">{[f.student?.classRoom?.name, f.student?.section?.name].filter(Boolean).join(" / ") || ""}</div>
-                        </td>
-                      )}
-                      <td className="td">
-                        <div className="font-bold text-slate-800">{f.title}</div>
-                        <div className="text-[11px] text-slate-400">{f.feeType}</div>
-                      </td>
-                      <td className="td font-semibold">{fmtMoney(f.amount)}</td>
-                      <td className="td font-semibold text-emerald-600">{fmtMoney(f.paidAmount)}</td>
-                      <td className="td">{f.dueDate ? fmtDate(f.dueDate) : "—"}</td>
-                      <td className="td">
-                        {f.installments?.length ? (
-                          <div className="space-y-0.5">
-                            {f.installments.map((i) => (
-                              <div key={i.id} className="text-[11px] text-slate-500">
-                                #{i.seq}: {fmtMoney(i.amount)} {i.dueDate ? `· ${fmtDate(i.dueDate)}` : ""}
-                              </div>
-                            ))}
-                          </div>
-                        ) : "—"}
-                      </td>
-                      <td className="td">
-                        <Badge tone={statusTone(f.status)}>{prettyStatus(f.status)}</Badge>
-                        {f.payments[0] && (
-                          <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
-                            <Receipt size={10} /> {f.payments[0].receiptNo} · {f.payments[0].method}
-                          </div>
+      <SectionHeader title={childFilter === "ALL" ? "Fee records" : `${childLabel} — fee records`} />
+      {visibleFees.length ? (
+        <ListCard>
+          {visibleFees.map((f) => {
+            const rowDue = feeDue(f);
+            return (
+              <ListRow
+                key={f.id}
+                icon={Wallet}
+                tone={rowDue > 0 ? "rose" : "emerald"}
+                title={f.title}
+                subtitle={
+                  <span>
+                    {manyChildren && f.student ? `${f.student.name} · ` : ""}
+                    {fmtMoney(f.amount)} total · {fmtMoney(f.paidAmount)} paid
+                    {f.dueDate ? ` · due ${fmtDate(f.dueDate)}` : ""}
+                    {f.installments?.length
+                      ? ` · ${f.installments.map((i) => `#${i.seq} ${fmtMoney(i.amount)}${i.dueDate ? ` (${fmtDate(i.dueDate)})` : ""}`).join(", ")}`
+                      : ""}
+                    {f.payments[0] ? ` · receipt ${f.payments[0].receiptNo} (${f.payments[0].method})` : ""}
+                  </span>
+                }
+                trailing={
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <Badge tone={statusTone(f.status)}>{prettyStatus(f.status)}</Badge>
+                    {rowDue > 0 && (
+                      <>
+                        <button className="btn btn-primary btn-sm min-h-11" onClick={() => startPay(f)}>
+                          <Wallet size={13} /> Pay {fmtMoney(rowDue)}
+                        </button>
+                        {/* Part-payment is the norm — offer the split without arithmetic. */}
+                        {rowDue > 1 && (
+                          <button className="text-[11px] font-semibold text-sky-600 hover:underline" onClick={() => startPay(f, Math.ceil(rowDue / 2))}>
+                            Pay half ({fmtMoney(Math.ceil(rowDue / 2))})
+                          </button>
                         )}
-                      </td>
-                      <td className="td">
-                        <div className="flex flex-col items-end gap-1.5">
-                          {rowDue > 0 && (
-                            <>
-                              <button className="btn btn-primary btn-sm" onClick={() => startPay(f)}>
-                                <Wallet size={13} /> Pay {fmtMoney(rowDue)}
-                              </button>
-                              {/* Part-payment is the norm — offer the split without arithmetic. */}
-                              {rowDue > 1 && (
-                                <button className="text-[11px] font-semibold text-indigo-600 hover:underline" onClick={() => startPay(f, Math.ceil(rowDue / 2))}>
-                                  Pay half ({fmtMoney(Math.ceil(rowDue / 2))})
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState
-            icon={Wallet}
-            title={childFilter === "ALL" ? "No fee records" : "No fee records for this child"}
-            description="Fee records appear after admission."
-          />
-        )}
-      </Card>
+                      </>
+                    )}
+                  </div>
+                }
+              />
+            );
+          })}
+        </ListCard>
+      ) : (
+        <EmptyState
+          icon={Wallet}
+          title={childFilter === "ALL" ? "No fee records" : "No fee records for this child"}
+          hint="Fee records appear after admission."
+        />
+      )}
 
-      <Modal open={!!payFor} onClose={() => setPayFor(null)} title="Pay fee">
-        {payFor && (() => {
-          const rowDue = feeDue(payFor);
-          const amt = Number(amount) || 0;
-          const over = amt > rowDue;
-          const remaining = Math.max(0, rowDue - amt);
-          const partial = amt > 0 && amt < rowDue;
-          const channel = channelForMethod(channels, method);
-          return (
-            <div className="space-y-4">
-              <div className="rounded-xl bg-slate-50 p-4 text-sm">
-                <div className="font-bold text-slate-800">{payFor.title}</div>
-                {manyChildren && payFor.student && (
-                  <div className="text-xs font-semibold text-indigo-600">{payFor.student.name}</div>
+      <MobileSheet open={!!payFor} onClose={() => setPayFor(null)} title="Pay fee">
+        {payFor &&
+          (() => {
+            const rowDue = feeDue(payFor);
+            const amt = Number(amount) || 0;
+            const over = amt > rowDue;
+            const remaining = Math.max(0, rowDue - amt);
+            const partial = amt > 0 && amt < rowDue;
+            const channel = channelForMethod(channels, method);
+            return (
+              <div className="space-y-4">
+                <div className="rounded-xl bg-slate-50 p-4 text-[13px]">
+                  <div className="font-bold text-slate-800">{payFor.title}</div>
+                  {manyChildren && payFor.student && <div className="text-[12px] font-semibold text-sky-600">{payFor.student.name}</div>}
+                  <div className="text-[12px] text-slate-500">
+                    {fmtMoney(payFor.amount)} total · {fmtMoney(payFor.paidAmount)} paid ·{" "}
+                    <span className="font-semibold text-slate-700">{fmtMoney(rowDue)} due</span>
+                  </div>
+                </div>
+
+                <Field label="Amount (৳)" hint="Part-payment is allowed — pay what you can now, the rest stays due.">
+                  <TextInput type="number" min="1" max={rowDue} value={amount} onChange={(e) => setAmount(e.target.value)} />
+                </Field>
+
+                <div className="flex flex-wrap gap-2">
+                  <button className="btn btn-secondary btn-sm min-h-11" onClick={() => setAmount(String(rowDue))}>Full {fmtMoney(rowDue)}</button>
+                  <button className="btn btn-secondary btn-sm min-h-11" onClick={() => setAmount(String(Math.ceil(rowDue / 2)))}>Half {fmtMoney(Math.ceil(rowDue / 2))}</button>
+                  <button className="btn btn-secondary btn-sm min-h-11" onClick={() => setAmount("")}>Other amount</button>
+                </div>
+
+                <Field label="Payment method">
+                  <Select value={method} onChange={(e) => setMethod(e.target.value)}>
+                    {methodOptions.map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </Select>
+                </Field>
+
+                {channel ? (
+                  <div className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-[12px] text-sky-900">
+                    <div className="font-bold">Send to: {channel.label}</div>
+                    <div className="mt-0.5 font-semibold">{channelDestination(channel) || "See the school office"}</div>
+                    {channel.instructions && <div className="mt-1 text-sky-700/80">{channel.instructions}</div>}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-[12px] text-slate-500">
+                    Your school has not published a number for this method yet — pay at the office, or ask the school to add it.
+                  </div>
                 )}
-                <div className="text-xs text-slate-500">
-                  {fmtMoney(payFor.amount)} total · {fmtMoney(payFor.paidAmount)} paid · <span className="font-semibold text-slate-700">{fmtMoney(rowDue)} due</span>
+
+                {over && <p className="text-[12px] font-semibold text-rose-600">That is more than the {fmtMoney(rowDue)} still due.</p>}
+                {partial && !over && (
+                  <p className="text-[12px] font-semibold text-amber-600">
+                    Part-payment: {fmtMoney(amt)} now, {fmtMoney(remaining)} stays due on this fee.
+                  </p>
+                )}
+
+                <div className="flex justify-end gap-2">
+                  <button className="btn btn-secondary min-h-11" onClick={() => setPayFor(null)}>Cancel</button>
+                  <button className="btn btn-primary min-h-11" onClick={pay} disabled={paying || amt <= 0 || over}>
+                    {paying ? (
+                      "Processing…"
+                    ) : (
+                      <>
+                        <CreditCard size={15} /> Pay {amt > 0 ? fmtMoney(amt) : "now"}
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
-
-              <Field label="Amount (৳)" hint="Part-payment is allowed — pay what you can now, the rest stays due.">
-                <TextInput
-                  type="number"
-                  min="1"
-                  max={rowDue}
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                />
-              </Field>
-
-              <div className="flex flex-wrap gap-2">
-                <button className="btn btn-secondary btn-sm" onClick={() => setAmount(String(rowDue))}>Full {fmtMoney(rowDue)}</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setAmount(String(Math.ceil(rowDue / 2)))}>Half {fmtMoney(Math.ceil(rowDue / 2))}</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setAmount("")}>Other amount</button>
-              </div>
-
-              <Field label="Payment method">
-                <Select value={method} onChange={(e) => setMethod(e.target.value)}>
-                  {methodOptions.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </Select>
-              </Field>
-
-              {channel ? (
-                <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-900">
-                  <div className="font-bold">Send to: {channel.label}</div>
-                  <div className="mt-0.5 font-semibold">{channelDestination(channel) || "See the school office"}</div>
-                  {channel.instructions && <div className="mt-1 text-indigo-700/80">{channel.instructions}</div>}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
-                  Your school has not published a number for this method yet — pay at the office, or ask the school to add it.
-                </div>
-              )}
-
-              {over && (
-                <p className="text-xs font-semibold text-rose-600">That is more than the {fmtMoney(rowDue)} still due.</p>
-              )}
-              {partial && !over && (
-                <p className="text-xs font-semibold text-amber-600">
-                  Part-payment: {fmtMoney(amt)} now, {fmtMoney(remaining)} stays due on this fee.
-                </p>
-              )}
-
-              <div className="flex justify-end gap-2">
-                <button className="btn btn-secondary" onClick={() => setPayFor(null)}>Cancel</button>
-                <button className="btn btn-primary" onClick={pay} disabled={paying || amt <= 0 || over}>
-                  {paying ? "Processing…" : <><CreditCard size={15} /> Pay {amt > 0 ? fmtMoney(amt) : "now"}</>}
-                </button>
-              </div>
-            </div>
-          );
-        })()}
-      </Modal>
+            );
+          })()}
+      </MobileSheet>
     </div>
   );
 }

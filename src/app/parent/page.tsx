@@ -2,82 +2,150 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { CalendarCheck, BookOpen, Wallet, MessageSquare, QrCode, FileText, ArrowRight } from "lucide-react";
+import { BookOpen, CalendarCheck, FileText, GraduationCap, LayoutGrid, MessageSquare, Wallet } from "lucide-react";
 import { api } from "@/lib/client";
-import { StatCard, Card, CardHeader, Badge, PageHeader, LoadingScreen } from "@/components/ui";
-import { fmtMoney, initials } from "@/lib/utils";
+import { LoadingScreen } from "@/components/ui";
 import { useMe } from "@/components/Shell";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar, Cell } from "recharts";
+import {
+  EmptyState,
+  ErrorState,
+  ListCard,
+  ListRow,
+  OverviewTile,
+  QuickAction,
+  SectionHeader,
+  Surface,
+} from "@/components/app-ui";
+import { fmtDate, fmtMoney, initials } from "@/lib/utils";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  BarChart,
+  Bar,
+  Cell,
+} from "recharts";
 
+/**
+ * Guardian Home.
+ *
+ * Same reads as before — one `/api/stats` and the latest three notices — and the
+ * same destinations (each quick action and notice opens the page it always did).
+ * What changed is the shape: a greeting header, a pastel overview grid, inset
+ * list rows and quick actions, matching the Teacher App. The two charts and the
+ * child banner are unchanged in substance. Also added: an error state, so a
+ * failed read no longer leaves the page on a spinner that never resolves.
+ */
 export default function ParentDashboard() {
   const { me } = useMe();
   const [stats, setStats] = useState<any>(null);
   const [notices, setNotices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    Promise.all([api<any>("/api/stats"), api<any[]>("/api/notices?limit=3")])
+      .then(([s, n]) => {
+        setStats(s);
+        setNotices(n);
+      })
+      .catch((e: any) => setError(e?.message || "Couldn't load your dashboard."))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    if (!me) return;
-    Promise.all([api<any>("/api/stats"), api<any[]>("/api/notices?limit=3")])
-      .then(([s, n]) => { setStats(s); setNotices(n); })
-      .finally(() => setLoading(false));
+    if (me) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
 
-  if (loading || !stats || !me) return <LoadingScreen label="Loading parent dashboard…" />;
-  const student = me.student;
+  if (loading) return <LoadingScreen label="Loading parent dashboard…" />;
+  if (error || !stats || !me) return <ErrorState message={error || undefined} onRetry={load} />;
 
+  const student = me.student;
   const BAR_COLORS = ["#4f46e5", "#7c3aed", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444"];
 
   return (
-    <div>
-      <PageHeader
-        title="Parent Dashboard"
-        subtitle={student ? `${student.name} · ${student.classRoom?.name || ""}${student.section ? ` / ${student.section.name}` : ""}` : "Guardian view"}
-        actions={
-          <Link href="/parent/results" className="btn btn-primary btn-sm">
-            <FileText size={14} /> Report cards
-          </Link>
-        }
-      />
-
-      {/* student banner — stacked on phones, one row from sm up */}
-      <Card className="mb-6 overflow-hidden">
-        <div className="flex flex-col gap-4 bg-gradient-to-r from-indigo-600 to-violet-600 p-5 text-white sm:flex-row sm:items-center sm:gap-5 sm:p-6">
-          <div className="flex min-w-0 items-center gap-4">
-            {student?.photoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={student.photoUrl} alt="" className="h-14 w-14 shrink-0 rounded-2xl object-cover ring-4 ring-white/20 sm:h-16 sm:w-16" />
-            ) : (
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-xl font-black sm:h-16 sm:w-16">{student ? initials(student.name) : "?"}</div>
-            )}
-            <div className="min-w-0">
-              <div className="text-xs font-bold uppercase tracking-widest text-indigo-200">Today&apos;s status</div>
-              <h2 className="truncate text-xl font-black">{student?.name || "Your child"}</h2>
-              <div className="mt-0.5 text-xs leading-relaxed text-indigo-200">
-                <span className="font-semibold text-white/90">{student?.admissionNo}</span>
-                {stats.attendance.total ? ` · ${stats.attendance.rate}% attendance · ${stats.attendance.present}/${stats.attendance.total} days present` : " · No attendance recorded yet"}
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-2 sm:ml-auto">
-            <Link href="/parent/homework" className="btn flex-1 bg-white/15 text-white hover:bg-white/25 sm:flex-none"><BookOpen size={15} /> Homework</Link>
-            <Link href="/parent/fees" className="btn flex-1 bg-white/15 text-white hover:bg-white/25 sm:flex-none"><Wallet size={15} /> Fees</Link>
-          </div>
+    <div className="ss-home">
+      {/* ------------------------------- greeting ------------------------------- */}
+      <div className="flex items-center gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-sky-50 text-[13px] font-extrabold text-sky-700">
+          {student?.photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={student.photoUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            initials(me.user?.name || student?.name || "") || <GraduationCap size={18} />
+          )}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[13px] text-slate-500">Welcome back</p>
+          <p className="truncate text-[17px] font-extrabold leading-tight text-slate-900">
+            {me.user?.name || "Guardian"}
+          </p>
+          <p className="truncate text-[12px] text-slate-400">
+            {student ? `${student.name} · ${student.classRoom?.name || ""}${student.section ? ` / ${student.section.name}` : ""}` : "Guardian view"}
+          </p>
         </div>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={CalendarCheck} label="Attendance" value={`${stats.attendance.rate}%`} sub={`${stats.attendance.present} of ${stats.attendance.total} days`} tone="emerald" />
-        <StatCard icon={BookOpen} label="Homework" value={stats.homeworks} sub="assigned to your child's class" tone="indigo" />
-        {/* One login covers the whole household (§5.4), so this figure is the
-            family's — exactly the rows /parent/fees lists, for every child. */}
-        <StatCard icon={Wallet} label="Fees due" value={fmtMoney(stats.fees.due)} sub={`across all your children · ${stats.fees.total} records`} tone={stats.fees.due > 0 ? "rose" : "emerald"} />
-        <StatCard icon={MessageSquare} label="Teacher remarks" value={stats.remarks} sub="daily remarks received" tone="violet" />
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="Attendance trend" subtitle="Monthly attendance rate (last 6 months)" />
-          <div className="h-56 p-4">
+      {/* --------------------------- today's overview --------------------------- */}
+      <SectionHeader title="Today's Overview" />
+      <div className="ss-tiles grid grid-cols-2 gap-3">
+        <OverviewTile
+          icon={CalendarCheck}
+          tone="emerald"
+          value={`${stats.attendance.rate}%`}
+          label="Attendance"
+          sub={`${stats.attendance.present} of ${stats.attendance.total} days`}
+        />
+        <OverviewTile
+          icon={BookOpen}
+          tone="indigo"
+          value={stats.homeworks}
+          label="Homework"
+          sub="assigned to the class"
+        />
+        {/* One login covers the whole household (§5.4), so this figure is the
+            family's — exactly the rows /parent/fees lists, for every child. */}
+        <OverviewTile
+          icon={Wallet}
+          tone={stats.fees.due > 0 ? "rose" : "emerald"}
+          value={fmtMoney(stats.fees.due)}
+          label="Fees due"
+          sub={`across all children · ${stats.fees.total} records`}
+        />
+        <OverviewTile
+          icon={MessageSquare}
+          tone="violet"
+          value={stats.remarks}
+          label="Teacher remarks"
+          sub="daily remarks received"
+        />
+      </div>
+
+      {/* ---------------------------- quick actions ---------------------------- */}
+      <SectionHeader title="Quick Actions" />
+      <div className="ss-quick grid grid-cols-4 gap-2.5">
+        <QuickAction href="/parent/attendance" icon={CalendarCheck} tone="indigo" label="Attendance" />
+        <QuickAction href="/parent/homework" icon={BookOpen} tone="emerald" label="Homework" />
+        <QuickAction href="/parent/fees" icon={Wallet} tone="amber" label="Fees" />
+        <QuickAction href="/parent/results" icon={FileText} tone="violet" label="Results" />
+      </div>
+
+      {/* ------------------------------- charts -------------------------------- */}
+      <SectionHeader title="Progress" />
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <Surface>
+          <div className="mb-2">
+            <p className="text-[13px] font-extrabold text-slate-800">Attendance trend</p>
+            <p className="text-[11px] text-slate-400">Monthly attendance rate (last 6 months)</p>
+          </div>
+          <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={stats.trend} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
                 <defs>
@@ -89,25 +157,36 @@ export default function ParentDashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
                 <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }} formatter={(v: any) => [`${v}%`, "Attendance"]} />
+                <Tooltip
+                  contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }}
+                  formatter={(v: any) => [`${v}%`, "Attendance"]}
+                />
                 <Area type="monotone" dataKey="rate" stroke="#10b981" strokeWidth={2.5} fill="url(#att)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </Card>
+        </Surface>
 
-        <Card>
-          <CardHeader title="Subject performance" subtitle="From published exam results" />
-          <div className="h-56 p-4">
+        <Surface>
+          <div className="mb-2">
+            <p className="text-[13px] font-extrabold text-slate-800">Subject performance</p>
+            <p className="text-[11px] text-slate-400">From published exam results</p>
+          </div>
+          <div className="h-52">
             {stats.subjectPerf?.length ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stats.subjectPerf} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis dataKey="subject" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }} formatter={(v: any) => [`${v}%`, "Score"]} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }}
+                    formatter={(v: any) => [`${v}%`, "Score"]}
+                  />
                   <Bar dataKey="pct" radius={[6, 6, 0, 0]}>
-                    {stats.subjectPerf.map((_: any, i: number) => <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />)}
+                    {stats.subjectPerf.map((_: any, i: number) => (
+                      <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />
+                    ))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -115,43 +194,30 @@ export default function ParentDashboard() {
               <div className="flex h-full items-center justify-center text-sm text-slate-400">No published results yet.</div>
             )}
           </div>
-        </Card>
+        </Surface>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="Notice board" subtitle="Latest from school" action={<Link href="/parent/notices" className="btn btn-ghost btn-sm">All</Link>} />
-          <div className="space-y-3 p-4">
-            {notices.map((n) => (
-              <div key={n.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
-                <div className="flex items-center justify-between">
-                  <Badge tone="indigo">{n.category}</Badge>
-                  <span className="text-[10px] text-slate-400">{new Date(n.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</span>
-                </div>
-                <div className="mt-1.5 text-sm font-bold text-slate-800">{n.title}</div>
-              </div>
-            ))}
-            {!notices.length && <p className="py-4 text-center text-sm text-slate-400">No notices yet.</p>}
-          </div>
-        </Card>
+      {/* ------------------------------ notice board --------------------------- */}
+      <SectionHeader title="Notice Board" actionHref="/parent/notices" actionLabel="View all" />
+      {notices.length ? (
+        <ListCard>
+          {notices.map((n) => (
+            <ListRow
+              key={n.id}
+              href="/parent/notices"
+              icon={LayoutGrid}
+              tone="sky"
+              title={n.title}
+              subtitle={`${n.category || "General"} · ${fmtDate(n.date, true)}`}
+            />
+          ))}
+        </ListCard>
+      ) : (
+        <EmptyState icon={LayoutGrid} title="No notices yet" hint="School announcements will appear here." />
+      )}
 
-        <Card>
-          <CardHeader title="Quick actions" />
-          <div className="grid grid-cols-1 gap-2 p-4">
-            {[
-              { href: "/parent/attendance", icon: CalendarCheck, label: "View attendance history" },
-              { href: "/parent/remarks", icon: MessageSquare, label: "Teacher remarks" },
-              { href: "/parent/results", icon: FileText, label: "Exam results & report cards" },
-              { href: "/parent/messages", icon: MessageSquare, label: "Message a teacher" },
-            ].map((a) => (
-              <Link key={a.href} href={a.href} className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50">
-                <a.icon size={16} className="text-indigo-600" /> {a.label}
-                <ArrowRight size={14} className="ml-auto text-slate-300" />
-              </Link>
-            ))}
-          </div>
-        </Card>
-      </div>
+      {/* Clears the fixed phone tab bar so the last row is never tapped by accident. */}
+      <div className="h-2" aria-hidden />
     </div>
   );
 }

@@ -1,21 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Inbox, Send } from "lucide-react";
 import { api } from "@/lib/client";
-import { Card, CardHeader, Badge, Field, TextInput, Select, Textarea, PageHeader, LoadingScreen, EmptyState, ErrorNote, statusTone, prettyStatus } from "@/components/ui";
+import { Badge, ErrorNote, Field, LoadingScreen, Select, TextInput, Textarea, statusTone, prettyStatus } from "@/components/ui";
+import { EmptyState, ErrorState, SectionHeader, Surface } from "@/components/app-ui";
 import { fmtDate } from "@/lib/utils";
 
 /** PRD §7.1 — Complaint/Feedback Box (guardian side, with tracking status). */
 export default function ParentFeedbackPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<any>({ category: "GENERAL" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const load = () => api<any[]>("/api/complaints").then(setItems).finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return api<any[]>("/api/complaints")
+      .then(setItems)
+      .catch((e: any) => setLoadError(e?.message || "Couldn't load your submissions."))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const submit = async () => {
     setBusy(true);
@@ -32,48 +43,59 @@ export default function ParentFeedbackPage() {
   };
 
   if (loading) return <LoadingScreen />;
+  if (loadError && !items.length) return <ErrorState message={loadError} onRetry={load} />;
 
   return (
-    <div className="space-y-4">
-      <PageHeader title="Complaints & Feedback" subtitle="Reach the school admin directly — track the status (PRD §7.1)" />
-
-      <Card className="p-4">
-        {error && <div className="mb-3"><ErrorNote message={error} /></div>}
-        <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-3">
-          <Field label="Subject *"><TextInput value={form.subject || ""} onChange={(e) => setForm({ ...form, subject: e.target.value })} /></Field>
+    <div>
+      <SectionHeader title="Reach the school" className="ss-flush-top" />
+      <Surface>
+        {error && (
+          <div className="mb-3">
+            <ErrorNote message={error} />
+          </div>
+        )}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Subject *">
+            <TextInput value={form.subject || ""} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
+          </Field>
           <Field label="Category">
             <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-              <option value="GENERAL">General</option><option value="ACADEMIC">Academic</option><option value="FEE">Fees</option><option value="TRANSPORT">Transport</option><option value="OTHER">Other</option>
+              <option value="GENERAL">General</option>
+              <option value="ACADEMIC">Academic</option>
+              <option value="FEE">Fees</option>
+              <option value="TRANSPORT">Transport</option>
+              <option value="OTHER">Other</option>
             </Select>
           </Field>
-          <div className="flex items-end">
-            <button className="btn btn-primary w-full" onClick={submit} disabled={busy || !form.subject || !form.message}><Send size={15} /> Send</button>
-          </div>
-          <div className="sm:col-span-3">
-            <Field label="Message *"><Textarea rows={3} value={form.message || ""} onChange={(e) => setForm({ ...form, message: e.target.value })} /></Field>
-          </div>
+          <Field label="Message *" className="sm:col-span-2">
+            <Textarea rows={3} value={form.message || ""} onChange={(e) => setForm({ ...form, message: e.target.value })} />
+          </Field>
         </div>
-      </Card>
+        <button className="btn btn-primary mt-3 w-full min-h-11" onClick={submit} disabled={busy || !form.subject || !form.message}>
+          <Send size={15} /> Send
+        </button>
+      </Surface>
 
-      <Card>
-        <CardHeader title="My submissions" subtitle={`${items.length} total`} />
-        {items.length ? (
-          <div className="divide-y divide-slate-100">
-            {items.map((c) => (
-              <div key={c.id} className="px-5 py-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-bold text-slate-800">{c.subject}</p>
-                  <Badge tone={statusTone(c.status)}>{prettyStatus(c.status)}</Badge>
-                </div>
-                <p className="mt-0.5 text-sm text-slate-600">{c.message}</p>
-                <p className="mt-1 text-[11px] text-slate-400">{fmtDate(c.createdAt, true)}{c.resolution ? ` · Resolution: ${c.resolution}` : ""}</p>
+      <SectionHeader title={`My submissions · ${items.length}`} />
+      {items.length ? (
+        <div className="space-y-3">
+          {items.map((c) => (
+            <Surface key={c.id}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[14px] font-bold text-slate-800">{c.subject}</p>
+                <Badge tone={statusTone(c.status)}>{prettyStatus(c.status)}</Badge>
               </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState icon={Inbox} title="No submissions" description="Your complaints and feedback will appear here with status." />
-        )}
-      </Card>
+              <p className="mt-1 text-[13px] text-slate-600">{c.message}</p>
+              <p className="mt-1 text-[11px] text-slate-400">
+                {fmtDate(c.createdAt, true)}
+                {c.resolution ? ` · Resolution: ${c.resolution}` : ""}
+              </p>
+            </Surface>
+          ))}
+        </div>
+      ) : (
+        <EmptyState icon={Inbox} title="No submissions" hint="Your complaints and feedback will appear here with status." />
+      )}
     </div>
   );
 }

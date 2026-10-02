@@ -1,67 +1,70 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CalendarCheck } from "lucide-react";
 import { api } from "@/lib/client";
-import { Card, CardHeader, Badge, PageHeader, LoadingScreen, EmptyState, statusTone, prettyStatus } from "@/components/ui";
+import { Badge, LoadingScreen, statusTone, prettyStatus } from "@/components/ui";
 import { useMe } from "@/components/Shell";
+import { EmptyState, ErrorState, ListCard, ListRow, OverviewTile, SectionHeader } from "@/components/app-ui";
 
+/** PRD §8 — Attendance history for the guardian's child (guardian view). */
 export default function ParentAttendancePage() {
   const { me } = useMe();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!me?.student) return;
+    setLoading(true);
+    setError(null);
     api(`/api/students/${me.student.id}`)
       .then((d: any) => setRows([...d.attendance].reverse()))
+      .catch((e: any) => setError(e?.message || "Couldn't load the attendance."))
       .finally(() => setLoading(false));
   }, [me]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (loading) return <LoadingScreen />;
+  if (error) return <ErrorState message={error} onRetry={load} />;
 
   const present = rows.filter((r) => r.status === "PRESENT" || r.status === "LATE").length;
   const rate = rows.length ? Math.round((present / rows.length) * 100) : 0;
 
   return (
     <div>
-      <PageHeader title="Attendance" subtitle={`${rate}% attendance across ${rows.length} school days`} />
+      <SectionHeader title={`${rate}% across ${rows.length} school days`} className="ss-flush-top" />
 
-      <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {["PRESENT", "ABSENT", "LATE", "LEAVE"].map((st) => {
-          const count = rows.filter((r) => r.status === st).length;
-          return (
-            <Card key={st} className="p-4 text-center">
-              <div className="text-2xl font-black text-slate-800">{count}</div>
-              <div className="text-[11px] font-bold uppercase text-slate-400">{st}</div>
-            </Card>
-          );
-        })}
+      <div className="ss-tiles grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { st: "PRESENT", tone: "emerald" as const },
+          { st: "ABSENT", tone: "rose" as const },
+          { st: "LATE", tone: "amber" as const },
+          { st: "LEAVE", tone: "sky" as const },
+        ].map(({ st, tone }) => (
+          <OverviewTile key={st} icon={CalendarCheck} tone={tone} value={rows.filter((r) => r.status === st).length} label={st} />
+        ))}
       </div>
 
-      <Card>
-        <CardHeader title="History" subtitle="Most recent first" />
-        {rows.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr><th className="th">Date</th><th className="th">Status</th><th className="th">Remark</th></tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="tr-hover">
-                    <td className="td font-semibold">{new Date(r.date).toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}</td>
-                    <td className="td"><Badge tone={statusTone(r.status)}>{prettyStatus(r.status)}</Badge></td>
-                    <td className="td">{r.remark || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState icon={CalendarCheck} title="No attendance records yet" />
-        )}
-      </Card>
+      <SectionHeader title="History" />
+      {rows.length ? (
+        <ListCard>
+          {rows.map((r) => (
+            <ListRow
+              key={r.id}
+              icon={CalendarCheck}
+              tone="slate"
+              title={new Date(r.date).toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}
+              subtitle={r.remark || "—"}
+              trailing={<Badge tone={statusTone(r.status)}>{prettyStatus(r.status)}</Badge>}
+            />
+          ))}
+        </ListCard>
+      ) : (
+        <EmptyState icon={CalendarCheck} title="No attendance records yet" />
+      )}
     </div>
   );
 }

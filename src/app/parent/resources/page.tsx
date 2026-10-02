@@ -1,59 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { FolderOpen, Eye, Download, ExternalLink } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Download, ExternalLink, Eye, FolderOpen } from "lucide-react";
 import { api } from "@/lib/client";
-import { Card, CardHeader, Badge, PageHeader, LoadingScreen, EmptyState } from "@/components/ui";
+import { Badge, LoadingScreen } from "@/components/ui";
+import { EmptyState, ErrorState, ListCard, ListRow, SectionHeader } from "@/components/app-ui";
 import { fmtDate } from "@/lib/utils";
 
 /** PRD §6.2/§7.2 — Class materials for the guardian (auto-filtered by child's class). */
 export default function ParentResourcesPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    api<any[]>("/api/resources").then(setItems).finally(() => setLoading(false));
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    api<any[]>("/api/resources")
+      .then(setItems)
+      .catch((e: any) => setError(e?.message || "Couldn't load the materials."))
+      .finally(() => setLoading(false));
   }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const track = (id: string, action: "view" | "download") => {
     api("/api/resources", { method: "PATCH", body: JSON.stringify({ id, action }) }).catch(() => null);
   };
 
   if (loading) return <LoadingScreen />;
+  if (error) return <ErrorState message={error} onRetry={load} />;
 
   return (
     <div>
-      <PageHeader title="Class Materials" subtitle="Notes, e-books and video lectures shared by teachers (PRD §6.2)" />
-      <Card>
-        <CardHeader title="Available materials" subtitle={`${items.length} resources for your child's class`} />
-        {items.length ? (
-          <div className="divide-y divide-slate-100">
-            {items.map((r) => (
-              <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-                <div>
-                  <p className="text-sm font-bold text-slate-800">{r.title}</p>
-                  <p className="text-xs text-slate-500">{r.subject?.name || "—"}{r.semester ? ` · ${r.semester}` : ""} · {r.teacher?.name || "Teacher"} · {fmtDate(r.createdAt)}</p>
-                </div>
-                <div className="flex items-center gap-2">
+      <SectionHeader title="Available materials" className="ss-flush-top" />
+      {items.length ? (
+        <ListCard>
+          {items.map((r) => (
+            <ListRow
+              key={r.id}
+              icon={FolderOpen}
+              tone="violet"
+              title={r.title}
+              subtitle={`${r.subject?.name || "—"}${r.semester ? ` · ${r.semester}` : ""} · ${r.teacher?.name || "Teacher"} · ${fmtDate(r.createdAt)}`}
+              trailing={
+                <div className="flex shrink-0 items-center gap-2">
                   <Badge tone="slate">{r.kind}</Badge>
                   {r.linkUrl ? (
-                    <a href={r.linkUrl} target="_blank" rel="noreferrer" onClick={() => track(r.id, "view")} className="btn btn-secondary btn-sm">
+                    <a href={r.linkUrl} target="_blank" rel="noreferrer" onClick={() => track(r.id, "view")} className="btn btn-secondary btn-sm min-h-11">
                       <ExternalLink size={13} /> Watch
                     </a>
                   ) : r.url ? (
-                    <a href={r.url} target="_blank" rel="noreferrer" onClick={() => track(r.id, "download")} className="btn btn-primary btn-sm">
+                    <a href={r.url} target="_blank" rel="noreferrer" onClick={() => track(r.id, "download")} className="btn btn-primary btn-sm min-h-11">
                       <Download size={13} /> Download
                     </a>
                   ) : null}
-                  <span className="flex items-center gap-1 text-[11px] text-slate-400"><Eye size={11} /> {r.views || 0}</span>
+                  <span className="hidden items-center gap-1 text-[11px] text-slate-400 sm:flex">
+                    <Eye size={11} /> {r.views || 0}
+                  </span>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState icon={FolderOpen} title="No materials yet" description="Materials tagged to your child's class appear here automatically." />
-        )}
-      </Card>
+              }
+            />
+          ))}
+        </ListCard>
+      ) : (
+        <EmptyState icon={FolderOpen} title="No materials yet" hint="Materials tagged to your child's class appear here automatically." />
+      )}
     </div>
   );
 }

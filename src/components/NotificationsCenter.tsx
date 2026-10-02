@@ -52,11 +52,12 @@ function CenterSurface({ teacher, children }: { teacher: boolean; children: Reac
   return <Card>{children}</Card>;
 }
 
-export function NotificationsCenter({ appearance = "default" }: { appearance?: "default" | "teacher" } = {}) {
+export function NotificationsCenter({ appearance = "default" }: { appearance?: "default" | "teacher" | "guardian" } = {}) {
   // Presentation only. The Teacher App renders the same centre on the app's inset
   // panel with a pill filter; every other portal keeps the default branch exactly
   // as it was, and no read, filter or action changes either way.
-  const teacher = appearance === "teacher";
+  // Both phone-first apps (Teacher, Parents) share the app-surface presentation.
+  const teacher = appearance === "teacher" || appearance === "guardian";
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [unread, setUnread] = useState(0);
   const [total, setTotal] = useState(0);
