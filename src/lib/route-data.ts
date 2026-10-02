@@ -51,8 +51,10 @@ const ROUTE_DATA: Record<string, string[]> = {
   // ---- teacher ----
   "/teacher": ["/api/stats"],
   "/teacher/notifications": ["/api/notifications?take=30"],
-  "/teacher/attendance": ["/api/classes", "/api/attendance"],
-  "/teacher/remarks": ["/api/classes", "/api/remarks"],
+  // Attendance/remarks reads require classId+date, so they are never warmed:
+  // a param-less prefetch of them could only ever answer 400.
+  "/teacher/attendance": ["/api/classes"],
+  "/teacher/remarks": ["/api/classes"],
   "/teacher/homework": ["/api/homework?mine=1", "/api/classes", "/api/subjects"],
   "/teacher/marks": ["/api/exams", "/api/subjects"],
   "/teacher/results": ["/api/exams"],
@@ -132,7 +134,8 @@ const SECTOR_WARM: Record<SectorKey, string[]> = {
     "/api/homework?mine=1",
     "/api/exams",
     "/api/grading-scheme",
-    "/api/remarks",
+    // "/api/remarks" is intentionally absent — it needs classId+date, so a
+    // sector warm-up prefetch of it could only ever 400.
     "/api/leave-requests",
     "/api/meetings",
     "/api/resources",
