@@ -15,6 +15,11 @@ env:
   - variable: JWT_SECRET
     secret: JWT_SECRET
 
+  # Firestore database selection. Unset => "(default)" (the rollback
+  # database). Set to the named database for the asia-southeast1 cutover.
+  - variable: FIRESTORE_DATABASE_ID
+    value: smart-school-db
+
   # Storage bucket. Without this the Admin SDK falls back to
   # `<projectId>.appspot.com`, which does NOT exist for this project — the real
   # bucket is `<projectId>.firebasestorage.app`, so every upload and every

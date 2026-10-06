@@ -38,7 +38,15 @@ export function adminApp(): App {
 }
 
 export function getDb(): Firestore {
-  if (!_db) _db = getFirestore(adminApp());
+  if (!_db) {
+    // Database selection is configuration-driven. Set FIRESTORE_DATABASE_ID to
+    // target a named database; when unset it resolves to "(default)", which is
+    // the rollback database (no code change is needed to roll back).
+    const databaseId = process.env.FIRESTORE_DATABASE_ID;
+    _db = databaseId
+      ? getFirestore(adminApp(), databaseId)
+      : getFirestore(adminApp());
+  }
   return _db;
 }
 
