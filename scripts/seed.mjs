@@ -5,7 +5,10 @@
  * Run:  node scripts/seed.mjs
  * Safe to re-run (idempotent — skips entities that already exist).
  *
- * Requires Firebase Admin credentials via env:
+ * Credentials: inside the Firestore emulator (FIRESTORE_EMULATOR_HOST set —
+ * the guard above guarantees it is loopback) no credentials are needed; the
+ * emulator ignores them, so only FIREBASE_PROJECT_ID is used. Against a real
+ * project the full Admin credentials are required via env:
  *   FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY
  */
 import { initializeApp, getApps, cert } from "firebase-admin/app";
@@ -22,7 +25,14 @@ const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
 const PRIVATE_KEY = process.env.FIREBASE_PRIVATE_KEY;
 
-if (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
+// requireEmulator() above has already failed closed unless FIRESTORE_EMULATOR_HOST
+// is set and loopback. The Firestore emulator ignores credentials, so in emulator
+// mode we skip the credential requirement entirely and initialize with the project
+// id alone — mirroring adminApp() in src/lib/firebase.ts. No service-account.json
+// is read here in either mode.
+const emulatorMode = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+
+if (!emulatorMode && (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY)) {
   console.error(
     "Missing Firebase Admin credentials. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY in .env"
   );
@@ -30,14 +40,18 @@ if (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
 }
 
 if (!getApps().length) {
-  initializeApp({
-    projectId: PROJECT_ID,
-    credential: cert({
+  if (emulatorMode) {
+    initializeApp({ projectId: PROJECT_ID || undefined });
+  } else {
+    initializeApp({
       projectId: PROJECT_ID,
-      clientEmail: CLIENT_EMAIL,
-      privateKey: PRIVATE_KEY.replace(/\\n/g, "\n"),
-    }),
-  });
+      credential: cert({
+        projectId: PROJECT_ID,
+        clientEmail: CLIENT_EMAIL,
+        privateKey: PRIVATE_KEY.replace(/\\n/g, "\n"),
+      }),
+    });
+  }
 }
 const db = getFirestore();
 
