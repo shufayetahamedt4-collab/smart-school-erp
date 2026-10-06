@@ -10,6 +10,10 @@
  *
  * Usage: node scripts/verify-read-cache.mjs [port]
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const PORT = Number(process.argv[2] || process.env.SMOKE_PORT || 3000);
 const BASE = `http://127.0.0.1:${PORT}`;
 

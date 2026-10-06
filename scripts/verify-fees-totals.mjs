@@ -25,8 +25,10 @@
  *     node scripts/verify-fees-totals.mjs
  */
 import { loadEnv } from "./load-env.mjs";
+import { requireEmulator } from "./lib/guard.mjs";
 
 loadEnv();
+requireEmulator();
 
 // NB: this shell exports PORT=0, so never read process.env.PORT here.
 const PORT = process.env.SMOKE_PORT || process.env.VERIFY_PORT || "3123";

@@ -5,6 +5,10 @@
  * routines/exams). Uses the seeded demo school.
  * Usage: node scripts/verify-sweep-routes.mjs
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const BASE = process.env.BASE_URL || "http://localhost:3000";
 const ROLES = [
   { label: "admin", email: "principal@sunrise.edu", password: "School@123" },

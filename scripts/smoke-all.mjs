@@ -27,7 +27,10 @@
  * fails, when no browser can be driven or SMOKE_HEADLESS=0.
  */
 // NB: this shell exports PORT=0, so never read process.env.PORT here.
+import { requireEmulator } from "./lib/guard.mjs";
+
 const PORT = process.env.SMOKE_PORT || "3000";
+requireEmulator();
 const LOCAL_BASE = `http://127.0.0.1:${PORT}`;
 const ORIGIN = (process.env.SMOKE_ORIGIN || "").trim().replace(/\/+$/, "");
 /** App label per role — the first label of the host the app answers on. */

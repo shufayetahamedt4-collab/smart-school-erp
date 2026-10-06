@@ -21,8 +21,10 @@
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { loadEnv } from "./load-env.mjs";
+import { requireEmulator } from "./lib/guard.mjs";
 
 loadEnv();
+requireEmulator();
 
 // NB: this shell exports PORT=0, so never read process.env.PORT here (it would
 // connect to port 0 and fail with EADDRNOTAVAIL).

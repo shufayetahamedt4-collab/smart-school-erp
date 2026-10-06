@@ -5,6 +5,10 @@
  *
  * Usage: node scripts/verify-exams-invalidation.mjs [BASE=http://localhost:58497]
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const BASE = process.env.BASE || "http://localhost:58497";
 const EMAIL = process.env.ADMIN_EMAIL || "principal@sunrise.edu";
 const PASSWORD = process.env.ADMIN_PASSWORD || "School@123";

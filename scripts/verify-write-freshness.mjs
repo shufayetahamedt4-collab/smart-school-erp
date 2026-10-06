@@ -8,6 +8,10 @@
  *
  * Usage: node scripts/verify-write-freshness.mjs
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const BASE = process.env.BASE_URL || "http://localhost:3000";
 
 async function login() {

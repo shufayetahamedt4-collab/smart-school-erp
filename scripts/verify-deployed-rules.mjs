@@ -14,6 +14,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GoogleAuth } from "google-auth-library";
 
+// DISABLED: this script targets the REAL project's security rules (amar-e-school)
+// and can never be emulated. It must never be run by an agent or an automated flow.
+console.error(
+  "[guard] verify-deployed-rules.mjs targets the real project (amar-e-school) and must never be run by an agent. Aborting."
+);
+process.exit(1);
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROJECT = "amar-e-school";
 const API = "https://firebaserules.googleapis.com/v1";

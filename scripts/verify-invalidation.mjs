@@ -4,6 +4,10 @@
  * couple of students → read stats again immediately. Second read must
  * reflect the new rows without waiting for the 30s TTL.
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const BASE = process.env.BASE_URL || "http://localhost:3000";
 
 async function login(email, password) {

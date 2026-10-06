@@ -15,6 +15,10 @@
  *
  * Usage: BASE_URL=http://127.0.0.1:3000 node scripts/verify-grading.mjs
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const BASE = process.env.BASE_URL || "http://localhost:3000";
 
 let failures = 0;

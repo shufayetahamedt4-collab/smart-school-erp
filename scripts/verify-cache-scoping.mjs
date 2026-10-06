@@ -35,8 +35,10 @@ import bcrypt from "bcryptjs";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { loadEnv } from "./load-env.mjs";
+import { requireEmulator } from "./lib/guard.mjs";
 
 loadEnv();
+requireEmulator();
 
 const PORT = process.env.SMOKE_PORT || process.env.VERIFY_PORT || "3000";
 const BASE = `http://127.0.0.1:${PORT}`;

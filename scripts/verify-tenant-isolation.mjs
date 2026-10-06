@@ -14,6 +14,10 @@ import { initializeApp, applicationDefault, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { readFileSync, existsSync } from "node:fs";
 
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const BASE = process.env.BASE || "http://localhost:3000";
 const P = "zziso-";
 
