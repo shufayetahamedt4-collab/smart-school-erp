@@ -8,15 +8,26 @@ loadEnv();
 requireEmulator();
 const BS = String.fromCharCode(92);
 const unesc = (k) => (k.includes(BS + "n") ? k.split(BS + "n").join("\n") : k);
+
+// Inside the emulator (FIRESTORE_EMULATOR_HOST — the guard above guarantees it is
+// loopback) the emulator needs no credentials, so never build a cert() from
+// possibly absent ones: initialise with the project id alone, exactly as
+// scripts/seed.mjs does. Outside it, the credentials are used as before.
+const emulatorMode = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+
 if (!getApps().length) {
-  initializeApp({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    credential: cert({
+  if (emulatorMode) {
+    initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID || undefined });
+  } else {
+    initializeApp({
       projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: unesc(process.env.FIREBASE_PRIVATE_KEY),
-    }),
-  });
+      credential: cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: unesc(process.env.FIREBASE_PRIVATE_KEY),
+      }),
+    });
+  }
 }
 const db = getFirestore();
 const sha1 = (s) => createHash("sha1").update(s).digest("hex");

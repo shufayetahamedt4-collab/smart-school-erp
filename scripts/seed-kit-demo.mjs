@@ -29,7 +29,13 @@ const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
 const PRIVATE_KEY = process.env.FIREBASE_PRIVATE_KEY;
 
-if (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
+// Inside the emulator (FIRESTORE_EMULATOR_HOST — the guard above guarantees it is
+// loopback) the emulator needs no credentials, so the requirement is skipped and
+// the SDK is initialised with the project id alone, mirroring scripts/seed.mjs.
+// No service-account.json is read in either mode.
+const emulatorMode = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+
+if (!emulatorMode && (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY)) {
   console.error("❌ Missing Firebase Admin credentials in .env (FIREBASE_PROJECT_ID / CLIENT_EMAIL / PRIVATE_KEY).");
   process.exit(1);
 }
@@ -41,10 +47,14 @@ function unescapeKey(k) {
 }
 
 if (!getApps().length) {
-  initializeApp({
-    projectId: PROJECT_ID,
-    credential: cert({ projectId: PROJECT_ID, clientEmail: CLIENT_EMAIL, privateKey: unescapeKey(PRIVATE_KEY) }),
-  });
+  if (emulatorMode) {
+    initializeApp({ projectId: PROJECT_ID || undefined });
+  } else {
+    initializeApp({
+      projectId: PROJECT_ID,
+      credential: cert({ projectId: PROJECT_ID, clientEmail: CLIENT_EMAIL, privateKey: unescapeKey(PRIVATE_KEY) }),
+    });
+  }
 }
 const db = getFirestore();
 
