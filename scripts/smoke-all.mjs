@@ -25,6 +25,12 @@
  * And a second closing section lays the Teacher App out in a real headless
  * browser to measure its PHONE layout (see the note there); it also skips, never
  * fails, when no browser can be driven or SMOKE_HEADLESS=0.
+ *
+ * Two checks SKIP rather than fail when this data cannot satisfy them, because
+ * both depend on the seeded state rather than on the code: the print pages (their
+ * ids are resolved from the app's own API — set SMOKE_STUDENT_ID /
+ * SMOKE_EXAM_ID to pin a pair) and the marks-entry field (which the page locks
+ * by design while its exam is published).
  */
 // NB: this shell exports PORT=0, so never read process.env.PORT here.
 import { requireEmulator } from "./lib/guard.mjs";
@@ -97,21 +103,42 @@ const APIS = {
 const HUB_PAGES = ["/login", "/welcome", "/qr", "/s/sunrise", "/apply"];
 const ERROR_MARKERS = ["Application error", "Unhandled Runtime Error", "Internal Server Error", "digest="];
 
-// Print pages carry ids in the URL, so each entry is [path, marker the finished
-// document must contain] — a 200 is not enough when the page can also render its
-// own "not found" notice. The demo tenant's ids are stable; point the env vars
-// at another tenant to check a different one.
-const DEMO = {
-  studentId: process.env.SMOKE_STUDENT_ID || "st_ba99122920f48693f156f2b16e57ef66",
-  examId: process.env.SMOKE_EXAM_ID || "Z1lw7KL79rR0Wv22MfU9",
+// Print pages carry ids in the URL, so each entry is [path template, marker the
+// finished document must contain, the ids that page needs] — a 200 is not enough
+// when the page can also render its own "not found" notice.
+//
+// The ids are NOT hard-coded: a fresh seed mints a new random student id
+// (`st_<32 hex>`, crypto.randomBytes) and a new `exams` auto-id, so a literal
+// captured from an earlier database points at documents that no longer exist and
+// the page answers with its own "not found" notice — a false failure. They are
+// resolved at run time from the app's own read-only API (see the lookup below);
+// SMOKE_STUDENT_ID / SMOKE_EXAM_ID pin a value when set, and an id that cannot
+// be resolved SKIPS the check it feeds instead of failing it.
+//
+// The guardian page prints the guardian's OWN child and refuses anyone else's,
+// so it carries its own id: reusing the school-admin pair there would fail the
+// ownership check on every tenant whose marked student is not that guardian's.
+const PINNED = {
+  studentId: (process.env.SMOKE_STUDENT_ID || "").trim(),
+  examId: (process.env.SMOKE_EXAM_ID || "").trim(),
 };
+const DEMO_ID = {
+  studentId: PINNED.studentId,
+  examId: PINNED.examId,
+  guardianStudentId: PINNED.studentId,
+};
+/** id key → why that id is missing, for the SKIP lines below. */
+const idWhy = {};
+const needWhy = (k) => idWhy[k] || "not resolved";
 const PRINT_PAGES = {
   "school-admin": [
-    [`/print/marksheet/${DEMO.studentId}`, "Academic Marksheet"],
-    [`/print/report-card/${DEMO.examId}/${DEMO.studentId}`, "Grading scale"],
+    ["/print/marksheet/{studentId}", "Academic Marksheet", ["studentId"]],
+    ["/print/report-card/{examId}/{studentId}", "Grading scale", ["examId", "studentId"]],
   ],
-  guardian: [[`/print/marksheet/${DEMO.studentId}`, "Academic Marksheet"]],
+  guardian: [["/print/marksheet/{guardianStudentId}", "Academic Marksheet", ["guardianStudentId"]]],
 };
+/** Fill a path template with whatever ids are known (placeholders stay put). */
+const printPath = (tpl) => tpl.replace(/\{(\w+)\}/g, (m, k) => DEMO_ID[k] || m);
 
 const fails = [];
 function bad(role, route, detail) {
@@ -211,6 +238,110 @@ if (!ORIGIN) {
   else console.log("  ✅ a guardian lands in /parent");
 }
 
+/*
+ * Resolve the print-page ids from the app's own API — read-only.
+ *
+ * A fresh seed replaces the documents those pages print (random `st_<hex>`
+ * students, auto-id exams), so the literal pair this suite used to carry pointed
+ * at rows that no longer existed and the print checks read as failures. Instead:
+ *
+ *   • SMOKE_STUDENT_ID / SMOKE_EXAM_ID pin a value — a pair to print, or another
+ *     tenant;
+ *   • anything unpinned is resolved from the running app: as the school admin,
+ *     an exam somebody has actually been marked on (the marksheet prints nothing
+ *     without marks) and one of its seated students — the one pair that
+ *     satisfies BOTH admin pages; and as the guardian, that guardian's own
+ *     default child;
+ *   • an id that cannot be resolved SKIPS the check that needs it, with the
+ *     reason, rather than reporting a false failure.
+ */
+console.log("\n=== print-page ids ===");
+{
+  const school = ROLES.find((r) => r.label === "school-admin");
+  const guardian = ROLES.find((r) => r.label === "guardian");
+
+  if (!DEMO_ID.studentId || !DEMO_ID.examId) {
+    const session = await login(school.host, school.id, school.pw);
+    if (session.status !== 200 || !session.cookie) {
+      idWhy.studentId = idWhy.examId = `school-admin login failed (HTTP ${session.status})`;
+    } else {
+      const res = await get(school.host, "/api/exams", session.cookie);
+      let exams = [];
+      if (res.status !== 200) {
+        idWhy.studentId = idWhy.examId = `/api/exams answered HTTP ${res.status}`;
+      } else {
+        try {
+          exams = JSON.parse(res.body)?.data || [];
+        } catch {
+          idWhy.studentId = idWhy.examId = "/api/exams returned a non-JSON body";
+        }
+      }
+      // A pinned exam is tried first (so a pinned pair is never re-paired), then
+      // the exam with the most marks: the one that is most likely to seat
+      // somebody. An exam nobody has been marked on could only supply a report
+      // card, and only a few candidates are worth a round trip each.
+      const ranked = [...exams].sort((a, b) => {
+        if (a.id === DEMO_ID.examId) return -1;
+        if (b.id === DEMO_ID.examId) return 1;
+        return (b._count?.marks ?? 0) - (a._count?.marks ?? 0);
+      });
+      for (const exam of ranked.slice(0, 5)) {
+        const detail = await get(school.host, `/api/exams/${exam.id}`, session.cookie);
+        if (detail.status !== 200) continue;
+        let rows = [];
+        try {
+          rows = JSON.parse(detail.body)?.data?.students || [];
+        } catch {
+          rows = [];
+        }
+        const seated = rows.find((s) => s.studentId && !s.absent && (s.marks || []).length);
+        if (seated) {
+          DEMO_ID.examId = DEMO_ID.examId || exam.id;
+          DEMO_ID.studentId = DEMO_ID.studentId || seated.studentId;
+          break;
+        }
+      }
+      if (!DEMO_ID.studentId || !DEMO_ID.examId) {
+        const why = exams.length
+          ? "no exam of this school has a marked student yet"
+          : "this school has no exams";
+        if (!DEMO_ID.studentId) idWhy.studentId = why;
+        if (!DEMO_ID.examId) idWhy.examId = why;
+      }
+    }
+  }
+
+  // The guardian's own child, from the guardian's own session. A pinned
+  // SMOKE_STUDENT_ID stays the fallback when that lookup cannot run.
+  if (guardian) {
+    const session = await login(guardian.host, guardian.id, guardian.pw);
+    if (session.status !== 200 || !session.cookie) {
+      if (!DEMO_ID.guardianStudentId) idWhy.guardianStudentId = `guardian login failed (HTTP ${session.status})`;
+    } else {
+      const me = await get(guardian.host, "/api/auth/me", session.cookie);
+      let child = "";
+      try {
+        child = JSON.parse(me.body)?.data?.student?.id || "";
+      } catch {
+        child = "";
+      }
+      if (child) DEMO_ID.guardianStudentId = child;
+      else if (!DEMO_ID.guardianStudentId) idWhy.guardianStudentId = `the guardian account (${guardian.id}) has no linked child`;
+    }
+  }
+
+  const unset = Object.keys(DEMO_ID).filter((k) => !DEMO_ID[k]);
+  if (!unset.length) {
+    console.log(
+      `  ✅ student ${DEMO_ID.studentId} · exam ${DEMO_ID.examId} · guardian child ${DEMO_ID.guardianStudentId}`,
+    );
+  } else {
+    console.log(`  ⏭️  unresolved: ${unset.join(", ")}`);
+    for (const k of unset) console.log(`     ${k}: ${needWhy(k)}`);
+    console.log("     (set SMOKE_STUDENT_ID / SMOKE_EXAM_ID to pin a pair)");
+  }
+}
+
 for (const role of ROLES) {
   console.log(`\n=== ${role.label} (${role.host}) ===`);
   const { status, cookie } = await login(role.host, role.id, role.pw);
@@ -223,7 +354,15 @@ for (const role of ROLES) {
     else if (ERROR_MARKERS.some((m) => r.body.includes(m))) bad(role.label, p, "error marker in HTML");
     else console.log(`  ✅ ${p}`);
   }
-  for (const [p, marker] of PRINT_PAGES[role.label] || []) {
+  for (const [tpl, marker, needs] of PRINT_PAGES[role.label] || []) {
+    const p = printPath(tpl);
+    const missing = needs.filter((k) => !DEMO_ID[k]);
+    if (missing.length) {
+      // No id, no page to judge: an unresolved half means the document the URL
+      // names cannot be known to exist, so this is a SKIP, not a failure.
+      console.log(`  ⏭️  SKIPPED ${p} — no ${missing.join(" or ")} (${missing.map(needWhy).join("; ")})`);
+      continue;
+    }
     const r = await get(role.host, p, cookie);
     if (r.status !== 200) bad(role.label, p, `HTTP ${r.status}${r.location ? " → " + r.location : ""}`);
     else if (ERROR_MARKERS.some((m) => r.body.includes(m))) bad(role.label, p, "error marker in HTML");
@@ -528,6 +667,32 @@ console.log("\n=== app assistant (grounded, no external AI) ===");
 console.log("\n=== teacher phone layout (headless browser) ===");
 {
   const teacher = ROLES.find((r) => r.label === "teacher");
+
+  /**
+   * The exam whose marks sheet is still OPEN, or null with the reason.
+   *
+   * `/teacher/marks` disables every mark input while its exam is published (the
+   * page locks a published sheet by design), so a tenant whose exams are all
+   * published has nothing editable to measure. The two marks checks below then
+   * SKIP with this reason instead of failing on a field that is locked on
+   * purpose. The list is the page's own source (`/api/exams`), so the id is
+   * always one the picker offers.
+   */
+  async function openExam(host, cookie) {
+    const res = await get(host, "/api/exams", cookie);
+    if (res.status !== 200) return { id: null, why: `/api/exams answered HTTP ${res.status}` };
+    let exams = [];
+    try {
+      exams = JSON.parse(res.body)?.data || [];
+    } catch {
+      return { id: null, why: "/api/exams returned a non-JSON body" };
+    }
+    if (!exams.length) return { id: null, why: "this school has no exams" };
+    const open = exams.find((e) => !e.published);
+    return open
+      ? { id: open.id, why: "" }
+      : { id: null, why: `all ${exams.length} exam(s) are published — a locked sheet is expected` };
+  }
   const reason =
     process.env.SMOKE_HEADLESS === "0"
       ? "SMOKE_HEADLESS=0"
@@ -552,6 +717,10 @@ console.log("\n=== teacher phone layout (headless browser) ===");
     if (session.status !== 200 || !session.cookie) {
       bad("teacher", "/teacher (headless layout)", `login HTTP ${session.status}`);
     } else {
+      // Resolve an exam whose sheet is still open before the browser work starts
+      // (read-only), so the marks checks below can skip rather than measure a
+      // sheet the app deliberately locks.
+      const openEx = await openExam(teacher.host, session.cookie);
       const browser = await HL.launch();
       if (!browser) {
         console.log("  ⏭️  SKIPPED — no Chrome/Edge found (set SMOKE_BROWSER to one)");
@@ -562,10 +731,12 @@ console.log("\n=== teacher phone layout (headless browser) ===");
           await page.setCookie({ name: cname, value: cval.join("="), url: `http://${teacher.host}/` });
           const origin = `http://${teacher.host}`;
 
-          // The sheet is client state: choose the first real exam option.
-          const pickExam = `(() => {
+          // The sheet is client state: choose the OPEN exam, by the id the API
+          // reported — not "the first option", which is how this check used to
+          // land on a published exam and then measure a locked field.
+          const pickExam = (id) => `(() => {
             const s = document.querySelectorAll('select')[0];
-            const o = s && [...s.options].find((x) => x.value);
+            const o = s && [...s.options].find((x) => x.value === ${JSON.stringify(id)});
             if (!o) return false;
             Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, o.value);
             s.dispatchEvent(new Event('change', { bubbles: true }));
@@ -793,10 +964,17 @@ console.log("\n=== teacher phone layout (headless browser) ===");
           }
 
           // --- 2. /teacher/marks at phone width: the sheet is an inset card list ---
+          //
+          // Both marks checks need an exam whose sheet is still OPEN. When there
+          // is none, the exam stays unpicked and the waits below stay short
+          // rather than timing out on a sheet this run did not open.
+          const marksSkip = openEx.id ? "" : `no unpublished exam to enter marks on — ${openEx.why}`;
+          const sheetWait = marksSkip ? 600 : 12000;
+
           await page.goto(`${origin}/teacher/marks`);
           await page.waitFor("document.querySelectorAll('select').length > 0", 12000);
-          await page.evaluate(pickExam);
-          const loadedPhone = await page.waitFor("document.querySelector('.ss-marks-row')", 12000);
+          if (!marksSkip) await page.evaluate(pickExam(openEx.id));
+          const loadedPhone = await page.waitFor("document.querySelector('.ss-marks-row')", sheetWait);
           const marksPhone = await page.evaluate(`(() => {
             const rows = [...document.querySelectorAll('.ss-marks-row')];
             const r0 = rows[0];
@@ -830,7 +1008,8 @@ console.log("\n=== teacher phone layout (headless browser) ===");
           if (marksPhone.overflow !== 0) phBad.push(`page overflows ${marksPhone.overflow}px`);
           if (marksPhone.tabbar < 1) phBad.push("no bottom bar on the marks page");
           if (marksPhone.pickers !== 2 || !marksPhone.pickerVisible) phBad.push("the exam/subject pickers are missing or hidden");
-          if (phBad.length) bad("teacher", "/teacher/marks @390 (headless)", phBad.join("; "));
+          if (marksSkip) console.log(`  ⏭️  SKIPPED /teacher/marks @390 — ${marksSkip}`);
+          else if (phBad.length) bad("teacher", "/teacher/marks @390 (headless)", phBad.join("; "));
           else
             console.log(
               `  ✅ /teacher/marks @390: ${marksPhone.rows} student cards (no table), a real editable numeric input ${marksPhone.inputH}px tall, grade \u201c${marksPhone.grade}\u201d + GPA shown, pickers still inline, page overflow 0`,
@@ -840,8 +1019,10 @@ console.log("\n=== teacher phone layout (headless browser) ===");
           await page.setViewport({ width: 1440, height: 900, mobile: false });
           await page.goto(`${origin}/teacher/marks`);
           await page.waitFor("document.querySelectorAll('select').length > 0", 12000);
-          await page.evaluate(pickExam);
-          await page.waitFor("document.querySelector('.ss-marks-row')", 12000);
+          if (!marksSkip) {
+            await page.evaluate(pickExam(openEx.id));
+            await page.waitFor("document.querySelector('.ss-marks-row')", sheetWait);
+          }
           const marksDesk = await page.evaluate(`(() => {
             const rows = [...document.querySelectorAll('.ss-marks-row')];
             const input = rows[0] && rows[0].querySelector('input');
@@ -859,7 +1040,8 @@ console.log("\n=== teacher phone layout (headless browser) ===");
           if (!marksDesk.editable) dkBad.push("the mark input is not editable at desktop width");
           if (marksDesk.tabbar !== 0) dkBad.push(`${marksDesk.tabbar} bottom bar(s) rendered at desktop width`);
           if (marksDesk.overflow !== 0) dkBad.push(`page overflows ${marksDesk.overflow}px`);
-          if (dkBad.length) bad("teacher", "/teacher/marks @1440 (headless)", dkBad.join("; "));
+          if (marksSkip) console.log(`  ⏭️  SKIPPED /teacher/marks @1440 — ${marksSkip}`);
+          else if (dkBad.length) bad("teacher", "/teacher/marks @1440 (headless)", dkBad.join("; "));
           else console.log(`  ✅ /teacher/marks @1440: the same ${marksDesk.rows} student cards, no table, editable inputs, no bottom bar`);
 
           // --- /teacher/remarks at phone width: the sheet really becomes cards ---
