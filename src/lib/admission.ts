@@ -3,7 +3,13 @@ import type { AdmissionStatus } from "@/lib/db";
 import { qrToken, qrPin } from "@/lib/qr";
 import { postToLedger, confirmPayment } from "@/lib/ledger";
 import { notifyUsers } from "@/lib/notify";
-import bcrypt from "bcryptjs";
+import { enrollStudent } from "@/lib/enroll";
+import { resolveSessionId } from "@/lib/academic";
+
+// The sibling/family helpers moved to lib/family.ts so the enrollment kernel can
+// use them without a circular import. They are re-exported here unchanged, so
+// every existing `import { … } from "@/lib/admission"` keeps working.
+export { findExistingSibling, linkSiblingFamily } from "@/lib/family";
 
 /**
  * PRD §4 — Admission module: a complete workflow, not an "Add Student" form.
@@ -102,11 +108,20 @@ export async function payAdmissionFeeAndEnroll(
   const payable = Number(admission.payableAmount || 0);
   if (payable <= 0) throw new Error("No payable amount set on this admission.");
 
-  // 1) Convert to a full student profile (§4.3)
+  // 1) Convert to a full student profile (§4.3), create/link the guardian login,
+  //    join the sibling's family (§5.4) and raise the fees — all through the
+  //    shared enrollment kernel, so this path, the walk-in intake and
+  //    POST /api/students agree on how a student is created. Orchestration
+  //    (payment, discount ledger, admission status, notify) stays here.
   const token = qrToken();
   const pin = qrPin();
-  const student = await prisma.student.create({
-    data: {
+  const feeSetting = await prisma.feeSetting.findUnique({ where: { schoolId: admission.schoolId } });
+  const sessionId = await resolveSessionId(admission.schoolId, admission.sessionId || null);
+
+  const enrolled = await enrollStudent({
+    schoolId: admission.schoolId,
+    branchId: admission.branchId || null,
+    student: {
       schoolId: admission.schoolId,
       admissionNo: admission.admissionNo || `ADM-${Date.now().toString().slice(-6)}`,
       name: admission.fullName,
@@ -135,67 +150,28 @@ export async function payAdmissionFeeAndEnroll(
       status: "ACTIVE",
       qrToken: token,
       qrPin: pin,
-      sessionId: admission.sessionId || null,
+      sessionId,
       branchId: admission.branchId || null,
     },
-  });
-
-  // 2) Guardian account auto-create/link (§4.3) + sibling linking (§5.4)
-  let guardianUserId: string | null = null;
-  if (admission.guardianEmail) {
-    const email = admission.guardianEmail.toLowerCase();
-    let gUser = await prisma.user.findUnique({ where: { email } });
-    if (!gUser) {
-      gUser = await prisma.user.create({
-        data: {
-          email,
-          name: admission.guardianName || "Guardian",
-          role: "GUARDIAN",
-          schoolId: admission.schoolId,
-          phone: admission.guardianPhone || null,
-          passwordHash: bcrypt.hashSync("Guardian@123", 10),
-        },
-      });
-    }
-    guardianUserId = gUser.id;
-    await prisma.student.update({ where: { id: student.id }, data: { guardianUserId } });
-  }
-
-  // Sibling link (§5.4) through the shared helper, so an enrolled child and a
-  // walk-in admitted at the desk end up in the same family with one login.
-  const sibling = await findExistingSibling(admission.schoolId, student.id, guardianUserId, admission.guardianPhone);
-  if (sibling) {
-    await linkSiblingFamily({ schoolId: admission.schoolId, studentId: student.id, siblingId: sibling.id, guardianUserId });
-  }
-
-  // 3) Fees: admission fee (with discount applied) + first monthly fee
-  const feeSetting = await prisma.feeSetting.findUnique({ where: { schoolId: admission.schoolId } });
-  const admissionFee = await prisma.fee.create({
-    data: {
-      schoolId: admission.schoolId,
-      studentId: student.id,
-      title: "Admission Fee",
-      amount: payable,
-      paidAmount: 0,
-      feeType: "ADMISSION",
-      status: "UNPAID",
-      dueDate: new Date(),
+    guardian: {
+      create: true,
+      email: admission.guardianEmail,
+      name: admission.guardianName,
+      phone: admission.guardianPhone || null,
+    },
+    family: { findExisting: true, guardianPhone: admission.guardianPhone },
+    fees: {
+      rows: [
+        { title: "Admission Fee", amount: payable, feeType: "ADMISSION" },
+        ...(feeSetting ? [{ title: "Monthly Fee", amount: Number(feeSetting.monthlyFee), feeType: "MONTHLY", dueInDays: 30 }] : []),
+      ],
     },
   });
-  if (feeSetting) {
-    await prisma.fee.create({
-      data: {
-        schoolId: admission.schoolId,
-        studentId: student.id,
-        title: "Monthly Fee",
-        amount: Number(feeSetting.monthlyFee),
-        paidAmount: 0,
-        feeType: "MONTHLY",
-        status: "UNPAID",
-        dueDate: new Date(Date.now() + 30 * 86400000),
-      },
-    });
-  }
+
+  const student = enrolled.student;
+  const guardianUserId = enrolled.guardianUserId;
+  if (!enrolled.admissionFeeId) throw new Error("Admission fee row was not created.");
+  const admissionFee = { id: enrolled.admissionFeeId };
 
   // 4) Confirm the admission fee payment via the central ledger flow
   await confirmPayment({
@@ -253,54 +229,9 @@ export async function payAdmissionFeeAndEnroll(
  * exactly the same rules.
  * ==========================================================================*/
 
-/** The nearest already-enrolled child to link a new student to, or null. */
-export async function findExistingSibling(
-  schoolId: string,
-  studentId: string,
-  guardianUserId: string | null,
-  guardianPhone?: string | null
-) {
-  // The guardian ACCOUNT is the strongest signal (a family that already signed
-  // in shares it); the phone number is the fallback the enquiry form implies.
-  const byUser = guardianUserId
-    ? await prisma.student.findFirst({ where: { schoolId, id: { not: studentId }, guardianUserId } })
-    : null;
-  if (byUser) return byUser;
-  if (!guardianPhone) return null;
-  return prisma.student.findFirst({ where: { schoolId, id: { not: studentId }, guardianPhone } });
-}
-
-/**
- * Put a new student in the same family as a sibling (§5.4).
- *
- * The sibling's family id wins when it has one; otherwise a new one is minted and
- * stamped on BOTH children, which is what makes the guardian portal list them
- * together (see /api/parent/siblings). The family also shares one login: whichever
- * of the two already has a guardian account keeps it for both.
- */
-export async function linkSiblingFamily(opts: {
-  schoolId: string;
-  studentId: string;
-  siblingId: string;
-  guardianUserId?: string | null;
-}): Promise<{ familyId: string; siblingName: string; guardianUserId: string | null }> {
-  const sibling = await prisma.student.findUnique({ where: { id: opts.siblingId } });
-  if (!sibling || sibling.schoolId !== opts.schoolId) throw new Error("Sibling not found in this school.");
-  if (sibling.id === opts.studentId) throw new Error("A student cannot be their own sibling.");
-
-  const familyId = sibling.familyId || `fam_${opts.studentId.slice(0, 10)}`;
-  if (!sibling.familyId) await prisma.student.update({ where: { id: sibling.id }, data: { familyId } });
-  await prisma.student.update({ where: { id: opts.studentId }, data: { familyId } });
-
-  const familyGuardian = sibling.guardianUserId || opts.guardianUserId || null;
-  if (familyGuardian && !sibling.guardianUserId) {
-    await prisma.student.update({ where: { id: sibling.id }, data: { guardianUserId: familyGuardian } });
-  }
-  if (familyGuardian && !opts.guardianUserId) {
-    await prisma.student.update({ where: { id: opts.studentId }, data: { guardianUserId: familyGuardian } });
-  }
-  return { familyId, siblingName: sibling.name, guardianUserId: familyGuardian };
-}
+// findExistingSibling() and linkSiblingFamily() now live in lib/family.ts (they
+// are re-exported at the top of this file). Kept out of here so lib/enroll.ts can
+// use them without importing this module.
 
 /** One catalogue item with what is actually on the shelf right now. */
 export interface KitItem {

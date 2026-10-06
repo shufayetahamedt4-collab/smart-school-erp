@@ -92,7 +92,7 @@ export default function PortalChooser({ host, protocol = "http" }: { host: strin
         </div>
 
         <div className="mt-10 flex flex-wrap items-center gap-4 text-xs text-slate-400">
-          <Link href="/welcome" className="font-semibold text-indigo-400 hover:underline">
+          <Link href="/welcome" prefetch={false} className="font-semibold text-indigo-400 hover:underline">
             What is Amar E School? →
           </Link>
           <span className="text-slate-700">|</span>

@@ -282,36 +282,30 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
 
   // Once the shell knows who is signed in, warm the rest of this app's reads in
   // the background — pre-paying them is what makes the *first* click on any
-  // sidebar entry instant when a Firestore read costs 0.5–1.2s cold. The
-  // stagger keeps the warm from competing with the page being looked at.
+  // sidebar entry instant when a Firestore read costs 0.5–1.2s cold.
   //
-  // Returning to the tab is the other moment the cache has gone stale, so
-  // re-warm then too (rate-limited, visible tabs only) — that is what makes the
-  // first click after a long pause as fast as the first click after sign-in.
+  // This runs exactly ONCE per sign-in, is deferred until the browser is idle,
+  // and drips one request at a time (see `prefetch`), so it never competes with
+  // the page the user is looking at. It deliberately does NOT re-run on window
+  // focus / tab re-show: that fired the whole batch again on every return to the
+  // tab and collided with the page's own reads.
+  // The session read gates this shell: the page below only mounts once `me`
+  // resolves, so its own reads used to start a full round trip late. Start the
+  // current screen's reads NOW — in the same wave as the session read — so the
+  // page finds them already in flight or answered. Same machinery as the hover
+  // warm, and it only issues reads the screen was about to issue anyway.
+  useEffect(() => {
+    prefetch(dataForRoute(pathname));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!me) return;
     const sector = sectorForRole(me.user.role);
     if (!sector) return;
-    const list = warmListForSector(sector.key);
-
-    if (!warmed.current) {
-      warmed.current = true;
-      prefetch(list, 150);
-    }
-
-    let lastWarm = Date.now();
-    const rearm = () => {
-      if (document.visibilityState !== "visible") return;
-      if (Date.now() - lastWarm < 30_000) return;
-      lastWarm = Date.now();
-      prefetch(list, 150);
-    };
-    window.addEventListener("focus", rearm);
-    document.addEventListener("visibilitychange", rearm);
-    return () => {
-      window.removeEventListener("focus", rearm);
-      document.removeEventListener("visibilitychange", rearm);
-    };
+    if (warmed.current) return;
+    warmed.current = true;
+    prefetch(warmListForSector(sector.key), 150);
   }, [me]);
 
   const logout = async () => {

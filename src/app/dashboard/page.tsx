@@ -90,8 +90,8 @@ export default function SchoolDashboard() {
   const role = me?.user?.role || "";
 
   // First paint is exactly what it was: the stats read and the notices read.
-  // Everything else loads in the second wave below, so the command center never
-  // becomes slower to appear than the dashboard it replaces.
+  // These two gate the render, so the command center never appears later than
+  // the dashboard it replaces; the attention wave below starts alongside them.
   useEffect(() => {
     // Notices are optional for back-office roles (the permission matrix gives
     // e.g. the accountant no communication access) — the dashboard must still
@@ -103,15 +103,17 @@ export default function SchoolDashboard() {
   }, []);
 
   // The attention / schedule / activity wave. Each source is optional: a role
-  // that may not read it (or an empty school) simply yields null and the row or
-  // panel is omitted, never rendered with a fabricated number.
+  // that may not read it (or an empty school) simply yields 403/500, which
+  // `safe` turns into null, and the row or panel is omitted — never rendered
+  // with a fabricated number.
+  //
+  // These six reads are NOT role-dependent (the API enforces permissions, not
+  // the client), so they start with the page instead of being held back until
+  // the session payload resolves. That is what previously made them a second,
+  // dependent wave; they now run in the same wave as the stats/notices read.
   useEffect(() => {
-    if (!role) return;
     let cancelled = false;
     const safe = <T,>(p: Promise<T>) => p.catch(() => null);
-    // The live-class roster is the heaviest read and only the two admin roles
-    // may take it; every other role skips it entirely.
-    const canRoster = role === "SCHOOL_ADMIN" || role === "BRANCH_ADMIN";
 
     Promise.all([
       safe(api<StatusRow[]>("/api/leave-requests")),
@@ -120,9 +122,8 @@ export default function SchoolDashboard() {
       safe(api<MeetingSlot[]>("/api/meetings")),
       safe(api<{ unread: number; total: number }>("/api/notifications?countOnly=1")),
       safe(api<{ items: NotificationRow[] }>("/api/notifications?take=5")),
-      canRoster ? safe(api<RosterData>("/api/class-sessions?view=roster")) : Promise.resolve(null),
     ])
-      .then(([leaves, admissions, complaints, meetingSlots, notif, recent, rosterData]) => {
+      .then(([leaves, admissions, complaints, meetingSlots, notif, recent]) => {
         if (cancelled) return;
         setAttention({
           leaves: leaves ? leaves.filter((l) => l.status === "PENDING").length : null,
@@ -133,12 +134,24 @@ export default function SchoolDashboard() {
             : null,
           unread: notif ? notif.unread : null,
         });
-        setRoster(rosterData || null);
         setMeetings(meetingSlots ? meetingSlots.filter((s) => s.startAt && new Date(s.startAt).getTime() >= Date.now()).slice(0, 4) : []);
         setActivity(recent?.items || []);
       })
       .finally(() => { if (!cancelled) setAttentionLoading(false); });
 
+    return () => { cancelled = true; };
+  }, []);
+
+  // The live-class roster is the heaviest read and only the two admin roles may
+  // take it; every other role skips it entirely (the panel still renders its
+  // "open Live Classes" empty state, exactly as before). It is the one read that
+  // genuinely needs the role, so it waits for the session and then starts.
+  useEffect(() => {
+    if (role !== "SCHOOL_ADMIN" && role !== "BRANCH_ADMIN") return;
+    let cancelled = false;
+    api<RosterData>("/api/class-sessions?view=roster")
+      .catch(() => null)
+      .then((rosterData) => { if (!cancelled) setRoster(rosterData || null); });
     return () => { cancelled = true; };
   }, [role]);
 

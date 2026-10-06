@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createHash } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
@@ -123,20 +123,25 @@ async function signIn(req: NextRequest) {
 
   // ---------------------------------------------------------------- 2FA gate (PRD §14.1)
   // Gradual enrollment: only challenge when the user has actually enabled 2FA.
-  const tf = await twoFactorStatus(user.id).catch(() => ({ enrolled: false, enabled: false }));
-  if (needsTwoFactor(user.role) && tf.enabled) {
-    const challengeId = `c_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-    await prisma.setting.upsert({
-      where: { key: `2fa_challenge_${challengeId}` },
-      create: {
-        key: `2fa_challenge_${challengeId}`,
-        value: { userId: user.id, expiresAt: Date.now() + 5 * 60 * 1000 },
-      },
-      update: { value: { userId: user.id, expiresAt: Date.now() + 5 * 60 * 1000 } },
-    });
-    return NextResponse.json({
-      data: { twoFactorRequired: true, challengeId, email: user.email },
-    });
+  // The status read is itself a round trip, so only the roles that can ever
+  // enroll (SUPER_ADMIN / SCHOOL_ADMIN) pay for it — a teacher, guardian or
+  // student sign-in no longer waits on it.
+  if (needsTwoFactor(user.role)) {
+    const tf = await twoFactorStatus(user.id).catch(() => ({ enrolled: false, enabled: false }));
+    if (tf.enabled) {
+      const challengeId = `c_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+      await prisma.setting.upsert({
+        where: { key: `2fa_challenge_${challengeId}` },
+        create: {
+          key: `2fa_challenge_${challengeId}`,
+          value: { userId: user.id, expiresAt: Date.now() + 5 * 60 * 1000 },
+        },
+        update: { value: { userId: user.id, expiresAt: Date.now() + 5 * 60 * 1000 } },
+      });
+      return NextResponse.json({
+        data: { twoFactorRequired: true, challengeId, email: user.email },
+      });
+    }
   }
 
   return issueSession(user.id, req, user);
@@ -168,25 +173,28 @@ async function issueSession(userId: string, req: NextRequest, preloaded?: any) {
     }
   }
 
-  // Signing the token and recording the login are independent, and each is a
-  // full round trip on this network — so they overlap. A failed audit write
-  // must not cost the user their login (the `audit()` helper swallows too).
-  const [session] = await Promise.all([
-    signSession({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      schoolId: user.schoolId,
-      scope: user.scope || null,
-      branchId: user.branchId || null,
-    }),
-    prisma.auditLog
+  // Sign the session now; record the login AFTER the response is sent.
+  //
+  // The audit write is a full Firestore round trip and the user does not wait on
+  // it, so `after()` runs it once the response has gone out — still guaranteed
+  // (the platform tracks it), but no longer on the sign-in critical path. A
+  // failed audit write must never cost the user their login.
+  const session = await signSession({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    schoolId: user.schoolId,
+    scope: user.scope || null,
+    branchId: user.branchId || null,
+  });
+  after(() => {
+    void prisma.auditLog
       .create({
         data: { action: "LOGIN", userId: user.id, schoolId: user.schoolId, entity: "user", entityId: user.id },
       })
-      .catch(() => null),
-  ]);
+      .catch(() => null);
+  });
 
   const res = NextResponse.json({
     data: {

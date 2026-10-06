@@ -1,6 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { getDb } from "./firebase";
 import { Timestamp, type WriteBatch } from "firebase-admin/firestore";
+import {
+  pushdownConditionsFor,
+  classifyWhere,
+  recordQuery,
+  recordInclude,
+  diagEnabled,
+  type Pushdown,
+} from "./query-diagnostics";
 
 // ---------------------------------------------------------------------------
 // Public types (replaces @prisma/client imports)
@@ -136,10 +144,25 @@ const COLS: Record<string, string> = {
   classSession: "classSessions",
   calendarEvent: "calendarEvents",
   twoFactor: "twoFactor",
+  // ---- Bulk import (Phase 2) ----
+  importBatch: "importBatches",
+  importBatchRow: "importBatchRows",
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
 const rand = () => `r_${randomBytes(8).toString("hex")}`;
+
+/**
+ * Deterministic document id for an account identified by email.
+ *
+ * Exported so a caller that must know a guardian's id BEFORE writing it (the
+ * bulk-import batch path references it on the student document it writes in the
+ * same Firestore write-batch) computes exactly the id `idFor`/`idForCreate`
+ * would, instead of re-implementing the hash.
+ */
+export function userIdForEmail(email: string): string {
+  return `u_${sha1(String(email).toLowerCase())}`;
+}
 
 /** Local YYYY-MM-DD key for a Date (keeps upsert + query keys identical). */
 function dateKey(d: Date | string): string {
@@ -183,7 +206,7 @@ export function generatedFeeId(studentId: string, categoryId: string, period: st
 /** Deterministic doc id for models with a unique key (upsert-friendly). */
 function idFor(model: string, where: Record<string, any>): string | undefined {
   if (typeof where.id === "string") return where.id;
-  if (model === "user" && where.email) return `u_${sha1(String(where.email).toLowerCase())}`;
+  if (model === "user" && where.email) return userIdForEmail(String(where.email));
   if (model === "school" && where.slug) return `s_${sha1(String(where.slug))}`;
   if (model === "teacher" && where.userId) return `t_${String(where.userId)}`;
   if (model === "student" && where.qrToken) return `st_${String(where.qrToken)}`;
@@ -221,7 +244,7 @@ function idFor(model: string, where: Record<string, any>): string | undefined {
 
 /** Deterministic id used when CREATING a record (must match idFor). */
 function idForCreate(model: string, data: Record<string, any>): string | undefined {
-  if (model === "user" && data.email) return `u_${sha1(String(data.email).toLowerCase())}`;
+  if (model === "user" && data.email) return userIdForEmail(String(data.email));
   if (model === "school" && data.slug) return `s_${sha1(String(data.slug))}`;
   if (model === "teacher" && data.userId) return `t_${String(data.userId)}`;
   if (model === "student" && data.qrToken) return `st_${String(data.qrToken)}`;
@@ -721,26 +744,139 @@ const PULL_TTL_MS = Number(process.env.DB_READ_CACHE_MS || 30_000);
  */
 const PULL_GRACE_MS = Number(process.env.DB_READ_GRACE_MS ?? 120_000);
 
-const pullMemo = new Map<string, { at: number; value: any }>();
-const pullInflight = new Map<string, Promise<any>>();
+/** What a single write is allowed to invalidate — see invalidateDbCacheScope. */
+export interface DbCacheScope {
+  /** Only this model's entries are dropped; every model when omitted. */
+  model?: string;
+  /** When set, entries provably belonging to another school survive. */
+  schoolId?: string | null;
+}
+
+/** A cached pull plus the scope it provably belongs to. */
+type PullEntry = { at: number; value: any; model: string; schoolId: string | null };
 
 /**
- * Bumped by every write. A read that started before the write must never
- * publish its pre-write result afterwards — without this guard a slow pull
- * racing a submit could re-cache stale rows for another full TTL.
+ * The read cache is PROCESS-wide, not module-wide.
+ *
+ * Next.js evaluates a shared module like this one more than once in a single
+ * server process: every route bundle in dev carries its own copy and a hot
+ * reload re-instantiates it. Module-scoped maps would therefore be split into
+ * several independent caches — so a write served by one copy could not
+ * invalidate a read cached by another, and worse, evaluating a new route's
+ * bundle would silently wipe the cache a previous read had filled. That made
+ * write invalidation look like a whole-model eviction (e.g. publishing a notice
+ * cold-started the student list). Pinning every mutable cache to one object on
+ * `globalThis` keeps exactly one cache for the whole process, so scoped
+ * invalidation holds no matter which bundle did the write or the read.
+ *
+ *   - `pullMemo`/`pullInflight`/`inflightMeta`: the Firestore round-trip memo.
+ *   - `cacheGeneration`: bumped by every write; a read that started before the
+ *     write must never publish its pre-write result afterwards — without this
+ *     guard a slow pull racing a submit could re-cache stale rows for a full TTL.
+ *   - `schoolWriteGen`/`globalWriteGen`: per-school/global write counters, so a
+ *     DERIVED cache (the /api/stats payload) can invalidate on ANY write to a
+ *     school while leaving other schools' cached dashboards untouched. A write
+ *     that cannot be attributed to one school bumps the global counter.
+ *   - `refMemo`: the school-scoped reference memo.
  */
-let cacheGeneration = 0;
+interface DbCacheState {
+  pullMemo: Map<string, PullEntry>;
+  pullInflight: Map<string, Promise<any>>;
+  inflightMeta: Map<string, { model: string; schoolId: string | null }>;
+  cacheGeneration: number;
+  schoolWriteGen: Map<string, number>;
+  globalWriteGen: number;
+  refMemo: Map<string, { at: number; rows: any[] }>;
+}
 
-/** Drop every cached pull. Write paths call this so a submit is never stale. */
+const DB_CACHE_GLOBAL_KEY = "__smartSchoolDbCache__";
+const dbGlobal = globalThis as unknown as { [DB_CACHE_GLOBAL_KEY]?: DbCacheState };
+const dbState: DbCacheState =
+  dbGlobal[DB_CACHE_GLOBAL_KEY] ||
+  (dbGlobal[DB_CACHE_GLOBAL_KEY] = {
+    pullMemo: new Map(),
+    pullInflight: new Map(),
+    inflightMeta: new Map(),
+    cacheGeneration: 0,
+    schoolWriteGen: new Map(),
+    globalWriteGen: 0,
+    refMemo: new Map(),
+  });
+
+// Aliases so the rest of this module keeps its terse names. The maps are the
+// SAME instances across every module evaluation (so mutations are shared); the
+// two counters are read/written through `dbState` directly.
+const pullMemo = dbState.pullMemo;
+const pullInflight = dbState.pullInflight;
+const inflightMeta = dbState.inflightMeta;
+const schoolWriteGen = dbState.schoolWriteGen;
+const refMemo = dbState.refMemo;
+
+/** The write generation for a school — changes on every write that can reach it. */
+export function schoolWriteGeneration(schoolId: string | null | undefined): number {
+  if (!schoolId) return dbState.globalWriteGen;
+  return dbState.globalWriteGen + (schoolWriteGen.get(schoolId) || 0);
+}
+
+/**
+ * Drop every cached pull. Write paths call this so a submit is never stale.
+ *
+ * This is the *global* escape hatch — used when a write cannot be attributed to
+ * one model (e.g. it also created a related model in the same call). Ordinary
+ * writes go through `invalidateDbCacheScope`, which drops only what the write
+ * can actually have made stale.
+ */
 export function invalidateDbCache(): void {
-  cacheGeneration++;
-  pullMemo.clear();
-  // In-flight reads are dropped too: a read that started BEFORE the write must
-  // not be handed to anyone who asks AFTER it. Without this, a background
-  // refresh running across a submit hands out the pre-write value to the very
-  // next reader — e.g. a school changes its grading scale and the exam sheet
-  // opened a second later still grades with the old bands.
-  pullInflight.clear();
+  invalidateDbCacheScope({});
+}
+
+/**
+ * Drop the cached pulls a single write can have made stale, and nothing else.
+ *
+ * A write to `model` in `schoolId` can only stale that model's cached reads
+ * (relation data is cached per model too), so:
+ *   - entries of another model are kept;
+ *   - entries PROVABLY belonging to another school are kept.
+ * An entry whose school cannot be proven (`schoolId === null` — a cross-school
+ * pull, a bare count, a document with no schoolId) is dropped, because we
+ * cannot show the write missed it. Omitting `model` drops across every model,
+ * which is what the reference/stats invalidators want.
+ *
+ * `cacheGeneration` is still bumped on every call, so a read that started
+ * BEFORE the write can never publish its pre-write rows afterwards — the guard
+ * `loadPull` relies on. Only the *deletion* is scoped; scoping the generation
+ * would risk a stale publish instead.
+ */
+export function invalidateDbCacheScope(scope: DbCacheScope): void {
+  dbState.cacheGeneration++;
+  const { model, schoolId } = scope;
+  if (schoolId) schoolWriteGen.set(schoolId, (schoolWriteGen.get(schoolId) || 0) + 1);
+  else dbState.globalWriteGen++;
+
+  // Nothing to keep anything by: a true global clear.
+  if (!model && !schoolId) {
+    pullMemo.clear();
+    pullInflight.clear();
+    inflightMeta.clear();
+    return;
+  }
+
+  for (const [key, entry] of pullMemo) {
+    if (model && entry.model !== model) continue;
+    if (schoolId && entry.schoolId && entry.schoolId !== schoolId) continue;
+    pullMemo.delete(key);
+  }
+  // In-flight reads are dropped on the same rule: a read that started BEFORE the
+  // write must not be handed to anyone who asks AFTER it. Without this, a
+  // background refresh running across a submit hands out the pre-write value to
+  // the very next reader — e.g. a school changes its grading scale and the exam
+  // sheet opened a second later still grades with the old bands.
+  for (const [key, meta] of inflightMeta) {
+    if (model && meta.model !== model) continue;
+    if (schoolId && meta.schoolId && meta.schoolId !== schoolId) continue;
+    pullInflight.delete(key);
+    inflightMeta.delete(key);
+  }
 }
 
 /** Evict entries that are past the stale window and nobody may serve any more. */
@@ -756,26 +892,65 @@ function prunePullMemo(): void {
  * panels ask for the same collection fires three identical 0.5–1.2s queries
  * instead of one.
  */
-function loadPull<T>(key: string, run: () => Promise<T>): Promise<T> {
+function loadPull<T>(
+  key: string,
+  model: string,
+  schoolHint: string | null | undefined,
+  run: () => Promise<T>
+): Promise<T> {
   const existing = pullInflight.get(key);
   if (existing) return existing as Promise<T>;
-  const generation = cacheGeneration;
+  const generation = dbState.cacheGeneration;
   const started = Promise.resolve()
     .then(run)
     .then((value) => {
-      if (generation === cacheGeneration) {
-        pullMemo.set(key, { at: Date.now(), value });
+      if (generation === dbState.cacheGeneration) {
+        pullMemo.set(key, {
+          at: Date.now(),
+          value,
+          model,
+          // Trust the query's pushdown filter when there is one; otherwise read
+          // the school off the real rows (never guess from the key).
+          schoolId: schoolHint ?? deriveSchoolId(value),
+        });
         prunePullMemo();
       }
       return value as T;
     });
   pullInflight.set(key, started);
+  inflightMeta.set(key, { model, schoolId: schoolHint ?? null });
   void started
     .catch(() => null)
     .finally(() => {
-      if (pullInflight.get(key) === started) pullInflight.delete(key);
+      if (pullInflight.get(key) === started) {
+        pullInflight.delete(key);
+        inflightMeta.delete(key);
+      }
     });
   return started;
+}
+
+/**
+ * The single school a freshly-read value provably belongs to, or null.
+ *
+ * Read off the real rows — never guessed from a cache key — so it cannot
+ * mislabel: a list whose rows do not all carry the same `schoolId` (or carry
+ * none, like `marks`) is null, and a null entry is conservatively dropped by
+ * every write to its model.
+ */
+function deriveSchoolId(value: any): string | null {
+  if (Array.isArray(value)) {
+    let school: string | null = null;
+    for (const row of value) {
+      const id = row && typeof row === "object" ? row.schoolId : undefined;
+      if (typeof id !== "string") return null;
+      if (school === null) school = id;
+      else if (school !== id) return null;
+    }
+    return school;
+  }
+  if (value && typeof value === "object" && typeof value.schoolId === "string") return value.schoolId;
+  return null;
 }
 
 /**
@@ -788,65 +963,137 @@ function loadPull<T>(key: string, run: () => Promise<T>): Promise<T> {
  *   expired, within grace → answer from the memo, refresh in the background
  *   otherwise             → wait for a fresh read (deduped across readers)
  */
-async function cachedValue<T>(key: string, run: () => Promise<T>): Promise<T> {
+async function cachedValue<T>(
+  key: string,
+  model: string,
+  schoolHint: string | null | undefined,
+  run: () => Promise<T>
+): Promise<T> {
   const hit = pullMemo.get(key);
   if (hit) {
     const age = Date.now() - hit.at;
     if (age < PULL_TTL_MS) return structuredClone(hit.value);
     if (age < PULL_GRACE_MS) {
       // Stale-while-revalidate: a click never waits for the refresh.
-      void loadPull(key, run).catch(() => null);
+      void loadPull(key, model, schoolHint, run).catch(() => null);
       return structuredClone(hit.value);
     }
   }
-  return structuredClone(await loadPull(key, run));
+  return structuredClone(await loadPull(key, model, schoolHint, run));
 }
 
 
-async function fetchAll(model: string, where?: Record<string, any>): Promise<any[]> {
-  let q: FirebaseFirestore.Query = col(model);
+/**
+ * Pushdown for a model — thin wrapper over the shared classifier in
+ * `query-diagnostics.ts`, so the data layer that ENFORCES the rule and the
+ * regression guard that ASSERTS it can never disagree. See that module for the
+ * safety rule (filterList re-applies the full predicate, so a pushed subset can
+ * only shrink the transfer, never change the result).
+ */
+function pushdownConditions(model: string, where?: Record<string, any>): Pushdown[] {
+  const rels = RELS[model];
+  return pushdownConditionsFor(where, (field) => !!(rels && rels[field]));
+}
+
+/**
+ * Dev/test-only classification of one read, plus the performance budget. A
+ * no-op unless DB_QUERY_DIAG=1, and it never logs a predicate value.
+ */
+function noteQueryDiag(kind: "fetch" | "count", model: string, where: Record<string, any> | undefined): void {
+  if (!diagEnabled()) return;
+  const rels = RELS[model];
+  const c = classifyWhere(where, (field) => !!(rels && rels[field]));
+  recordQuery({
+    kind,
+    model,
+    cls: kind === "count" && c.cls === "SAFE_PUSHED" ? "NATIVE_COUNT" : c.cls,
+    pushed: c.pushed,
+    unpushed: c.unpushed,
+    schoolScoped: !!(where && typeof where.schoolId === "string"),
+  });
+}
+
+function applyPushdown(base: FirebaseFirestore.Query, pushed: Pushdown[]): FirebaseFirestore.Query {
+  let q = base;
+  for (const c of pushed) q = c.op === "in" ? q.where(c.field, "in", c.value) : q.where(c.field, "==", c.value);
+  return q;
+}
+
+/** Cache key that captures every pushed condition (the only thing the pull depends on). */
+function pushdownKey(model: string, pushed: Pushdown[]): string {
   let key = model;
-  // Push one equality filter down (single-field, avoids composite indexes).
-  if (where && typeof where.schoolId === "string") {
-    q = q.where("schoolId", "==", where.schoolId);
-    key += `|schoolId=${where.schoolId}`;
-    // Bonus pushdown: schoolId equality + a date range works with the
-    // (schoolId, date) composite index and bounds the transfer for
-    // time-windowed reads (e.g. the 7-day stats trend). Falls back to the
-    // equality-only query while the index builds or if it is missing.
-    const dateCond = where.date;
-    if (dateCond && typeof dateCond === "object" && !(dateCond instanceof Date)) {
-      const gte = dateCond.gte instanceof Date ? dateCond.gte : null;
-      const lt = dateCond.lt instanceof Date ? dateCond.lt : null;
-      if (gte || lt) {
-        let ranged: FirebaseFirestore.Query = q;
-        if (gte) ranged = ranged.where("date", ">=", gte);
-        if (lt) ranged = ranged.where("date", "<", lt);
-        // Distinct key from the equality-only fallback below: a wider result
-        // must never be served for the narrower range.
-        const rangeKey = `${key}|date=${gte ? gte.getTime() : ""}:${lt ? lt.getTime() : ""}`;
-        try {
-          return await cachedValue(rangeKey, async () => {
-            const snap = await ranged.get();
-            return snap.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
-          });
-        } catch {
-          // composite index not ready — fall through to equality-only pull;
-          // the in-memory filter still enforces the range.
-        }
-      }
-    }
-  } else if (where) {
-    const first = Object.entries(where).find(
-      ([, v]) => v !== undefined && v !== null && typeof v !== "object"
-    );
-    if (first) {
-      q = q.where(first[0], "==", first[1]);
-      key += `|${first[0]}=${String(first[1])}`;
+  for (const c of pushed) key += `|${c.field}=${c.op}:${JSON.stringify(c.value)}`;
+  return key;
+}
+
+async function fetchAll(model: string, where?: Record<string, any>): Promise<any[]> {
+  // The school this pull provably belongs to (its pushdown filter), used to
+  // scope write invalidation — see invalidateDbCacheScope.
+  const schoolHint = where && typeof where.schoolId === "string" ? where.schoolId : undefined;
+  noteQueryDiag("fetch", model, where);
+
+  // --- by-id reads: ONE round trip instead of a whole-collection scan --------
+  // `where: { id: { in: [...] } }` used to push nothing (the synthetic id is not
+  // a stored field) and pulled every document in the collection. Fetch the exact
+  // documents instead; the in-memory filter still applies the full `where`.
+  const idCond = where?.id;
+  if (idCond !== undefined) {
+    const requested =
+      typeof idCond === "string"
+        ? [idCond]
+        : idCond && typeof idCond === "object" && Array.isArray((idCond as any).in)
+          ? ((idCond as any).in as any[])
+          : null;
+    if (requested) {
+      const ids = requested.filter((v) => typeof v === "string");
+      // An empty id set can match nothing, so answer without a round trip.
+      if (ids.length === 0) return [];
+      const sorted = [...ids].sort();
+      const key = `ids:${model}:${sha1(sorted.join("\u0000"))}`;
+      return cachedValue(key, model, schoolHint, async () => {
+        const chunks: string[][] = [];
+        for (let i = 0; i < sorted.length; i += 300) chunks.push(sorted.slice(i, i + 300));
+        const snaps = (
+          await Promise.all(chunks.map((c) => getDb().getAll(...c.map((id) => col(model).doc(id)))))
+        ).flat();
+        return snaps.filter((s) => s.exists).map((s) => ({ id: s.id, ...conv(s.data()) }));
+      });
     }
   }
-  return cachedValue(key, async () => {
-    const snap = await q.get();
+
+  const pushed = pushdownConditions(model, where);
+  const base = applyPushdown(col(model), pushed);
+  const key = pushdownKey(model, pushed);
+
+  // Bonus pushdown: schoolId equality + a date range works with the
+  // (schoolId, date) composite index and bounds the transfer for time-windowed
+  // reads (e.g. the 7-day stats trend). Falls back to the equality-only query
+  // while the index builds or if it is missing.
+  const dateCond = where?.date;
+  if (typeof where?.schoolId === "string" && dateCond && typeof dateCond === "object" && !(dateCond instanceof Date)) {
+    const gte = dateCond.gte instanceof Date ? dateCond.gte : null;
+    const lt = dateCond.lt instanceof Date ? dateCond.lt : null;
+    if (gte || lt) {
+      let ranged = base;
+      if (gte) ranged = ranged.where("date", ">=", gte);
+      if (lt) ranged = ranged.where("date", "<", lt);
+      // Distinct key from the equality-only fallback below: a wider result
+      // must never be served for the narrower range.
+      const rangeKey = `${key}|date=${gte ? gte.getTime() : ""}:${lt ? lt.getTime() : ""}`;
+      try {
+        return await cachedValue(rangeKey, model, schoolHint, async () => {
+          const snap = await ranged.get();
+          return snap.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
+        });
+      } catch {
+        // composite index not ready — fall through to equality-only pull;
+        // the in-memory filter still enforces the range.
+      }
+    }
+  }
+
+  return cachedValue(key, model, schoolHint, async () => {
+    const snap = await base.get();
     return snap.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
   });
 }
@@ -856,16 +1103,19 @@ async function fetchAll(model: string, where?: Record<string, any>): Promise<any
  * sections, subjects, teachers, students…). Routes that resolve names via
  * repeated pulls reuse one fetch for ~3s; write routes call
  * `invalidateReferenceCache(schoolId)` so pages never see stale names.
+ *
+ * The map itself lives on `dbState` (see DbCacheState) so the reference memo,
+ * like the pull cache, survives a module re-evaluation.
  */
 const REF_TTL_MS = 3_000;
-const refMemo = new Map<string, { at: number; rows: any[] }>();
 
 export function invalidateReferenceCache(schoolId: string | null | undefined): void {
   if (!schoolId) return;
   for (const k of refMemo.keys()) if (k.endsWith(`:${schoolId}`)) refMemo.delete(k);
-  // Any write must also drop the raw pull cache: a freshly submitted row has
-  // to show up on the very next read, not after the TTL.
-  invalidateDbCache();
+  // Any write must also drop the raw pull cache so a freshly submitted row shows
+  // up on the very next read — but only THIS school's pulls (plus the
+  // un-attributable cross-school ones), not another school's cached reads.
+  invalidateDbCacheScope({ schoolId });
 }
 
 export async function schoolReference(model: string, schoolId: string): Promise<any[]> {
@@ -926,7 +1176,9 @@ export async function userNamesFor(
  * instead of one each.
  */
 async function getDoc(model: string, id: string): Promise<any> {
-  return cachedValue(`doc:${model}:${id}`, async () => {
+  // A single document has no query filter to lean on, so its school is derived
+  // from the document itself once it is read (see deriveSchoolId).
+  return cachedValue(`doc:${model}:${id}`, model, undefined, async () => {
     const snap = await col(model).doc(id).get();
     return snap.exists ? { id: snap.id, ...conv(snap.data()) } : null;
   });
@@ -936,11 +1188,26 @@ class Ctx {
   private docCache = new Map<string, Promise<any>>();
   private listCache = new Map<string, Promise<any[]>>();
   private allCache = new Map<string, Promise<any[]>>();
+  /**
+   * Per-related-model read counters for the include / N+1 audit. Populated only
+   * while DB_QUERY_DIAG=1; carries no application data.
+   */
+  readonly related = new Map<string, { reads: number; deduped: number }>();
+
+  private noteRelated(model: string, miss: boolean): void {
+    if (!diagEnabled()) return;
+    const e = this.related.get(model) || { reads: 0, deduped: 0 };
+    if (miss) e.reads++;
+    else e.deduped++;
+    this.related.set(model, e);
+  }
 
   doc(model: string, id: string | undefined | null): Promise<any> {
     if (!id) return Promise.resolve(null);
     const key = `${model}:${id}`;
-    if (!this.docCache.has(key)) {
+    const miss = !this.docCache.has(key);
+    this.noteRelated(model, miss);
+    if (miss) {
       // Relation lookups (every `include: { school: … }`, `student: …`) are
       // single-document gets; they cost a full round trip each unless they
       // share the process memo, which is why one `include` used to add ~530ms
@@ -952,11 +1219,13 @@ class Ctx {
 
   list(model: string, via: string, parentId: string): Promise<any[]> {
     const key = `${model}:${via}:${parentId}`;
-    if (!this.listCache.has(key)) {
+    const miss = !this.listCache.has(key);
+    this.noteRelated(model, miss);
+    if (miss) {
       // Same reasoning for to-many relations: a query per parent document.
       this.listCache.set(
         key,
-        cachedValue(`list:${model}:${via}=${parentId}`, async () => {
+        cachedValue(`list:${model}:${via}=${parentId}`, model, undefined, async () => {
           const s = await col(model).where(via, "==", parentId).get();
           return s.docs.map((d) => ({ id: d.id, ...conv(d.data()) }));
         })
@@ -1183,6 +1452,24 @@ async function applyInclude(doc: any, model: string, include: Record<string, any
   );
 }
 
+/**
+ * Dev/test-only: report how many related reads an include (or a relation filter
+ * in `where`) caused, so an N+1 pattern is visible. A no-op unless
+ * DB_QUERY_DIAG=1; logs model names and counts only, never values.
+ */
+function reportIncludes(parentModel: string, ctx: Ctx): void {
+  if (!diagEnabled() || ctx.related.size === 0) return;
+  for (const [relatedModel, e] of ctx.related) {
+    recordInclude({
+      model: parentModel,
+      key: relatedModel,
+      relatedReads: e.reads,
+      deduped: e.deduped,
+      nPlusOne: e.reads > 1,
+    });
+  }
+}
+
 async function shape(doc: any, model: string, spec: any, ctx: Ctx): Promise<any> {
   if (!spec) return doc;
   if (spec === true) return doc;
@@ -1236,6 +1523,7 @@ async function findUnique(model: string, args: any): Promise<any> {
   }
   if (!doc) return null;
   if (args?.include) await applyInclude(doc, model, args.include, ctx);
+  reportIncludes(model, ctx);
   if (args?.select) return shape(doc, model, { select: args.select }, ctx);
   return doc;
 }
@@ -1253,6 +1541,7 @@ async function findFirst(model: string, args: any): Promise<any> {
   }
   if (!doc) return null;
   if (args?.include) await applyInclude(doc, model, args.include, ctx);
+  reportIncludes(model, ctx);
   if (args?.select) return shape(doc, model, { select: args.select }, ctx);
   return doc;
 }
@@ -1262,6 +1551,7 @@ async function findMany(model: string, args: any): Promise<any[]> {
   let list = await fetchAll(model, args?.where);
   list = await filterList(list, model, args?.where, ctx);
   if (args?.include) await Promise.all(list.map((d) => applyInclude(d, model, args.include, ctx)));
+  reportIncludes(model, ctx);
   if (args?.orderBy) list = sortBy(list, args.orderBy);
   if (args?.take !== undefined) list = list.slice(0, args.take);
   if (args?.select) list = await Promise.all(list.map((d) => shape(d, model, { select: args.select }, ctx)));
@@ -1270,17 +1560,25 @@ async function findMany(model: string, args: any): Promise<any[]> {
 
 async function count(model: string, args: any): Promise<number> {
   const where = args?.where || {};
-  const keys = Object.keys(where).filter((k) => where[k] !== undefined && where[k] !== null);
-  // Fast path: a lone string-equality filter pushes down to Firestore cleanly
-  // (schoolId, examId, …), so use the native count aggregation instead of
-  // pulling every document just to count it.
-  if (keys.length === 1 && typeof where[keys[0]] === "string") {
+  noteQueryDiag("count", model, where);
+  const defined = Object.entries(where).filter(([, v]) => v !== undefined && v !== null);
+  const pushed = pushdownConditions(model, where);
+  // Fast path: when EVERY condition is one this shim can push down, ask Firestore
+  // to COUNT instead of pulling every document just to count it. This stays
+  // correct because filterList would re-apply exactly those same conditions.
+  if (defined.length > 0 && pushed.length === defined.length) {
+    const q = applyPushdown(col(model), pushed);
     // Counts are the third uncached round trip: cache the NUMBER (a Firestore
     // snapshot is not structured-cloneable, the count is).
-    return await cachedValue(`count:${model}:${keys[0]}=${where[keys[0]]}`, async () => {
-      const snap = await col(model).where(keys[0], "==", where[keys[0]]).count().get();
-      return Number((snap.data() as any).count ?? (snap.data() as any).totalCount ?? 0);
-    });
+    return await cachedValue(
+      `count:${pushdownKey(model, pushed)}`,
+      model,
+      typeof where.schoolId === "string" ? where.schoolId : undefined,
+      async () => {
+        const snap = await q.count().get();
+        return Number((snap.data() as any).count ?? (snap.data() as any).totalCount ?? 0);
+      }
+    );
   }
   const list = await filterAll(model, where);
   return list.length;
@@ -1291,6 +1589,8 @@ async function count(model: string, args: any): Promise<number> {
 // ---------------------------------------------------------------------------
 
 class Op<T = any> implements PromiseLike<T> {
+  /** Set by writeOp so $transaction can re-apply the scope after the commit. */
+  scope?: DbCacheScope | "all";
   constructor(private fn: (batch?: WriteBatch) => Promise<T>) {}
   then<TResult1 = T, TResult2 = never>(
     onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
@@ -1429,22 +1729,110 @@ async function deleteMany(model: string, where: Record<string, any>, batch?: Wri
 // Model facade (mirrors prisma.<model>.<method>)
 // ---------------------------------------------------------------------------
 
+/** True when a write payload carries a nested create/update on a related model. */
+function hasNestedWrite(modelName: string, data: any): boolean {
+  const rels = RELS[modelName];
+  if (!rels || !data || typeof data !== "object") return false;
+  for (const [k, v] of Object.entries(data)) {
+    const rel = rels[k];
+    if (rel && v && typeof v === "object" && ("create" in (v as any) || "update" in (v as any))) return true;
+  }
+  return false;
+}
+
+/** The school an already-cached document provably belongs to (no round trip). */
+function cachedDocSchool(modelName: string, id: string | undefined): string | null {
+  if (!id) return null;
+  const entry = pullMemo.get(`doc:${modelName}:${id}`);
+  return entry && entry.schoolId ? entry.schoolId : null;
+}
+
+type WriteKind = "create" | "createMany" | "update" | "updateMany" | "upsert" | "delete" | "deleteMany";
+
+/**
+ * The invalidation scope for one write, or "all" when it cannot be proven.
+ *
+ * The school is used as scope only when the write's own arguments (or an
+ * already-cached copy of the row it targets) prove it. An update/delete
+ * addressed by id alone proves nothing, so it falls back to a model-wide drop.
+ * A write that also touches a related model is only ever provably covered by
+ * the global clear. Every unproven case is MORE eviction, never less, so this
+ * can only under-optimise — it can never serve stale data.
+ */
+function writeScope(modelName: string, kind: WriteKind, args: any): DbCacheScope | "all" {
+  const data = args?.data;
+  const where = args?.where || {};
+
+  if (
+    (kind === "create" && hasNestedWrite(modelName, data)) ||
+    (kind === "update" && hasNestedWrite(modelName, data)) ||
+    (kind === "createMany" && Array.isArray(data) && data.some((r: any) => hasNestedWrite(modelName, r)))
+  ) {
+    return "all";
+  }
+
+  const wSid = typeof where.schoolId === "string" ? where.schoolId : undefined;
+  let schoolId: string | undefined;
+
+  if (kind === "create") {
+    schoolId = typeof data?.schoolId === "string" ? data.schoolId : undefined;
+  } else if (kind === "createMany") {
+    if (Array.isArray(data) && data.length) {
+      const ids = new Set<string>();
+      let complete = true;
+      for (const r of data) {
+        if (r && typeof r.schoolId === "string") ids.add(r.schoolId);
+        else {
+          complete = false;
+          break;
+        }
+      }
+      schoolId = complete && ids.size === 1 ? [...ids][0] : undefined;
+    }
+  } else if (kind === "upsert") {
+    const ids = new Set<string>();
+    for (const sid of [wSid, args?.create?.schoolId, args?.update?.schoolId]) {
+      if (typeof sid === "string") ids.add(sid);
+    }
+    schoolId = ids.size === 1 ? [...ids][0] : undefined;
+  } else {
+    // update | updateMany | delete | deleteMany
+    const dSid = typeof data?.schoolId === "string" ? data.schoolId : undefined;
+    // A data.schoolId that differs from the where clause could be MOVING the row
+    // between schools — then the old school's cached copy would go stale, so
+    // refuse to scope.
+    const moving = !!dSid && !!wSid && dSid !== wSid;
+    if (!moving) {
+      schoolId = wSid || cachedDocSchool(modelName, typeof where.id === "string" ? where.id : undefined) || undefined;
+    }
+  }
+
+  return schoolId ? { model: modelName, schoolId } : { model: modelName };
+}
+
 /**
  * Wrap a write so the pull cache is dropped the moment it lands.
  *
  * Freshness must not depend on a route remembering to invalidate: about
  * thirty write routes never call an invalidator, and a 5s cached read after
  * one of them would show pre-write data. Doing it here makes every write
- * through `prisma.*` correct by construction, including future routes.
+ * through `prisma.*` correct by construction, including future routes — and
+ * `writeScope` narrows that drop to the model (and school, when provable) the
+ * write actually touched, so one school's submit no longer cold-starts every
+ * other school's reads.
  * (The per-route `invalidateReferenceCache` / `invalidateStats` calls remain
  * for the other two layers — the reference memo and the stats payloads.)
  */
-function writeOp(fn: (b?: WriteBatch) => Promise<any>): Op {
-  return new Op(async (b) => {
+function writeOp(modelName: string, kind: WriteKind, args: any, fn: (b?: WriteBatch) => Promise<any>): Op {
+  const scope = writeScope(modelName, kind, args);
+  const op = new Op(async (b) => {
     const out = await fn(b);
-    invalidateDbCache();
+    if (scope === "all") invalidateDbCache();
+    else invalidateDbCacheScope(scope);
     return out;
   });
+  op.scope = scope;
+  return op;
 }
 
 function model(name: string) {
@@ -1453,13 +1841,13 @@ function model(name: string) {
     findFirst: (args?: any) => findFirst(name, args),
     findMany: (args?: any) => findMany(name, args),
     count: (args?: any) => count(name, args),
-    create: (args: any) => writeOp((b) => create(name, args?.data || {}, b)),
-    createMany: (args: any) => writeOp((b) => createMany(name, args?.data || [], b)),
-    update: (args: any) => writeOp((b) => update(name, args, b)),
-    updateMany: (args: any) => writeOp(() => updateMany(name, args)),
-    upsert: (args: any) => writeOp((b) => upsert(name, args, b)),
-    delete: (args: any) => writeOp((b) => del(name, args, b)),
-    deleteMany: (args: any) => writeOp((b) => deleteMany(name, args?.where || {}, b)),
+    create: (args: any) => writeOp(name, "create", args, (b) => create(name, args?.data || {}, b)),
+    createMany: (args: any) => writeOp(name, "createMany", args, (b) => createMany(name, args?.data || [], b)),
+    update: (args: any) => writeOp(name, "update", args, (b) => update(name, args, b)),
+    updateMany: (args: any) => writeOp(name, "updateMany", args, () => updateMany(name, args)),
+    upsert: (args: any) => writeOp(name, "upsert", args, (b) => upsert(name, args, b)),
+    delete: (args: any) => writeOp(name, "delete", args, (b) => del(name, args, b)),
+    deleteMany: (args: any) => writeOp(name, "deleteMany", args, (b) => deleteMany(name, args?.where || {}, b)),
   };
 }
 
@@ -1477,10 +1865,13 @@ async function transaction<T>(
     const batch = getDb().batch();
     for (const op of arg) await op._run(batch);
     await batch.commit();
-    // The individual ops already cleared the memo; clear once more after the
-    // commit so a reader that squeezed in between cannot leave stale rows
+    // The individual ops already dropped their scopes; drop them once more after
+    // the commit so a reader that squeezed in between cannot leave stale rows
     // cached for the whole TTL.
-    invalidateDbCache();
+    for (const op of arg) {
+      if (op.scope === undefined || op.scope === "all") invalidateDbCache();
+      else invalidateDbCacheScope(op.scope);
+    }
     return undefined;
   }
   if (typeof arg === "function") {
@@ -1512,6 +1903,8 @@ export const prisma = {
   message: model("message"),
   auditLog: model("auditLog"),
   setting: model("setting"),
+  importBatch: model("importBatch"),
+  importBatchRow: model("importBatchRow"),
   // ---- PRD v1.2 new models ----
   admission: model("admission"),
   admissionDocument: model("admissionDocument"),

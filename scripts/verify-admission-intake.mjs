@@ -215,6 +215,10 @@ check("the student exists with the intake fields", !!student && student.bloodGro
   student ? `${student.name} · ${student.admissionNo} · ${student.bloodGroup}` : "missing");
 check("the student is in the chosen class", student?.classId === class1.id);
 check("the student got QR credentials", !!student?.qrToken && !!student?.qrPin);
+// Phase 1: the intake path resolves the school's current academic session.
+const currentSessionNow = ((await req(HOSTS.school, "/api/academic-sessions", { cookie: admin })).data || []).find((s) => s.isCurrent)?.id || null;
+check("the intake student carries the current academic session", (student?.sessionId ?? null) === currentSessionNow,
+  `${student?.sessionId ?? "null"} vs ${currentSessionNow ?? "null"}`);
 
 // admission row
 const admissions = (await req(HOSTS.school, "/api/admissions?status=ENROLLED", { cookie: admin })).data || [];

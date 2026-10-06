@@ -12,10 +12,13 @@ export async function GET(req: NextRequest) {
   }
   const schoolId = session.schoolId!;
   const q = req.nextUrl.searchParams.get("q") || "";
+  // `?status=TRANSFERRED` lists the off-roll (transferred/withdrawn) students;
+  // the default stays the alumni archive, so existing callers are unchanged.
+  const status = req.nextUrl.searchParams.get("status") === "TRANSFERRED" ? "TRANSFERRED" : "ALUMNI";
   const alumni = await prisma.student.findMany({
     where: {
       schoolId,
-      status: "ALUMNI",
+      status,
       ...(q
         ? {
             OR: [

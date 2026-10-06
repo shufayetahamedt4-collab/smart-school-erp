@@ -134,14 +134,30 @@ export async function guardianChildren(session: SessionUser): Promise<GuardianCh
     createdAt: true,
     familyId: true,
   } as const;
-  const linked: any[] = await prisma.student.findMany({
-    where: { schoolId, guardianUserId: session.id },
-    select,
-  });
+  // Target the guardian's OWN rows instead of scanning the school.
+  //
+  // `where: { schoolId, guardianUserId }` is NOT a targeted query in this data
+  // layer: it pushes only the `schoolId` equality down to Firestore (a single
+  // equality filter is all the pull can push), then filters `guardianUserId` in
+  // memory — so every guardian read pulled the whole school's students (610 rows
+  // in the demo, ~4.9s cold on /api/auth/me) just to keep two. Asking for
+  // `guardianUserId` alone pushes THAT equality down (a single-field equality
+  // query — no composite index), so only the guardian's own rows cross the wire;
+  // the school boundary is enforced here, on the returned rows, which is exactly
+  // the filter the old query applied. Same rows, same order (the sort below),
+  // same isolation — just not the whole school.
+  const linked: any[] = (
+    await prisma.student.findMany({ where: { guardianUserId: session.id }, select })
+  ).filter((c) => c.schoolId === schoolId);
   const familyIds = [...new Set(linked.map((c) => c.familyId).filter((f): f is string => !!f))];
-  const siblings: any[] = familyIds.length
-    ? await prisma.student.findMany({ where: { schoolId, familyId: { in: familyIds } }, select })
-    : [];
+  // Same reasoning for the sibling expansion: a `familyId: { in: [...] }` clause
+  // is an object condition, so it pushed no filter and re-scanned the school
+  // under the cached `schoolId` key. One single-field equality pull per family id
+  // is targeted and index-free; the school check keeps it to this school.
+  const siblingLists = await Promise.all(
+    familyIds.map((familyId) => prisma.student.findMany({ where: { familyId }, select }))
+  );
+  const siblings: any[] = siblingLists.flat().filter((c) => c.schoolId === schoolId);
   const byId = new Map<string, any>();
   for (const c of [...linked, ...siblings]) byId.set(c.id, c);
   if (session.studentId && !byId.has(session.studentId)) {

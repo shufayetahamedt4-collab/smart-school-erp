@@ -32,6 +32,7 @@ import {
   QrCode,
   Briefcase,
   Bell,
+  Upload,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -79,8 +80,11 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/students", label: "Students", icon: GraduationCap },
+    { href: "/dashboard/students/import", label: "Bulk Import", icon: Upload },
+    { href: "/dashboard/onboarding", label: "Guardian Onboarding", icon: ShieldCheck },
     { href: "/dashboard/teachers", label: "Teachers", icon: Users },
     { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
+    { href: "/dashboard/academic-sessions", label: "Academic Sessions", icon: CalendarDays },
     { href: "/dashboard/subjects", label: "Subjects", icon: BookOpen },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
@@ -112,8 +116,11 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/students", label: "Students", icon: GraduationCap },
+    { href: "/dashboard/students/import", label: "Bulk Import", icon: Upload },
+    { href: "/dashboard/onboarding", label: "Guardian Onboarding", icon: ShieldCheck },
     { href: "/dashboard/teachers", label: "Teachers", icon: Users },
     { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
+    { href: "/dashboard/academic-sessions", label: "Academic Sessions", icon: CalendarDays },
     { href: "/dashboard/subjects", label: "Subjects", icon: BookOpen },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
@@ -242,6 +249,7 @@ const SCHOOL_PANEL_ROLES = ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR", "ACCOUN
 const SCHOOL_GROUP_OF: Record<string, string> = {
   "/dashboard": "overview",
   "/dashboard/classes": "academics",
+  "/dashboard/academic-sessions": "academics",
   "/dashboard/subjects": "academics",
   "/dashboard/routine": "academics",
   "/dashboard/live-classes": "academics",
@@ -251,6 +259,8 @@ const SCHOOL_GROUP_OF: Record<string, string> = {
   "/dashboard/resources": "academics",
   "/dashboard/admissions": "people",
   "/dashboard/students": "people",
+  "/dashboard/students/import": "people",
+  "/dashboard/onboarding": "people",
   "/dashboard/teachers": "people",
   "/dashboard/guardians": "people",
   "/dashboard/staff": "people",

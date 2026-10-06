@@ -59,13 +59,17 @@ export default function ParentDashboard() {
       .finally(() => setLoading(false));
   };
 
+  // The stats and notices reads do not depend on the session payload, so they
+  // start with the page instead of waiting for `/api/auth/me` to resolve. `me`
+  // only supplies the greeting and the child banner, which the shell is already
+  // fetching in parallel — the reads below now run in that same wave.
   useEffect(() => {
-    if (me) load();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me]);
+  }, []);
 
-  if (loading) return <LoadingScreen label="Loading parent dashboard…" />;
-  if (error || !stats || !me) return <ErrorState message={error || undefined} onRetry={load} />;
+  if (loading || !me) return <LoadingScreen label="Loading parent dashboard…" />;
+  if (error || !stats) return <ErrorState message={error || undefined} onRetry={load} />;
 
   const student = me.student;
   const BAR_COLORS = ["#4f46e5", "#7c3aed", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444"];

@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, guardianChildren } from "@/lib/auth";
 import { isBranchScoped } from "@/lib/permissions";
-import { statsCacheGet, statsCachePut } from "@/lib/stats-cache";
+import { statsCacheRead, statsCompute, statsRefresh } from "@/lib/stats-cache";
 import { money } from "@/lib/utils";
+
+/** A TEACHER session with no teacher row — surfaced as a 404 and never cached. */
+class MissingTeacherProfile extends Error {}
+/** Guardian session with no resolvable child (mapped to 404, never cached). */
+class MissingLinkedStudent extends Error {}
 
 /**
  * PRD §14.2 — dashboard stats for every role.
@@ -12,9 +17,10 @@ import { money } from "@/lib/utils";
  * so each branch resolves in ONE parallel batch of school-scoped pulls and
  * derives every relation/count in memory (the db layer only pushes one
  * equality filter down and would otherwise do per-relation or per-month
- * queries). Payloads are cached for 30s (src/lib/stats-cache.ts) and
- * invalidated by write routes on attendance/homework/marks/class-student
- * changes, so dashboards never show stale numbers after a submit.
+ * queries). Payloads are cached (src/lib/stats-cache.ts): fresh for 30s, then
+ * served while a fresh copy is refreshed in the background, and invalidated by
+ * write routes on attendance/homework/marks/class-student changes and by the
+ * school's write generation — so a dashboard is never stale after a submit.
  */
 
 export async function GET(req: NextRequest) {
@@ -37,9 +43,10 @@ export async function GET(req: NextRequest) {
     const branchId = session.role !== "SUPER_ADMIN" && isBranchScoped(session) ? session.branchId || "" : null;
 
     const cacheKey = `admin|${session.id}|${sid}|${branchId || ""}`;
-    const cached = statsCacheGet(cacheKey);
-    if (cached) return NextResponse.json(cached);
-
+    // Built as a thunk so the cache below can serve a previous payload now and
+    // refresh it in the background, and so concurrent cold readers share ONE
+    // recomputation instead of each pulling every collection again.
+    const produce = async () => {
     const scope = branchId ? { schoolId: sid, branchId } : { schoolId: sid };
     const [students, teachers, classes, examRows, notices, feeRows, attendanceAll, markRows] = await Promise.all([
       prisma.student.count({ where: { ...scope, active: true } }),
@@ -113,79 +120,117 @@ export async function GET(req: NextRequest) {
         trend: trendDays,
       },
     };
-    statsCachePut(cacheKey, payload, sid);
-    return NextResponse.json(payload);
+    return payload;
+    };
+
+    const cached = statsCacheRead(cacheKey);
+    if (cached) {
+      // Past the fresh window but still serveable: hand back the last payload
+      // now and recompute for the next reader behind it, so an idle dashboard
+      // never waits on the seconds-long cold Firestore pull. A write to the
+      // school drops the entry instead (see stats-cache), so a submit is never
+      // served stale.
+      if (cached.stale) statsRefresh(cacheKey, sid, produce);
+      return NextResponse.json(cached.payload);
+    }
+    return NextResponse.json(await statsCompute(cacheKey, sid, produce));
   }
 
   // ---- TEACHER
   if (session.role === "TEACHER") {
     const cacheKey = `teacher|${session.id}|${schoolId}`;
-    const cached = statsCacheGet(cacheKey);
-    if (cached) return NextResponse.json(cached);
-
-    // Single parallel batch. teacher-scoped pulls use the db layer's
-    // documented deterministic teacher id (t_<userId>) so they can fire in
-    // the same batch as the teacher lookup; the fallback below re-pulls with
-    // the real id if that convention ever drifts.
-    const teacherIdHint = `t_${session.id}`;
-    let [teacher, assignments, homeworks, allAttendanceToday, allSections, allStudents, classRooms, subjects] = await Promise.all([
-      prisma.teacher.findUnique({ where: { userId: session.id } }),
-      prisma.classAssignment.findMany({ where: { schoolId, teacherId: teacherIdHint } }),
-      prisma.homework.findMany({ where: { schoolId, teacherId: teacherIdHint }, orderBy: { createdAt: "desc" }, take: 5 }),
-      prisma.attendance.findMany({ where: { schoolId, date: today }, select: { markedById: true, status: true } }),
-      prisma.section.findMany({ where: { schoolId } }),
-      prisma.student.findMany({ where: { schoolId, active: true }, select: { id: true, classId: true } }),
-      prisma.classRoom.findMany({ where: { schoolId } }),
-      prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } }),
-    ]);
-    if (!teacher) return NextResponse.json({ error: "Teacher profile missing" }, { status: 404 });
-    if (teacher.id !== teacherIdHint) {
-      [assignments, homeworks] = await Promise.all([
-        prisma.classAssignment.findMany({ where: { schoolId, teacherId: teacher.id } }),
-        prisma.homework.findMany({ where: { schoolId, teacherId: teacher.id }, orderBy: { createdAt: "desc" }, take: 5 }),
+    // Same two-layer cache as the admin branch. A previous payload is served
+    // now while a fresh one is computed behind it, and concurrent cold readers
+    // collapse into ONE recomputation (statsCompute). Correctness does NOT rest
+    // on the time window — entries are tagged with the school's write
+    // generation, so ANY write to the school drops the payload and the next read
+    // recomputes fresh, and a dashboard right after a submit is never stale.
+    const produce = async () => {
+      // Single parallel batch. teacher-scoped pulls use the db layer's
+      // documented deterministic teacher id (t_<userId>) so they can fire in
+      // the same batch as the teacher lookup; the fallback below re-pulls with
+      // the real id if that convention ever drifts.
+      const teacherIdHint = `t_${session.id}`;
+      let [teacher, assignments, homeworks, allAttendanceToday, allSections, allStudents, classRooms, subjects] = await Promise.all([
+        prisma.teacher.findUnique({ where: { userId: session.id } }),
+        prisma.classAssignment.findMany({ where: { schoolId, teacherId: teacherIdHint } }),
+        prisma.homework.findMany({ where: { schoolId, teacherId: teacherIdHint }, orderBy: { createdAt: "desc" }, take: 5 }),
+        prisma.attendance.findMany({ where: { schoolId, date: today }, select: { markedById: true, status: true } }),
+        prisma.section.findMany({ where: { schoolId } }),
+        prisma.student.findMany({ where: { schoolId, active: true }, select: { id: true, classId: true } }),
+        prisma.classRoom.findMany({ where: { schoolId } }),
+        prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } }),
       ]);
-    }
+      // The profile check lives inside the cached thunk, so a cached or stale
+      // serve costs no round trip; a missing profile is surfaced as a 404 and is
+      // never cached (statsCompute rejects, so nothing is stored).
+      if (!teacher) throw new MissingTeacherProfile();
+      if (teacher.id !== teacherIdHint) {
+        [assignments, homeworks] = await Promise.all([
+          prisma.classAssignment.findMany({ where: { schoolId, teacherId: teacher.id } }),
+          prisma.homework.findMany({ where: { schoolId, teacherId: teacher.id }, orderBy: { createdAt: "desc" }, take: 5 }),
+        ]);
+      }
 
-    const sectionById = new Map(allSections.map((s) => [s.id, s]));
-    const studentsByClass = new Map<string, number>();
-    for (const s of allStudents) {
-      if (!s.classId) continue;
-      studentsByClass.set(s.classId, (studentsByClass.get(s.classId) || 0) + 1);
-    }
-    const classById = new Map(classRooms.map((c) => [c.id, c]));
-    const subjectById = new Map(subjects.map((s) => [s.id, s]));
-    const shapedAssignments = assignments.map((a: any) => ({
-      ...a,
-      classRoom: a.classId ? (classById.get(a.classId) ? { name: classById.get(a.classId)!.name } : null) : null,
-      section: a.sectionId ? (sectionById.get(a.sectionId) ? { name: sectionById.get(a.sectionId)!.name } : null) : null,
-      subject: a.subjectId ? (subjectById.get(a.subjectId) ? { name: subjectById.get(a.subjectId)!.name } : null) : null,
-    }));
-    // classes where this teacher has an assignment, with student counts + sections
-    const myClassIds = [...new Set(assignments.map((a: any) => a.classId))];
-    const myClasses = myClassIds
-      .map((classId) => classById.get(classId))
-      .filter((c): c is (typeof classRooms)[number] => Boolean(c))
-      .map((c) => ({
-        ...c,
-        _count: { students: studentsByClass.get(c.id) || 0 },
-        sections: allSections.filter((s) => s.classId === c.id).map((s) => ({ id: s.id, name: s.name })),
-      }))
-      // Firestore's implicit doc-id order, preserved from the old code path
-      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    const attendanceToday = allAttendanceToday.filter((a) => a.markedById === teacher.id).length;
+      const sectionById = new Map(allSections.map((s) => [s.id, s]));
+      const studentsByClass = new Map<string, number>();
+      for (const s of allStudents) {
+        if (!s.classId) continue;
+        studentsByClass.set(s.classId, (studentsByClass.get(s.classId) || 0) + 1);
+      }
+      const classById = new Map(classRooms.map((c) => [c.id, c]));
+      const subjectById = new Map(subjects.map((s) => [s.id, s]));
+      const shapedAssignments = assignments.map((a: any) => ({
+        ...a,
+        classRoom: a.classId ? (classById.get(a.classId) ? { name: classById.get(a.classId)!.name } : null) : null,
+        section: a.sectionId ? (sectionById.get(a.sectionId) ? { name: sectionById.get(a.sectionId)!.name } : null) : null,
+        subject: a.subjectId ? (subjectById.get(a.subjectId) ? { name: subjectById.get(a.subjectId)!.name } : null) : null,
+      }));
+      // classes where this teacher has an assignment, with student counts + sections
+      const myClassIds = [...new Set(assignments.map((a: any) => a.classId))];
+      const myClasses = myClassIds
+        .map((classId) => classById.get(classId))
+        .filter((c): c is (typeof classRooms)[number] => Boolean(c))
+        .map((c) => ({
+          ...c,
+          _count: { students: studentsByClass.get(c.id) || 0 },
+          sections: allSections.filter((s) => s.classId === c.id).map((s) => ({ id: s.id, name: s.name })),
+        }))
+        // Firestore's implicit doc-id order, preserved from the old code path
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const attendanceToday = allAttendanceToday.filter((a) => a.markedById === teacher.id).length;
 
-    const payload = {
-      data: { assignments: shapedAssignments, homeworks, myClasses, attendanceToday },
+      return { data: { assignments: shapedAssignments, homeworks, myClasses, attendanceToday } };
     };
-    statsCachePut(cacheKey, payload, schoolId);
-    return NextResponse.json(payload);
+
+    const cached = statsCacheRead(cacheKey);
+    if (cached) {
+      // Past the fresh window but still serveable: answer now and recompute for
+      // the next reader behind it, so an idle dashboard never blocks on the
+      // seconds-long cold Firestore pull once the db pull cache has aged out. A
+      // write to the school drops the entry instead (see stats-cache), so a
+      // submit is never served stale.
+      if (cached.stale) statsRefresh(cacheKey, schoolId, produce);
+      return NextResponse.json(cached.payload);
+    }
+    try {
+      return NextResponse.json(await statsCompute(cacheKey, schoolId, produce));
+    } catch (e) {
+      if (e instanceof MissingTeacherProfile) {
+        return NextResponse.json({ error: "Teacher profile missing" }, { status: 404 });
+      }
+      throw e;
+    }
   }
 
   // ---- GUARDIAN
   if (session.role === "GUARDIAN") {
     const cacheKey = `guardian|${session.id}|${schoolId}`;
-    const cached = statsCacheGet(cacheKey);
-    if (cached) return NextResponse.json(cached);
+
+    // Recompute (and cache) the payload. Kept as a thunk so a warm reader is
+    // served instantly and a merely-stale one refreshes in the background — the
+    // same serve-stale + single-flight contract the ADMIN and TEACHER branches use.
+    const produce = async () => {
 
     // Single parallel batch when session.studentId is known (the normal
     // case): every student-scoped pull keys off it directly. The fallback
@@ -214,7 +259,7 @@ export async function GET(req: NextRequest) {
       prisma.subject.findMany({ where: { schoolId }, select: { id: true, name: true } }),
       prisma.homework.findMany({ where: { schoolId }, select: { id: true, classId: true, sectionId: true } }),
     ]);
-    if (!student) return NextResponse.json({ error: "No linked student" }, { status: 404 });
+    if (!student) throw new MissingLinkedStudent();
 
     let attendance = attendance0;
     let marks = marks0;
@@ -292,8 +337,22 @@ export async function GET(req: NextRequest) {
         marksCount: shapedMarks.length,
       },
     };
-    statsCachePut(cacheKey, payload, schoolId);
-    return NextResponse.json(payload);
+    return payload;
+    };
+
+    const cached = statsCacheRead(cacheKey);
+    if (cached) {
+      if (cached.stale) statsRefresh(cacheKey, schoolId, produce);
+      return NextResponse.json(cached.payload);
+    }
+    try {
+      return NextResponse.json(await statsCompute(cacheKey, schoolId, produce));
+    } catch (e) {
+      if (e instanceof MissingLinkedStudent) {
+        return NextResponse.json({ error: "No linked student" }, { status: 404 });
+      }
+      throw e;
+    }
   }
 
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
 import { prisma, invalidateReferenceCache, ON_ROLL_STUDENT } from "@/lib/db";
+import { enrollStudent } from "@/lib/enroll";
+import { resolveSessionId } from "@/lib/academic";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
@@ -14,7 +15,6 @@ import {
   findSiblingCandidates,
   issueKitAtAdmission,
   kitAvailability,
-  linkSiblingFamily,
 } from "@/lib/admission";
 
 /**
@@ -216,11 +216,17 @@ export async function POST(req: NextRequest) {
   let studentId: string | null = null;
   const admissionId = admission.id;
   try {
-    // ---------------------------------------------------------------- student
+    // ------------------------------------- student + guardian + family + fees
+    // All four go through the shared enrollment kernel — the same code path the
+    // enquiry-pipeline enrollment uses — and the `done` log is pushed in the same
+    // order as before, so the desk sees exactly the same trail.
     const token = qrToken();
     const pin = qrPin();
-    const student = await prisma.student.create({
-      data: {
+    const sessionId = await resolveSessionId(schoolId, stud.sessionId || null);
+    const enrolled = await enrollStudent({
+      schoolId,
+      branchId,
+      student: {
         schoolId,
         branchId,
         admissionNo: str(stud.admissionNo) || `ADM-${Date.now().toString().slice(-6)}`,
@@ -253,93 +259,49 @@ export async function POST(req: NextRequest) {
         status: "ACTIVE",
         qrToken: token,
         qrPin: pin,
+        sessionId,
+      },
+      guardian: {
+        create: true,
+        email: guardianEmail,
+        name: str(guard.name) || "Guardian",
+        phone: guardianPhone,
+        password: str(guard.password) || null,
+      },
+      family: { siblingId: str(sib.siblingId) || null },
+      fees: {
+        includeBranch: true,
+        branchId,
+        rows: [
+          { title: "Admission Fee", amount: admissionFee, feeType: "ADMISSION" },
+          ...(createMonthly ? [{ title: "Monthly Fee", amount: monthlyFee, feeType: "MONTHLY", dueInDays: 30 }] : []),
+          ...defaults.extraLines.map((line) => ({ title: line.title, amount: line.amount, feeType: line.type })),
+        ],
       },
     });
+
+    const student = enrolled.student;
     studentId = student.id;
     done.push("student record created");
 
-    // -------------------------------------------------------- guardian account
-    let guardianUserId: string | null = null;
-    let guardianCreated = false;
+    const guardianUserId = enrolled.guardianUserId;
+    const guardianCreated = enrolled.guardianCreated;
     if (guardianEmail) {
-      let gUser = await prisma.user.findUnique({ where: { email: guardianEmail } });
-      if (!gUser) {
-        gUser = await prisma.user.create({
-          data: {
-            email: guardianEmail,
-            name: str(guard.name) || "Guardian",
-            role: "GUARDIAN",
-            schoolId,
-            phone: guardianPhone,
-            passwordHash: bcrypt.hashSync(str(guard.password) || "Guardian@123", 10),
-          },
-        });
-        guardianCreated = true;
-      }
-      guardianUserId = gUser.id;
-      await prisma.student.update({ where: { id: student.id }, data: { guardianUserId } });
       done.push(guardianCreated ? "guardian login created" : "linked to the existing guardian login");
     }
 
-    // -------------------------------------------------------------- family link
-    let family: { familyId: string; siblingName: string; guardianUserId: string | null } | null = null;
-    const siblingId = str(sib.siblingId);
-    if (siblingId) {
-      family = await linkSiblingFamily({ schoolId, studentId: student.id, siblingId, guardianUserId });
-      if (!guardianUserId && family.guardianUserId) guardianUserId = family.guardianUserId;
+    const family = enrolled.family;
+    if (family) {
       done.push(`linked to sibling ${family.siblingName} (family ${family.familyId})`);
     }
 
-    // -------------------------------------------------------------------- fees
-    const admissionFeeRow = await prisma.fee.create({
-      data: {
-        schoolId,
-        branchId,
-        studentId: student.id,
-        title: "Admission Fee",
-        amount: admissionFee,
-        paidAmount: 0,
-        feeType: "ADMISSION",
-        status: "UNPAID",
-        dueDate: new Date(),
-      },
-    });
+    if (!enrolled.admissionFeeId) throw new Error("Admission fee row was not created.");
+    const admissionFeeRow = { id: enrolled.admissionFeeId };
     done.push("admission fee raised");
 
-    let monthlyFeeId: string | null = null;
-    if (createMonthly) {
-      const monthly = await prisma.fee.create({
-        data: {
-          schoolId,
-          branchId,
-          studentId: student.id,
-          title: "Monthly Fee",
-          amount: monthlyFee,
-          paidAmount: 0,
-          feeType: "MONTHLY",
-          status: "UNPAID",
-          dueDate: new Date(Date.now() + 30 * 86400000),
-        },
-      });
-      monthlyFeeId = monthly.id;
-      done.push(`monthly fee raised (${monthlyFee})`);
-    }
-    for (const line of defaults.extraLines) {
-      await prisma.fee.create({
-        data: {
-          schoolId,
-          branchId,
-          studentId: student.id,
-          title: line.title,
-          amount: line.amount,
-          paidAmount: 0,
-          feeType: line.type as any,
-          status: "UNPAID",
-          dueDate: new Date(),
-        },
-      });
-      done.push(`class template line raised: ${line.title}`);
-    }
+    const monthlyFeeId = enrolled.monthlyFeeId;
+    if (createMonthly) done.push(`monthly fee raised (${monthlyFee})`);
+    for (const line of defaults.extraLines) done.push(`class template line raised: ${line.title}`);
 
     // ---------------------------------------------------------------- discount
     let discountRow: any = null;

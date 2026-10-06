@@ -385,7 +385,10 @@ export default function LoginForm({ sector: sectorKey, hub = false }: { sector?:
                     </div>
                   </div>
 
-                  <Link href="/qr" className="btn btn-secondary w-full !py-3">
+                  {/* No prefetch: warming /qr costs a request and an RSC payload
+                      before sign-in, competing with the chunks this screen needs
+                      to become interactive. It is one click away anyway. */}
+                  <Link href="/qr" prefetch={false} className="btn btn-secondary w-full !py-3">
                     <QrCode size={16} /> Sign in with a student QR code
                   </Link>
                   <p className="text-center text-[11px] text-slate-500">
@@ -431,7 +434,7 @@ export default function LoginForm({ sector: sectorKey, hub = false }: { sector?:
           )}
 
           <p className="mt-6 text-center text-xs text-slate-500">
-            <Link href="/welcome" className="font-semibold text-indigo-600 hover:underline">
+            <Link href="/welcome" prefetch={false} className="font-semibold text-indigo-600 hover:underline">
               ← What is Amar E School?
             </Link>
           </p>

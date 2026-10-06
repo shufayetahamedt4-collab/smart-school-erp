@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Building2, ChevronDown, ChevronLeft, LayoutGrid, LogOut, UserRound, X } from "lucide-react";
-import { api } from "@/lib/client";
+import { api, prefetch } from "@/lib/client";
+import { dataForRoute } from "@/lib/route-data";
 import { cn, initials } from "@/lib/utils";
 import { sectorForRole } from "@/lib/sectors";
 import { NAVS, NOTIFICATIONS_HREF, PROFILE_HREF, type NavItem } from "@/components/nav";
@@ -43,6 +44,16 @@ export function AppShell({ role, children }: { role: string; children: React.Rea
     sync();
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  // The session read gates this shell: the page below only mounts once `me`
+  // resolves, so its own reads used to start a full round trip late. Start the
+  // current screen's reads NOW — in the same wave as the session read — so the
+  // page finds them already in flight or answered. Same machinery as the hover
+  // warm, and it only issues reads the screen was about to issue anyway.
+  useEffect(() => {
+    prefetch(dataForRoute(pathname));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const effRole = me?.user?.role || role;
