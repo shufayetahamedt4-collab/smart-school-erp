@@ -15,12 +15,15 @@
  * Everything it creates is removed again by document reference. Usage:
  *   node scripts/verify-notifications.mjs    (SMOKE_PORT, default 3000)
  */
-import { initializeApp, getApps, cert } from "firebase-admin/app";
+import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
-import { loadEnv } from "./load-env.mjs";
 import { requireEmulator } from "./lib/guard.mjs";
 
-loadEnv();
+// The guard is the first statement: it refuses to run unless
+// FIRESTORE_EMULATOR_HOST is loopback, so everything below is emulator-only.
+// There is deliberately no loadEnv() and no credential path — this suite needs
+// no production config, and reading .env here would only pull the production
+// project id / credentials into an emulator run.
 requireEmulator();
 
 const PORT = process.env.SMOKE_PORT || process.env.VERIFY_PORT || "3000";
@@ -49,32 +52,31 @@ const skip = (label, why) => {
 };
 
 /* ----------------------------------------------------------------- firebase */
-function unescapeKey(k) {
-  const BS = String.fromCharCode(92);
-  return k.includes(BS + "n") ? k.split(BS + "n").join("\n") : k;
-}
-
-// Inside the emulator (FIRESTORE_EMULATOR_HOST — the guard above guarantees it is
-// loopback) the emulator needs no credentials, so never build a cert() from
-// possibly absent ones: initialise with the project id alone, exactly as
-// scripts/seed.mjs does. Outside it, the credentials are used as before.
-const emulatorMode = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
-
+// The guard above guarantees FIRESTORE_EMULATOR_HOST is loopback, and the
+// emulator needs no credentials — so initialise with the project id alone,
+// exactly as scripts/verify-invalidation.mjs does. There is intentionally no
+// cert()/production branch: nothing here can build production credentials.
 if (!getApps().length) {
-  if (emulatorMode) {
-    initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID || undefined });
-  } else {
-    initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      credential: cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: unescapeKey(process.env.FIREBASE_PRIVATE_KEY || ""),
-      }),
-    });
-  }
+  initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID || undefined });
 }
 const db = getFirestore();
+
+/* ------------------------------------------------------------- audit scope */
+// Every auditLog action this suite can cause. Cleanup deletes only ids from this
+// set that did not exist before the run began — never a broad delete, and never
+// an action some other actor owns.
+const SUITE_AUDIT_ACTIONS = [
+  "LOGIN",
+  "NOTICE_CREATE",
+  "HOMEWORK_CREATE",
+  "ATTENDANCE_SAVE",
+  "EXAM_CREATE",
+  "EXAM_UPDATE",
+  "CLASS_START",
+  "CLASS_END",
+];
+const auditIdsThisSuite = async () =>
+  new Set((await db.collection("auditLogs").where("action", "in", SUITE_AUDIT_ACTIONS).get()).docs.map((d) => d.id));
 
 /* --------------------------------------------------------------------- http */
 async function req(host, path, { cookie, ...init } = {}) {
@@ -126,30 +128,59 @@ async function until(fn, tries = 8, waitMs = 2500) {
 const unreadOf = async (host, cookie) => (await GET(host, "/api/notifications?countOnly=1", cookie)).data?.unread ?? -1;
 const listOf = async (host, cookie, extra = "?take=100") => (await GET(host, `/api/notifications${extra}`, cookie)).data || {};
 const findNotif = (data, contains, event) =>
-  (data.items || []).find((n) => String(n.title || "").includes(contains) && (!event || n.event === event));
+  (data.items || []).find(
+    (n) =>
+      String(n.title || "").includes(contains) &&
+      (!event || n.event === event) &&
+      // Run-scoped: the absence and class-start titles are not unique, so a
+      // leftover row from an interrupted earlier run must never satisfy this
+      // run. Only rows created at/after this run started count.
+      !!n.createdAt &&
+      new Date(n.createdAt).getTime() >= startedAt.getTime()
+  );
 
 /* --------------------------------------------------------------------- main */
+// Snapshot the suite's audit space BEFORE the first mutation: the logins below
+// already write LOGIN rows, and the trigger routes write the rest. Only ids that
+// appear after this point can belong to this run.
+const auditBefore = await auditIdsThisSuite();
+
+const cleanups = [];
+const note = (collection, id) => cleanups.push({ collection, id });
+// Resolved inside the try; declared here so the finally can rely on it even when
+// the run aborts before a child is chosen.
+let child = null;
+
+// Probe-day helpers, shared by the test and its cleanup. A fixed old date so the
+// probe attendance row can never collide with a real register.
+const probeDate = "2001-02-03";
+const probeDay = new Date(`${probeDate}T00:00:00`).toDateString();
+const sameProbeDay = (ts) => !!ts && new Date(ts.toDate ? ts.toDate() : ts).toDateString() === probeDay;
+
+// Everything below — starting with the logins, which already write audit rows —
+// runs under a finally that always removes exactly what this run created, even
+// if a fetch throws, an AbortSignal fires, an assertion blows up, or a
+// precondition fails. Precondition failures THROW (never process.exit) so the
+// finally still executes. (The body keeps its original indentation to keep the
+// patch small.)
+try {
 const admin = await signIn(SCHOOL_HOST, ADMIN);
 const teacher = await signIn(TEACHER_HOST, TEACHER);
 const guardian = await signIn(PARENTS_HOST, GUARDIAN);
 const sup = await signIn(SUPER_HOST, SUPER);
 
 check("sessions: school admin / teacher / guardian / super admin", [admin, teacher, guardian, sup].every((s) => s.status === 200), `statuses ${[admin, teacher, guardian, sup].map((s) => s.status).join("/")}`);
-if (guardian.status !== 200) {
-  console.log("guardian session failed — cannot continue");
-  process.exit(1);
-}
+// No process.exit here: that would bypass the finally and strand the LOGIN audit
+// rows the sign-ins above already wrote. Throwing routes through cleanup.
+if (guardian.status !== 200) throw new Error("guardian session failed — cannot continue (cleanup still runs)");
 
 // The child to run every per-student event against, and that child's guardian.
 const guardianUser = (await db.collection("users").where("email", "==", GUARDIAN.id.toLowerCase()).limit(1).get()).docs[0];
 const guardianUserId = guardianUser?.id;
 const childDocs = await db.collection("students").where("schoolId", "==", SCHOOL).get();
-const child = childDocs.docs.map((d) => ({ id: d.id, ...d.data() })).find((s) => s.guardianUserId === guardianUserId && s.classId);
+child = childDocs.docs.map((d) => ({ id: d.id, ...d.data() })).find((s) => s.guardianUserId === guardianUserId && s.classId);
 check("demo guardian has a linked child with a class", !!child, child ? `${child.name} (${child.classId})` : "none found");
-if (!child) process.exit(1);
-
-const cleanups = [];
-const note = (collection, id) => cleanups.push({ collection, id });
+if (!child) throw new Error("demo guardian has no linked child with a class — cannot continue (cleanup still runs)");
 
 /* ---------------------------------------------------------------- 1. baseline */
 console.log("\n== baseline ==");
@@ -199,11 +230,6 @@ check("homework notification has a timestamp", !!hwNotif?.createdAt, hwNotif?.cr
 
 /* ------------------------------------------------------------ 4. attendance */
 console.log("\n== an absence reaches the guardian, once ==");
-// A fixed old date so the probe can never collide with a real register.
-const probeDate = "2001-02-03";
-const probeDay = new Date(`${probeDate}T00:00:00`).toDateString();
-const sameProbeDay = (ts) => !!ts && new Date(ts.toDate ? ts.toDate() : ts).toDateString() === probeDay;
-
 // Pre-flight: an interrupted earlier run could have left a probe row behind,
 // which would (correctly) suppress the "newly absent" notification.
 const attExisting = await db.collection("attendance").where("schoolId", "==", SCHOOL).get();
@@ -318,8 +344,16 @@ check("a notice reaches the teacher and not only the guardian", !!other);
 console.log("\n== filter, search, paging ==");
 const unreadOnly = await listOf(PARENTS_HOST, guardian.cookie, "?take=100&filter=unread");
 check("filter=unread returns only unread rows", unreadOnly.items?.length > 0 && unreadOnly.items.every((n) => !n.readAt), `rows=${unreadOnly.items?.length}`);
+// Prove the read filter actually works: mark one run-created row read first,
+// then require filter=read to return at least one row, all of them read. An
+// empty list must NOT pass ([].every(...) is vacuously true).
+if (guardianNotice?.id) await POST(PARENTS_HOST, "/api/notifications", guardian.cookie, { id: guardianNotice.id });
 const readOnly = await listOf(PARENTS_HOST, guardian.cookie, "?take=100&filter=read");
-check("filter=read returns only read rows", readOnly.items?.every((n) => !!n.readAt), `rows=${readOnly.items?.length}`);
+check(
+  "filter=read returns only read rows",
+  (readOnly.items?.length ?? 0) >= 1 && readOnly.items.every((n) => !!n.readAt),
+  `rows=${readOnly.items?.length}`
+);
 const searched = await listOf(PARENTS_HOST, guardian.cookie, `?take=100&q=${encodeURIComponent(noticeTitle)}`);
 check("search narrows to matching rows", searched.items?.length >= 1 && searched.items.every((n) => `${n.title} ${n.body}`.includes(noticeTitle)), `rows=${searched.items?.length}`);
 const page1 = await listOf(PARENTS_HOST, guardian.cookie, "?take=1");
@@ -338,6 +372,7 @@ const all = await POST(PARENTS_HOST, "/api/notifications", guardian.cookie, {});
 check("mark all read succeeds", all.status === 200, `status=${all.status}`);
 check("unread is zero afterwards", (await unreadOf(PARENTS_HOST, guardian.cookie)) === 0, `unread=${await unreadOf(PARENTS_HOST, guardian.cookie)}`);
 
+} finally {
 /* ------------------------------------------------------------------ cleanup */
 console.log("\n== cleanup ==");
 // Remove every notification this run created, plus the probe records.
@@ -366,7 +401,7 @@ for (const { collection, id } of cleanups.filter((c) => c.id)) {
 // an ISO date-string comparison silently misses it east/west of UTC.
 const attRows = await db.collection("attendance").where("schoolId", "==", SCHOOL).get();
 for (const d of attRows.docs) {
-  if (d.get("studentId") === child.id && sameProbeDay(d.get("date"))) await d.ref.delete();
+  if (child && d.get("studentId") === child.id && sameProbeDay(d.get("date"))) await d.ref.delete();
 }
 // The exam's marks (none written, but be thorough) — exam doc already removed.
 console.log(`  removed ${removed} notification(s) and ${cleanups.length} probe record(s)`);
@@ -376,5 +411,21 @@ const leftover = (await db.collection("notifications").where("schoolId", "==", S
 });
 check("probe notifications cleaned up", leftover.length === 0, `left=${leftover.length}`);
 
-console.log(`\n${failures === 0 ? "ALL GREEN" : `${failures} FAILURE(S)`}${skipped ? ` · ${skipped} skipped` : ""}`);
-process.exit(failures ? 1 : 0);
+// Audit rows this run created — an id-diff over the exact action set the suite
+// triggers. Safe in this single-process emulator: nothing else writes these
+// actions while the run is in flight, and pre-existing rows are never touched.
+const auditCreated = [...(await auditIdsThisSuite())].filter((id) => !auditBefore.has(id));
+for (let i = 0; i < auditCreated.length; i += 450) {
+  const batch = db.batch();
+  for (const id of auditCreated.slice(i, i + 450)) batch.delete(db.collection("auditLogs").doc(id));
+  await batch.commit();
+}
+const auditLeft = (await auditIdsThisSuite()).size;
+check("suite auditLog rows cleaned up", auditLeft === auditBefore.size, `${auditBefore.size} → ${auditLeft}`);
+}
+
+// Green only when every required section ran AND passed. A skipped section is
+// not green: the suite exits non-zero so "ALL GREEN" can never hide a gap.
+const green = failures === 0 && skipped === 0;
+console.log(`\n${green ? "ALL GREEN" : `${failures} FAILURE(S)${skipped ? ` · ${skipped} skipped` : ""}`}`);
+process.exit(green ? 0 : 1);
