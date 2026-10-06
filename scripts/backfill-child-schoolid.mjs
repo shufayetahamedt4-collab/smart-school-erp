@@ -16,6 +16,10 @@ import { getFirestore } from "firebase-admin/firestore";
 import { readFileSync } from "node:fs";
 
 // Use the project's service account (same convention as other scripts).
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 let cred;
 try {
   const sa = JSON.parse(readFileSync(new URL("../service-account.json", import.meta.url), "utf8"));

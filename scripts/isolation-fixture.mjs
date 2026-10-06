@@ -18,6 +18,10 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 let sa = null;
 try {
   sa = JSON.parse(readFileSync(new URL("../service-account.json", import.meta.url), "utf8"));

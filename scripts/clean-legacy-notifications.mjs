@@ -25,8 +25,10 @@ import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadEnv } from "./load-env.mjs";
+import { requireEmulator } from "./lib/guard.mjs";
 
 loadEnv();
+requireEmulator();
 
 const APPLY = process.argv.includes("--apply");
 const DEMO_SCHOOL = "s_54bf3dc2c4f98fabdf78b7216c0ae888455d009a";

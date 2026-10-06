@@ -7,6 +7,14 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// [SAFETY] This script targets the production environment and must never be
+// run by an agent. It reads the PRODUCTION service-account.json at the repo
+// root and writes those credentials into .env.
+console.error(
+  "[SAFETY] This script targets the production environment and must never be run by an agent."
+);
+process.exit(1);
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const saPath = path.join(ROOT, "service-account.json");
 const envPath = path.join(ROOT, ".env");

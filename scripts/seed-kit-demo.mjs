@@ -20,8 +20,10 @@
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { loadEnv } from "./load-env.mjs";
+import { requireEmulator } from "./lib/guard.mjs";
 
 loadEnv();
+requireEmulator();
 
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;

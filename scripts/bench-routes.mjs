@@ -3,6 +3,10 @@
  * Login → warm the page's core endpoints → best-of-N per route.
  * Usage: node scripts/bench-routes.mjs [N=2]
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const BASE = process.env.BASE_URL || "http://localhost:3000";
 const N = Number(process.argv[2] || 2);
 

@@ -6,6 +6,10 @@
  * Credentials via env (GUARDIAN_EMAIL/GUARDIAN_PASSWORD optional).
  * Usage: node scripts/parity-sweep-routes.mjs
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const NEW_BASE = process.env.NEW_BASE || "http://localhost:3000";
 const OLD_BASE = process.env.OLD_BASE || "http://localhost:3001";
 const GUARDIAN_EMAIL = process.env.GUARDIAN_EMAIL || "guardian1@demo.com";

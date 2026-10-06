@@ -7,6 +7,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireEmulator } from "./lib/guard.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -37,6 +38,10 @@ if (existsSync(envPath)) {
     process.env[m[1]] = value;
   }
 }
+
+// Emulator-only: `npm run setup` seeds Firestore, so it must never reach a
+// Cloud database. This runs after .env is loaded into process.env, above.
+requireEmulator();
 
 if (!process.env.FIREBASE_PROJECT_ID) {
   console.error(

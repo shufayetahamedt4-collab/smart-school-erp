@@ -1,9 +1,11 @@
 import { loadEnv } from "./load-env.mjs";
+import { requireEmulator } from "./lib/guard.mjs";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { createHash } from "node:crypto";
 
 loadEnv();
+requireEmulator();
 const BS = String.fromCharCode(92);
 const unesc = (k) => (k.includes(BS + "n") ? k.split(BS + "n").join("\n") : k);
 if (!getApps().length) {

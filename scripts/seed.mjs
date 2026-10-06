@@ -14,6 +14,10 @@ import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
 import { checkpoint } from "./progress.mjs";
 
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
 const PRIVATE_KEY = process.env.FIREBASE_PRIVATE_KEY;

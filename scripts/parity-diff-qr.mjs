@@ -8,6 +8,10 @@
  *   QR_TOKEN=<student qrToken> QR_PIN=<student qrPin> node scripts/parity-diff-qr.mjs
  * (values live in Firestore: students → qrToken / qrPin for the linked student)
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const NEW_BASE = "http://localhost:3000";
 const OLD_BASE = "http://localhost:3001";
 

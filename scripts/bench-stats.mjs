@@ -2,6 +2,10 @@
  * bench-stats.mjs — measure /api/stats timings per role against the dev server.
  * Usage: node scripts/bench-stats.mjs [rounds=3]
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const BASE = process.env.BASE_URL || "http://localhost:3000";
 const rounds = Number(process.argv[2] || 3);
 

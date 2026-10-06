@@ -8,6 +8,10 @@
 import admin from "firebase-admin";
 import { readFileSync } from "node:fs";
 
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const serviceAccount = JSON.parse(readFileSync(new URL("../service-account.json", import.meta.url), "utf8"));
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();

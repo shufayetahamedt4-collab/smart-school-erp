@@ -3,6 +3,10 @@
  * servers and deep-diff the JSON. Objects compared unordered, arrays ordered.
  * Usage: node scripts/parity-diff.mjs
  */
+import { requireEmulator } from "./lib/guard.mjs";
+
+requireEmulator();
+
 const NEW_BASE = "http://localhost:3000";
 const OLD_BASE = "http://localhost:3001";
 
