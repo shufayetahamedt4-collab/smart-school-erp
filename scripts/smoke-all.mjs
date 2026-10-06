@@ -475,17 +475,21 @@ console.log("\n=== teacher app chrome ===");
     console.log(`  ⚠️  SKIPPED app shell gate lock — ${e && e.message ? e.message : e}`);
   }
 
-  // ---- phone-only CSS: every teacher phone rule is scoped, and scoped off ----
+  // ---- phone-only CSS: every app phone rule is scoped, and scoped off ----
   //
   // Two properties, checked against the CSS the build actually SERVED rather
   // than the source it came from, so a build-time change cannot slip past:
   //
-  //   1. every rule inside a <768px block must name the TEACHER sector — one
-  //      that doesn't would restyle /parent, /admin, /dashboard and the login
-  //      page at the same width;
+  //   1. every rule inside a <768px block must name an APP sector — the Teacher
+  //      App or the Parents App (both are phone-first apps). A rule that names
+  //      neither would restyle /admin, /dashboard and the login page at the same
+  //      width;
   //   2. a class that a phone rule styles is phone-only BY CONSTRUCTION, so
   //      none of those classes may be referenced outside those blocks. That is
   //      exactly what keeps desktop byte-identical to the T0 baseline.
+  //
+  // Before the Guardian mobile app redesign this asserted TEACHER only; the
+  // Parents App now owns its own phone CSS too, so both app sectors are valid.
   //
   // The class set is DERIVED from the served CSS instead of listed, so a new
   // phone-only class is covered the day it is written. `.ss-sheet-in` is
@@ -545,7 +549,10 @@ console.log("\n=== teacher app chrome ===");
     let cls;
     while ((cls = reCls.exec(css))) (inRange(cls.index) ? phoneClasses : otherClasses).add(cls[0]);
 
-    const unscoped = selectors.filter((s) => !/\[data-sector=["']?teacher/.test(s));
+    // A <768px rule is scoped when it names either phone-first app sector; a
+    // rule that names neither would restyle the console or the login page.
+    const appScoped = /\[data-sector=["']?(teacher|guardian)/;
+    const unscoped = selectors.filter((s) => !appScoped.test(s));
     const leaking = [...phoneClasses].filter((c) => otherClasses.has(c));
 
     // ...and that the roster is still ONE list rendered from ONE array with no
@@ -561,11 +568,11 @@ console.log("\n=== teacher app chrome ===");
     else if (!ranges.length) bad("teacher", "teacher phone CSS", "no <768px media query in the served CSS");
     else if (!selectors.length) bad("teacher", "teacher phone CSS", "could not parse a rule out of the <768px blocks");
     else if (!phoneClasses.size) bad("teacher", "teacher phone CSS", "no phone-only class found — has the parse moved?");
-    else if (unscoped.length) bad("teacher", "teacher phone CSS", `${unscoped.length} phone rule(s) are not teacher-scoped and would restyle other portals: ${unscoped[0].slice(0, 70)}`);
+    else if (unscoped.length) bad("teacher", "teacher phone CSS", `${unscoped.length} phone rule(s) name neither app sector (teacher/guardian) and would restyle the console or the login page: ${unscoped[0].slice(0, 70)}`);
     else if (leaking.length) bad("teacher", "teacher phone CSS", `${leaking.join(", ")} styled for phones but referenced outside the <768px block — desktop at risk`);
     else if (tables !== 0 || rowTemplates !== 1) bad("teacher", "teacher phone CSS", `expected no <table> and one roster row template, found ${tables} and ${rowTemplates}`);
     else {
-      console.log(`  ✅ teacher phone CSS: ${selectors.length} rules over ${phoneClasses.size} classes, all teacher-scoped in <768px and none outside it`);
+      console.log(`  ✅ teacher phone CSS: ${selectors.length} rules over ${phoneClasses.size} classes, all scoped to an app sector (teacher/guardian) in <768px and none outside it`);
       console.log(`       ${[...phoneClasses].sort().join(", ")}`);
     }
 
@@ -2055,19 +2062,25 @@ console.log("\n=== teacher phone layout (headless browser) ===");
               `  ✅ teacher app @390: ${swept} routes, no text squeezed into a sliver column (no title wrapping one word per line)`,
             );
 
-          // --- the missing banner and the dark bar are TEACHER-ONLY -------------------
+          // --- the missing banner and the dark bar are APP-ONLY -----------------------
           //
           // Both changes touch something the other sectors also render: the banner
           // is mounted from the ROOT LAYOUT, and the bell comes from a component the
-          // School Admin / Super Admin shell shares. So hiding the banner and adding
-          // the dark variant are checked on those sectors' OWN rendered pages, not
-          // on the source: the banner must still be offered everywhere else, and
-          // neither the dark bar nor the dark bell may leak.
+          // School Admin / Super Admin shell shares. Both phone-first apps (Teacher
+          // App, Parents App) opt into the dark chrome and hide the banner, while the
+          // console/portal sectors must keep the light bar and the banner — so it is
+          // checked on their OWN rendered pages, not on the source, and neither the
+          // dark bar nor the dark bell may leak outside the two apps.
           {
+            // The Parents App is an app now (as the Teacher App is), so it is the
+            // app-side case; the console/portal sectors are the non-app controls and
+            // must keep the light bar and the banner. The Teacher App's own dark
+            // chrome is asserted by the phone-layout section, so this stays at the
+            // previous three pages.
             const cases = [
-              { label: "school-admin", role: ROLES.find((r) => r.label === "school-admin"), path: "/dashboard" },
-              { label: "super-admin", role: ROLES.find((r) => r.label === "super-admin"), path: "/admin" },
-              { label: "guardian", role: ROLES.find((r) => r.label === "guardian"), path: "/parent" },
+              { label: "guardian", role: ROLES.find((r) => r.label === "guardian"), path: "/parent", app: true },
+              { label: "school-admin", role: ROLES.find((r) => r.label === "school-admin"), path: "/dashboard", app: false },
+              { label: "super-admin", role: ROLES.find((r) => r.label === "super-admin"), path: "/admin", app: false },
             ];
             const scopeBad = [];
             for (const c of cases) {
@@ -2095,39 +2108,50 @@ console.log("\n=== teacher phone layout (headless browser) ===");
                   bellClass: bell ? bell.className : null,
                 };
               })()`);
-              if (!seen.banner) scopeBad.push(`${c.label}: the install banner is gone — it must still be offered outside the Teacher App`);
-              if (seen.darkNodes) scopeBad.push(`${c.label}: ${seen.darkNodes} element(s) carry the Teacher dark-bar token`);
-              if (!seen.bellClass) scopeBad.push(`${c.label}: no notification bell rendered`);
-              else {
-                if (seen.bellClass.includes("text-slate-300")) scopeBad.push(`${c.label}: the bell picked up the Teacher dark variant`);
-                if (!seen.bellClass.includes("text-slate-500")) scopeBad.push(`${c.label}: the bell trigger's original classes changed`);
+              if (c.app) {
+                if (seen.banner) scopeBad.push(`${c.label}: the install banner is still shown inside an app — the Teacher/Parents App hides it`);
+                if (!seen.darkNodes) scopeBad.push(`${c.label}: the app dark bar is missing — no element carries the app dark token`);
+                if (!seen.bellClass) scopeBad.push(`${c.label}: no notification bell rendered`);
+                else if (!seen.bellClass.includes("text-slate-300")) scopeBad.push(`${c.label}: the bell is not the app dark variant`);
+              } else {
+                if (!seen.banner) scopeBad.push(`${c.label}: the install banner is gone — it must still be offered outside the apps`);
+                if (seen.darkNodes) scopeBad.push(`${c.label}: ${seen.darkNodes} element(s) carry the app dark-bar token — it must not leak outside the apps`);
+                if (!seen.bellClass) scopeBad.push(`${c.label}: no notification bell rendered`);
+                else {
+                  if (seen.bellClass.includes("text-slate-300")) scopeBad.push(`${c.label}: the bell picked up the app dark variant`);
+                  if (!seen.bellClass.includes("text-slate-500")) scopeBad.push(`${c.label}: the bell trigger's original classes changed`);
+                }
               }
               // The driver's Page exposes no close(); the browser is closed below.
             }
             if (scopeBad.length) bad("teacher", "app chrome scope", scopeBad.slice(0, 4).join("; "));
             else
               console.log(
-                "  ✅ banner + dark bar stay Teacher-only: gone on /teacher, still offered to school-admin, super-admin and guardian, whose bars and bells are unchanged",
+                "  ✅ dark bar + banner stay app-only: dark and banner-free on /parent, still light with the banner offered to school-admin and super-admin",
               );
           }
 
           // --- the shared components' DEFAULT rendering is untouched --------------
           //
-          // Three of Wave 1's screens delegate to components the Parent App also
-          // renders. Each got an opt-in teacher appearance whose default branch is
-          // the original markup, so the same components on the Parent side must
-          // still produce the portal's bordered `Card`, not the app's inset panel.
-          // Asserted on the rendered page rather than in the source, because the
-          // default is a runtime branch.
+          // These panels are shared across sectors, each with an opt-in app
+          // appearance whose DEFAULT branch is the original portal markup. Both
+          // phone-first apps (Teacher App, Parents App) now take the app surface, so
+          // the assertion is: the app sectors render the inset panel (and drop the
+          // assistant heading), and the School Admin control still renders the
+          // portal's bordered `Card`. Asserted on the rendered page rather than in
+          // the source, because the branch is a runtime decision.
           {
             // `proves` is the element each component's DEFAULT branch actually
             // renders: the portal `.card` for the chat and the notification centre,
             // and the AI panel's own heading — the assistant has no `.card`, and its
             // teacher variant is precisely the branch that removes that heading.
             const sharedCases = [
-              { label: "guardian /parent/messages", host: `parents.localhost:${PORT}`, path: "/parent/messages", proves: "main .card", expectCard: true },
-              { label: "guardian /parent/ai", host: `parents.localhost:${PORT}`, path: "/parent/ai", proves: "main h1", expectCard: false },
-              { label: "school-admin /dashboard/notifications", host: `school.localhost:${PORT}`, path: "/dashboard/notifications", proves: "main .card", expectCard: true },
+              // App sectors: the inset ring panel replaces the portal Card, and the
+              // assistant drops the heading the dark app bar already owns.
+              { label: "guardian /parent/messages", host: `parents.localhost:${PORT}`, path: "/parent/messages", proves: 'main [class*="ring-slate-900/5"]', app: true, ai: false },
+              { label: "guardian /parent/ai", host: `parents.localhost:${PORT}`, path: "/parent/ai", proves: "main", app: true, ai: true },
+              // Non-app control: the console keeps the portal's bordered Card.
+              { label: "school-admin /dashboard/notifications", host: `school.localhost:${PORT}`, path: "/dashboard/notifications", proves: "main .card", app: false, ai: false },
             ];
             const sharedBad = [];
             for (const c of sharedCases) {
@@ -2157,6 +2181,7 @@ console.log("\n=== teacher phone layout (headless browser) ===");
                 return {
                   textLen: main.textContent.trim().length,
                   cards: cards.length,
+                  appPanel: main.querySelectorAll('[class*="ring-slate-900/5"]').length,
                   heading: main.textContent.includes('AI Assistant'),
                   cardBorder: cs ? cs.borderTopWidth : null,
                   cardShadow: cs ? cs.boxShadow : null,
@@ -2166,24 +2191,30 @@ console.log("\n=== teacher phone layout (headless browser) ===");
                 sharedBad.push(`${c.label}: the panel never rendered content`);
                 continue;
               }
-              // The default branch renders the portal's `.card` — a 1px border and
-              // no ring. The teacher branch renders the inset panel instead, so a
-              // default-branch page must have the card and must NOT have the ring.
-              if (c.expectCard) {
+              if (c.app) {
+                // The app surface is the inset ring panel; the portal Card must not
+                // reappear there, and the app bar owns the screen title.
+                if (!c.ai && !seen.appPanel)
+                  sharedBad.push(`${c.label}: no app inset panel within 30s — the app surface regressed`);
+                if (c.ai && seen.heading)
+                  sharedBad.push(`${c.label}: the assistant heading is back — the app bar owns the title`);
+              } else {
+                // The default branch renders the portal's `.card` — a 1px border and
+                // no ring. The app branch renders the inset panel instead, so a
+                // default-branch page must have the card and must NOT have the ring.
                 if (seen.cards < 1) sharedBad.push(`${c.label}: no portal .card within 30s — the default rendering changed`);
                 else if (seen.cardBorder !== "1px")
                   sharedBad.push(`${c.label}: the .card border is ${seen.cardBorder}, not the portal's 1px`);
                 else if (seen.cardShadow && seen.cardShadow.includes("0px 0px 0px 1px"))
-                  sharedBad.push(`${c.label}: the teacher inset ring leaked into the default rendering`);
+                  sharedBad.push(`${c.label}: the app inset ring leaked into the default rendering`);
+                if (c.ai && !seen.heading)
+                  sharedBad.push(`${c.label}: the assistant's own heading is missing — the app variant leaked`);
               }
-              // The assistant's teacher variant is the branch that drops this heading.
-              if (c.path.endsWith("/ai") && !seen.heading)
-                sharedBad.push(`${c.label}: the assistant's own heading is missing — the teacher variant leaked`);
             }
             if (sharedBad.length) bad("teacher", "shared component defaults", sharedBad.slice(0, 4).join("; "));
             else
               console.log(
-                "  ✅ shared component defaults: parent messages, parent AI and admin notifications still render the portal .card, with no teacher inset surface leaking in",
+                "  ✅ shared component defaults: the two apps render the inset panel and drop the assistant heading, while admin notifications keeps the portal .card (no cross-variant leak)",
               );
           }
 
