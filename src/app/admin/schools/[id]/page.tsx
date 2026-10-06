@@ -31,6 +31,7 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ id: str
       await api(`/api/schools/${id}`, { method: "PATCH", body: JSON.stringify({
         name: form.name, tagline: form.tagline, address: form.address, phone: form.phone, email: form.email,
         website: form.website, plan: form.plan, status: form.status,
+        institutionType: form.institutionType,
         monthlyFee: form.monthlyFee, admissionFee: form.admissionFee,
       }) });
       setEdit(false);
@@ -71,7 +72,8 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ id: str
             <div className="grid grid-cols-1 gap-x-8 gap-y-3 p-5 text-sm sm:grid-cols-2">
               {[
                 ["Tagline", data.tagline], ["Address", data.address], ["Phone", data.phone], ["Email", data.email],
-                ["Website", data.website], ["Plan", data.plan], ["Monthly fee", fmtMoney(data.feeSetting?.monthlyFee)],
+                ["Website", data.website], ["Plan", data.plan], ["Institution type", data.institutionType || "SCHOOL"],
+                ["Monthly fee", fmtMoney(data.feeSetting?.monthlyFee)],
                 ["Admission fee", fmtMoney(data.feeSetting?.admissionFee)],
               ].map(([k, v]) => (
                 <div key={k}>
@@ -101,6 +103,13 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ id: str
                   </Select>
                 </Field>
               </div>
+              <Field label="Institution type" hint="Runs as a school, a college or both. Tenants with no value run as schools.">
+                <Select value={form.institutionType || "SCHOOL"} onChange={(e) => setForm({ ...form, institutionType: e.target.value })}>
+                  <option value="SCHOOL">SCHOOL</option>
+                  <option value="COLLEGE">COLLEGE</option>
+                  <option value="BOTH">BOTH</option>
+                </Select>
+              </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Monthly fee (৳)"><TextInput type="number" value={form.monthlyFee} onChange={(e) => setForm({ ...form, monthlyFee: e.target.value })} /></Field>
                 <Field label="Admission fee (৳)"><TextInput type="number" value={form.admissionFee} onChange={(e) => setForm({ ...form, admissionFee: e.target.value })} /></Field>

@@ -47,6 +47,7 @@ export default function SchoolsPage() {
     monthlyFee: "1500",
     admissionFee: "5000",
     planId: "",
+    institutionType: "SCHOOL",
     cycle: "MONTHLY",
   });
 
@@ -114,6 +115,7 @@ export default function SchoolsPage() {
         monthlyFee: "1500",
         admissionFee: "5000",
         planId: plans[0]?.id || "",
+        institutionType: "SCHOOL",
         cycle: "MONTHLY",
       });
       load();
@@ -218,6 +220,13 @@ export default function SchoolsPage() {
                 <Field label="Brand color"><TextInput type="color" value={form.themeColor} onChange={(e) => setForm({ ...form, themeColor: e.target.value })} className="h-11 p-2" /></Field>
                 <Field label="Logo URL"><TextInput value={form.logoUrl} onChange={(e) => setForm({ ...form, logoUrl: e.target.value })} placeholder="https://..." /></Field>
               </div>
+              <Field label="Institution type" hint="Runs as a school, a college, or both. Tenants with no value run as schools.">
+                <Select value={form.institutionType} onChange={(e) => setForm({ ...form, institutionType: e.target.value })}>
+                  <option value="SCHOOL">SCHOOL</option>
+                  <option value="COLLEGE">COLLEGE</option>
+                  <option value="BOTH">BOTH</option>
+                </Select>
+              </Field>
             </div>
           )}
 
@@ -273,6 +282,7 @@ export default function SchoolsPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><div className="text-xs uppercase text-slate-400">Address</div><div className="mt-1 font-semibold text-slate-700">{form.address || "—"}</div></div>
                 <div><div className="text-xs uppercase text-slate-400">Email</div><div className="mt-1 font-semibold text-slate-700">{form.schoolEmail || "—"}</div></div>
+                <div><div className="text-xs uppercase text-slate-400">Institution type</div><div className="mt-1 font-semibold text-slate-700">{form.institutionType}</div></div>
                 <div><div className="text-xs uppercase text-slate-400">Admin</div><div className="mt-1 font-semibold text-slate-700">{form.adminName || "—"}</div></div>
                 <div><div className="text-xs uppercase text-slate-400">Plan</div><div className="mt-1 font-semibold text-slate-700">{selectedPlan?.name || "—"}</div></div>
                 <div><div className="text-xs uppercase text-slate-400">Monthly fee</div><div className="mt-1 font-semibold text-slate-700">৳ {Number(form.monthlyFee || 0).toLocaleString()}</div></div>

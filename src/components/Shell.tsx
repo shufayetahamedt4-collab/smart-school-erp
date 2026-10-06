@@ -7,6 +7,7 @@ import { Crown, GraduationCap, LogOut, Menu, X, UserRound, ChevronDown, ChevronR
 import { api, prefetch } from "@/lib/client";
 import { cn, initials } from "@/lib/utils";
 import { sectorForRole } from "@/lib/sectors";
+import type { InstitutionType } from "@/lib/institution";
 import { dataForRoute, warmListForSector } from "@/lib/route-data";
 import { NAVS, NOTIFICATIONS_HREF, PROFILE_HREF, groupNavFor, type NavGroup, type NavItem } from "./nav";
 import { PageSkeleton } from "./PageSkeleton";
@@ -35,6 +36,8 @@ export interface Me {
     plan: string;
     status: string;
     themeColor?: string | null;
+    /** Tenant shape (docs/COLLEGE-DECISIONS.md). Absent = SCHOOL. */
+    institutionType?: InstitutionType | null;
   } | null;
   student?: {
     id: string;

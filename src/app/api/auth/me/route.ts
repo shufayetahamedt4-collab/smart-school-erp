@@ -34,7 +34,7 @@ export async function GET() {
 
     const school = await prisma.school.findUnique({
       where: { id: schoolId },
-      select: { id: true, name: true, slug: true, logoUrl: true, plan: true, status: true, tagline: true, themeColor: true },
+      select: { id: true, name: true, slug: true, logoUrl: true, plan: true, status: true, tagline: true, themeColor: true, institutionType: true },
     });
     if (!school || school.status === "SUSPENDED") {
       return NextResponse.json({ error: "School unavailable" }, { status: 401 });
@@ -73,7 +73,7 @@ export async function GET() {
   const school = user.schoolId
     ? await prisma.school.findUnique({
         where: { id: user.schoolId },
-        select: { id: true, name: true, slug: true, logoUrl: true, plan: true, status: true, tagline: true, themeColor: true },
+        select: { id: true, name: true, slug: true, logoUrl: true, plan: true, status: true, tagline: true, themeColor: true, institutionType: true },
       })
     : null;
 

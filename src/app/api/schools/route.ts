@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
 import { audit } from "@/lib/auth";
 import { notifySuperAdmins } from "@/lib/notify";
+import { isInstitutionType, normalizeInstitutionType } from "@/lib/institution";
 
 function addDays(date: Date, days: number) {
   const copy = new Date(date);
@@ -41,6 +42,13 @@ export async function POST(req: NextRequest) {
   if (!name || !adminEmail || !password) {
     return NextResponse.json({ error: "School name, admin email and password are required." }, { status: 400 });
   }
+
+  // Tenant shape (docs/COLLEGE-DECISIONS.md). Absent ⇒ SCHOOL; an explicit value
+  // must be one of the three — a typo is a 400, never a silently-stored junk value.
+  if (body?.institutionType !== undefined && !isInstitutionType(body.institutionType)) {
+    return NextResponse.json({ error: "institutionType must be SCHOOL, COLLEGE or BOTH." }, { status: 400 });
+  }
+  const institutionType = normalizeInstitutionType(body?.institutionType);
 
   const planId = String(body?.planId || body?.plan || "").trim();
   const cycle = body?.cycle === "YEARLY" ? "YEARLY" : "MONTHLY";
@@ -80,6 +88,7 @@ export async function POST(req: NextRequest) {
         phone: body?.phone || null,
         email: body?.schoolEmail || body?.email || null,
         tagline: body?.tagline || null,
+        institutionType,
         status: body?.status || "ACTIVE",
         plan: currentPlan?.name || body?.plan || "Pro",
         themeColor: body?.themeColor || "#4f46e5",
@@ -180,6 +189,7 @@ export async function POST(req: NextRequest) {
   await audit("SCHOOL_CREATE", "school", schoolId ?? undefined, {
     name,
     adminEmail,
+    institutionType,
     planId: result?.subscription?.planId || currentPlan?.id || null,
   });
 

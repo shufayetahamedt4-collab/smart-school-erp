@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { slugify } from "@/lib/utils";
 import { writeGuard } from "@/lib/subscription";
+import {
+  canChangeInstitutionType,
+  isInstitutionType,
+  normalizeInstitutionType,
+  schoolHasCollegeData,
+  type InstitutionType,
+} from "@/lib/institution";
 
 /**
  * School detail API.
@@ -71,6 +78,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (body[key] !== undefined) data[key] = body[key];
     }
   }
+
+  // Tenant shape (docs/COLLEGE-DECISIONS.md §6) — platform-only, and a change
+  // is gated by the approved rule instead of copied straight through: adding a
+  // half is always allowed, but downgrading to a school-only tenant is refused
+  // while college data exists. A same-value request is a no-op.
+  let institutionTypeChange: { from: InstitutionType; to: InstitutionType } | null = null;
+  if (body.institutionType !== undefined) {
+    if (!isPlatform) {
+      return NextResponse.json(
+        { error: "Only the platform administrator can change a tenant's institution type." },
+        { status: 403 }
+      );
+    }
+    const requested = body.institutionType;
+    if (!isInstitutionType(requested)) {
+      return NextResponse.json({ error: "institutionType must be SCHOOL, COLLEGE or BOTH." }, { status: 400 });
+    }
+    const current = await prisma.school.findUnique({ where: { id }, select: { institutionType: true } });
+    const from = normalizeInstitutionType(current?.institutionType);
+    const to: InstitutionType = requested;
+    if (from !== to) {
+      const check = canChangeInstitutionType(from, to, await schoolHasCollegeData(id));
+      if (!check.allowed) {
+        return NextResponse.json({ error: check.reason || "That institution type change is not allowed." }, { status: 409 });
+      }
+      data.institutionType = to;
+      institutionTypeChange = { from, to };
+    }
+  }
+
   if (body.themeColor !== undefined) {
     // PRD §12.2 — brand color must be a strict 6-digit hex.
     const hex = String(body.themeColor || "").trim();
@@ -93,6 +130,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
       create: { schoolId: id, monthlyFee: Number(body.monthlyFee || 1500), admissionFee: Number(body.admissionFee || 5000) },
     });
+  }
+  if (institutionTypeChange) {
+    // The tenant's shape is read through school-scoped reference pulls; drop this
+    // school's memo so the next read observes the change (the helper every other
+    // write route uses). Scoped to the change so unrelated PATCHes pay nothing.
+    invalidateReferenceCache(id);
+    await audit("SCHOOL_INSTITUTION_TYPE_CHANGE", "school", id, { ...institutionTypeChange, by: session.role });
   }
   await audit("SCHOOL_UPDATE", "school", id, { ...data, by: session.role });
   return NextResponse.json({ data: school });
