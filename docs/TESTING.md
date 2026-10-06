@@ -40,20 +40,29 @@ database-touching test/verification command.** Nothing in this list may be run f
 
 ```bash
 # from the repo root
-npx firebase emulators:start --only firestore
+npx firebase emulators:start --only firestore --project demo-ss-test \
+    --config firebase.emulator.json
 ```
 
-`firebase.json` carries:
+Use the standalone **`firebase.emulator.json`**, which carries only the emulators block:
 
 ```json
-"emulators": {
-  "firestore": { "host": "127.0.0.1", "port": 8080 },
-  "singleProjectMode": true
+{
+  "emulators": {
+    "firestore": { "host": "127.0.0.1", "port": 8080 },
+    "singleProjectMode": true
+  }
 }
 ```
 
-so Firestore comes up on **127.0.0.1:8080**. Add `,storage` to `--only` and a `"storage"`
-emulator block only if you are exercising upload paths.
+so Firestore comes up on **127.0.0.1:8080**. The project's main `firebase.json` also lists an
+`emulators` block, but it cannot be used here: its `hosting` / web-framework config makes the CLI
+demand the webframeworks experiment before it will start, so a Firestore-only run against it fails.
+That is why the emulators block lives in a separate, hosting-free config.
+
+The Firestore emulator hosts a **single database per project**, so `FIRESTORE_DATABASE_ID` must
+stay **unset** — the emulator has no `smart-school-db`. Add `,storage` to `--only` and a `"storage"`
+emulator block (in `firebase.emulator.json`) only if you are exercising upload paths.
 
 ## 3. Environment variables
 
