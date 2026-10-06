@@ -10,7 +10,7 @@
  * Usage: node scripts/verify-tenant-isolation.mjs   (BASE, default http://localhost:3000)
  * Cleanup afterwards: node scripts/isolation-fixture.mjs clean
  */
-import { initializeApp, applicationDefault, cert } from "firebase-admin/app";
+import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { readFileSync, existsSync } from "node:fs";
 
@@ -34,21 +34,21 @@ if (!CRED.admin || !CRED.teacher || !CRED.student) {
   process.exit(1);
 }
 
-let sa = null;
-try {
-  sa = JSON.parse(readFileSync(new URL("../service-account.json", import.meta.url), "utf8"));
-} catch {}
-initializeApp(sa ? { credential: cert(sa), projectId: sa.project_id } : { credential: applicationDefault() });
+// Emulator-only, credential-free init with the SAME project id as seed.mjs, so
+// the fixture and the seeded tenants share one emulator namespace. No
+// service-account.json, no cert(), no applicationDefault().
+initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID || undefined });
 const db = getFirestore();
 
 /* ---------- foreign names + ids from every other school ---------- */
 const foreignNames = new Set();
 const foreignIds = new Set();
+let foreignClassId = null; // one real foreign class id, used by the read probe
 const schools = await db.collection("schools").get();
 for (const s of schools.docs) {
   if (s.id === `${P}school`) continue;
   foreignIds.add(s.id);
-  foreignNames.add(String(s.data().name || ""));
+  if (s.data().name) foreignNames.add(String(s.data().name));
   for (const [col, nameField] of [
     ["students", "name"], ["classes", "name"], ["sections", "name"],
     ["subjects", "name"], ["teachers", "name"], ["homeworks", "title"],
@@ -57,6 +57,7 @@ for (const s of schools.docs) {
     const snap = await db.collection(col).where("schoolId", "==", s.id).get();
     for (const d of snap.docs) {
       foreignIds.add(d.id);
+      if (col === "classes" && !foreignClassId) foreignClassId = d.id;
       const n = d.data()[nameField];
       if (n) foreignNames.add(String(n));
     }
@@ -88,7 +89,7 @@ function walkStrings(v, out, depth = 0) {
   if (depth > 12 || out.size > 20000) return;
   if (typeof v === "string") { out.add(v); return; }
   if (Array.isArray(v)) { for (const x of v) walkStrings(x, out, depth + 1); return; }
-  if (v && typeof v === "object") { for (const k of Object.keys(v)) { out.add(k); walkStrings(v[k], out, depth + 1); } }
+  if (v && typeof v === "object") { for (const k of Object.keys(v)) walkStrings(v[k], out, depth + 1); }
 }
 
 let failures = 0;
@@ -96,6 +97,12 @@ function check(cond, msg) {
   if (cond) console.log(`  ✅ ${msg}`);
   else { failures++; console.log(`  ❌ ${msg}`); }
 }
+
+// A cross-school isolation test is only meaningful when a genuine foreign tenant
+// exists to be excluded. Fail (never pass) on an empty foreign set.
+console.log("\n### foreign tenant availability");
+check(foreignIds.size > 0 && foreignNames.size > 0,
+  `a real foreign tenant exists — ${foreignNames.size} name(s), ${foreignIds.size} id(s) from ${schools.size - 1} other school(s)`);
 
 const SESSIONS = [
   { label: "school2-admin", email: "zz-iso-admin@test.local", password: CRED.admin },
@@ -118,10 +125,12 @@ for (const acc of SESSIONS) {
     "/api/classes",
     "/api/stats",
   ];
+  let inspected = 0;
   for (const route of routes) {
     const { status, body } = await getJSON(cookie, route);
-    if (status === 403) { console.log(`  ⛔ 403 (expected for role)  ${route}`); continue; }
+    if (status === 403) { console.log(`  ⛔ 403 (no access for this role)  ${route}`); continue; }
     if (status !== 200) { failures++; console.log(`  ❌ HTTP ${status}  ${route}  ${JSON.stringify(body).slice(0, 150)}`); continue; }
+    inspected++;
     const strings = new Set();
     walkStrings(body, strings);
     const leakedNames = [...foreignNames].filter((n) => n && strings.has(n));
@@ -129,6 +138,9 @@ for (const acc of SESSIONS) {
     check(leakedNames.length === 0 && leakedIds.length === 0,
       `${route} — no foreign data${leakedNames.length ? ` (NAMES: ${leakedNames.slice(0, 3).join(", ")})` : ""}${leakedIds.length ? ` (IDS: ${leakedIds.slice(0, 3).join(", ")})` : ""}`);
   }
+  // A wall of 403s must not read as a clean isolation result: require that this
+  // role actually had an accessible route whose payload was inspected.
+  check(inspected > 0, `${acc.label}: at least one accessible route inspected (${inspected} of ${routes.length})`);
 }
 
 /* ---------- fixture visibility (pulls genuinely work) ---------- */
@@ -149,6 +161,16 @@ console.log("\n### fixture visibility (school2 teacher chat thread)");
 const chat = await getJSON(tCookie, "/api/chat");
 const convs = chat.body.data || [];
 check(chat.status === 200 && convs.some((c) => c.id === "zziso-conv"), "chat lists the fixture conversation");
+
+console.log("\n### cross-tenant read by explicit foreign id");
+if (!foreignClassId) {
+  check(false, "a foreign class id is available for the read probe");
+} else {
+  const probe = await getJSON(tCookie, `/api/attendance?classId=${encodeURIComponent(foreignClassId)}&date=2026-09-11`);
+  const rows = probe.body?.data || [];
+  check(rows.length === 0,
+    `supplying another tenant's class id returns no rows — status=${probe.status} rows=${rows.length} (${foreignClassId})`);
+}
 
 console.log("\n### userNamesFor school-scoping (school2 admin sees only ZZ names in routines/homework)");
 const aCookie = await login("zz-iso-admin@test.local", CRED.admin);

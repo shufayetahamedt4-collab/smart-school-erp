@@ -12,7 +12,7 @@
  * that file and deletes exactly those docs (plus sweeps any leftover
  * zziso-prefixed docs in the collections it owns).
  */
-import { initializeApp, applicationDefault, cert } from "firebase-admin/app";
+import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -22,11 +22,10 @@ import { requireEmulator } from "./lib/guard.mjs";
 
 requireEmulator();
 
-let sa = null;
-try {
-  sa = JSON.parse(readFileSync(new URL("../service-account.json", import.meta.url), "utf8"));
-} catch {}
-initializeApp(sa ? { credential: cert(sa), projectId: sa.project_id } : { credential: applicationDefault() });
+// Emulator-only, credential-free init with the SAME project id as seed.mjs and
+// the verifier, so the fixture lands in the namespace the emulator seed uses.
+// No service-account.json, no cert(), no applicationDefault().
+initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID || undefined });
 const db = getFirestore();
 
 const TRACK = new URL(".qa-fixtures.json", import.meta.url);
@@ -47,6 +46,11 @@ const hash = (pw) => bcrypt.hashSync(pw, 10);
 const newPw = () => randomBytes(12).toString("base64url");
 
 async function create() {
+  // Safe to run twice: remove any previous fixture (which also restores the demo
+  // student link) before recreating, so a second `create` never mistakes the
+  // first run's fixture user for the demo student's original link.
+  if (existsSync(TRACK)) await clean();
+
   const track = { created: [], creds: { admin: newPw(), teacher: newPw(), student: newPw(), demoStudent: newPw() } };
   const mark = (col, id) => track.created.push({ col, id });
 
@@ -244,7 +248,14 @@ async function clean() {
     else await ref.update({ userId: FieldValue.delete() });
     deleted++;
   }
-  // Safety sweep: any zziso- docs left in owned collections
+  // Safety sweep: any zziso- docs left in owned collections. Scoped by the
+  // fixture id prefix only — never by school.
+  //
+  // The fixture writes RAW Firestore docs directly and never calls the app's
+  // audit()/notifyUsers(), so creating it produces NO auditLogs/notifications
+  // rows. The only such rows an isolation run leaves are the LOGIN rows written
+  // by the verifier's sign-ins; those belong to the verifier's activity and
+  // cannot be attributed to (or safely deleted by) the fixture.
   const owned = ["users", "students", "classes", "sections", "subjects", "teachers",
     "attendance", "homeworks", "fees", "exams", "routines", "meetingSlots", "conversations", "schools"];
   for (const col of owned) {
