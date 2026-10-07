@@ -15,6 +15,7 @@
  */
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { readFileSync, existsSync } from "node:fs";
 import { loadEnv } from "./load-env.mjs";
 import { requireEmulator } from "./lib/guard.mjs";
 
@@ -23,6 +24,8 @@ requireEmulator();
 
 const PORT = process.env.SMOKE_PORT || process.env.VERIFY_PORT || "3000";
 const BASE = `http://127.0.0.1:${PORT}`;
+/** Fixture id prefix (isolation-fixture.mjs) — the college tenant used below. */
+const P = "zziso-";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -80,6 +83,7 @@ const HEADERS = ["Name", "Admission No", "Roll", "Registration No", "Class", "Se
 const row = (o = {}) => [o.name ?? "", o.admissionNo ?? "", o.roll ?? "", o.registrationNo ?? "", o.class ?? "", o.section ?? "", o.nameBn ?? "", o.dob ?? "", o.gender ?? "", o.bloodGroup ?? "", o.birthCertificateNo ?? "", o.address ?? "", o.previousSchoolName ?? "", o.previousSchoolClass ?? "", o.guardianName ?? "", o.guardianPhone ?? "", o.guardianEmail ?? "", o.guardianRelation ?? "", o.photoUrl ?? ""];
 const numbered = (rows, start = 2) => rows.map((cells, i) => ({ rowNumber: start + i, cells }));
 const post = (host, path, body, cookie) => req(host, path, { cookie, method: "POST", body: JSON.stringify(body) });
+const patch = (host, path, body, cookie) => req(host, path, { cookie, method: "PATCH", body: JSON.stringify(body) });
 
 const admin = await login(HOSTS.school, "principal@sunrise.edu", "School@123");
 
@@ -197,6 +201,84 @@ console.log("\n### no cross-branch leakage in the credential list");
   const list = cred.data?.credentials || [];
   check("the branch admin's slips never include another branch's student", !list.some((c) => c.admissionNo === admOther), JSON.stringify(list.map((c) => c.admissionNo)));
   check("the branch admin's slips include only its own student", list.length === 1 && list[0]?.admissionNo === admOwn, JSON.stringify(list.map((c) => c.admissionNo)));
+}
+
+/* ------------------------------------- college route branch isolation (2h) */
+// Runs against the COLLEGE tenant created by isolation-fixture.mjs (two branches,
+// a branch-bound department/program per branch, plus one branch-less department).
+// A BRANCH-scoped admin must see and touch ONLY its own branch's rows.
+console.log("\n### college departments/programs — branch admin confinement");
+{
+  const TRACK = new URL(".qa-fixtures.json", import.meta.url);
+  if (!existsSync(TRACK)) {
+    check("the isolation fixture is present (scripts/.qa-fixtures.json)", false, "run: node scripts/isolation-fixture.mjs create");
+  } else {
+    const creds = (JSON.parse(readFileSync(TRACK, "utf8")).creds) || {};
+    const collegeAdmin = await login(HOSTS.school, "zz-iso-college-admin@test.local", creds.collegeAdmin);
+    const collegeBranchAdmin = await login(HOSTS.school, "zz-iso-college-br-admin@test.local", creds.collegeBranchAdmin);
+
+    const deptA = `${P}col-dept-a`;
+    const deptB = `${P}col-dept-b`;
+    const deptNone = `${P}col-dept-none`;
+    const progA = `${P}col-prog-a`;
+    const progB = `${P}col-prog-b`;
+
+    // 1. A branch admin sees only its own branch's rows (not branch B's, not the
+    //    branch-less department, which no BRANCH scope may reach).
+    const bDepts = (await req(HOSTS.school, "/api/departments", { cookie: collegeBranchAdmin })).data || [];
+    check(
+      "branch admin sees ONLY its own branch's departments",
+      bDepts.length === 1 && bDepts[0].id === deptA,
+      JSON.stringify(bDepts.map((d) => d.id))
+    );
+    const bProgs = (await req(HOSTS.school, "/api/programs", { cookie: collegeBranchAdmin })).data || [];
+    check(
+      "branch admin sees ONLY its own branch's programs",
+      bProgs.length === 1 && bProgs[0].id === progA,
+      JSON.stringify(bProgs.map((p) => p.id))
+    );
+
+    // 2. Another branch's row cannot be edited or deleted.
+    const patchDeptB = await patch(HOSTS.school, `/api/departments/${deptB}`, { name: "nope" }, collegeBranchAdmin);
+    check("branch admin CANNOT PATCH another branch's department (403)", patchDeptB.status === 403, `HTTP ${patchDeptB.status}`);
+    const delDeptB = await req(HOSTS.school, `/api/departments/${deptB}`, { cookie: collegeBranchAdmin, method: "DELETE" });
+    check("branch admin CANNOT DELETE another branch's department (403)", delDeptB.status === 403, `HTTP ${delDeptB.status}`);
+    const patchProgB = await patch(HOSTS.school, `/api/programs/${progB}`, { name: "nope" }, collegeBranchAdmin);
+    check("branch admin CANNOT PATCH another branch's program (403)", patchProgB.status === 403, `HTTP ${patchProgB.status}`);
+    const delProgB = await req(HOSTS.school, `/api/programs/${progB}`, { cookie: collegeBranchAdmin, method: "DELETE" });
+    check("branch admin CANNOT DELETE another branch's program (403)", delProgB.status === 403, `HTTP ${delProgB.status}`);
+
+    // 3. A foreign (another-tenant) id behaves as NOT FOUND — never a 403 oracle
+    //    that would confirm the row exists in some other tenant.
+    const foreignDept = `${P}both-dept`; // belongs to the BOTH tenant, not the college
+    const crossDept = await patch(HOSTS.school, `/api/departments/${foreignDept}`, { name: "nope" }, collegeAdmin);
+    check("a foreign tenant's department id is NOT FOUND (404)", crossDept.status === 404, `HTTP ${crossDept.status}`);
+    const crossProg = await patch(HOSTS.school, `/api/programs/${foreignDept}`, { name: "nope" }, collegeAdmin);
+    check("a foreign tenant's program id is NOT FOUND (404)", crossProg.status === 404, `HTTP ${crossProg.status}`);
+
+    // 4. The decided edge: a branch-scoped admin cannot move a program OUT of its
+    //    branch by pointing it at a branch-less department; a SCHOOL-scoped admin can.
+    const moveByBranch = await patch(HOSTS.school, `/api/programs/${progA}`, { departmentId: deptNone }, collegeBranchAdmin);
+    check(
+      "a BRANCH-scoped admin CANNOT move a program into a branch-less department (403)",
+      moveByBranch.status === 403,
+      `HTTP ${moveByBranch.status}`
+    );
+    const moveBySchool = await patch(HOSTS.school, `/api/programs/${progA}`, { departmentId: deptNone }, collegeAdmin);
+    const movedRow = (await db.collection("programs").doc(progA).get()).data();
+    check(
+      "a SCHOOL_ADMIN CAN move a program into a branch-less department (200, branchId null)",
+      moveBySchool.status === 200 && movedRow?.departmentId === deptNone && movedRow?.branchId === null,
+      `HTTP ${moveBySchool.status} dept=${movedRow?.departmentId} branch=${movedRow?.branchId}`
+    );
+    // Restore the fixture row exactly as created, so the run is repeatable.
+    const restored = await patch(HOSTS.school, `/api/programs/${progA}`, { departmentId: deptA }, collegeAdmin);
+    check(
+      "the moved program is restored to its original department",
+      restored.status === 200 && restored.data?.branchId === `${P}col-br-a`,
+      `HTTP ${restored.status}`
+    );
+  }
 }
 
 /* --------------------------------------------------------------- cleanup */

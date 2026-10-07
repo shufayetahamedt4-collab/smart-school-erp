@@ -190,6 +190,110 @@ async function create() {
   });
   mark("conversations", convId);
 
+  // ---- College fixture: a COLLEGE tenant with two branches, three departments
+  //      (two branch-bound, one branch-less) and two programs, plus a SCHOOL_ADMIN
+  //      and a BRANCH-scoped admin. This is the tenant the college route sweep
+  //      (verify-tenant-isolation.mjs) and the branch-admin college assertions
+  //      (verify-branch-isolation.mjs) run as. Folded in from the temporary
+  //      _tmp-college-fixture.mjs.
+  const collegeSchoolId = `${P}college`;
+  await db.collection("schools").doc(collegeSchoolId).set({
+    id: collegeSchoolId, name: "ZZ Iso College", status: "ACTIVE", plan: "PRO",
+    institutionType: "COLLEGE", createdAt: now,
+  });
+  mark("schools", collegeSchoolId);
+
+  const colBranchA = `${P}col-br-a`;
+  const colBranchB = `${P}col-br-b`;
+  await db.collection("branches").doc(colBranchA).set({
+    id: colBranchA, schoolId: collegeSchoolId, name: "ZZ Iso College Branch A", enabled: true, createdAt: now,
+  });
+  mark("branches", colBranchA);
+  await db.collection("branches").doc(colBranchB).set({
+    id: colBranchB, schoolId: collegeSchoolId, name: "ZZ Iso College Branch B", enabled: true, createdAt: now,
+  });
+  mark("branches", colBranchB);
+
+  track.creds.collegeAdmin = newPw();
+  track.creds.collegeBranchAdmin = newPw();
+  const colAdminUserId = `${P}user-col-admin`;
+  await db.collection("users").doc(colAdminUserId).set({
+    email: "zz-iso-college-admin@test.local", name: "ZZ Iso College Admin",
+    role: "SCHOOL_ADMIN", schoolId: collegeSchoolId, active: true,
+    passwordHash: hash(track.creds.collegeAdmin),
+  });
+  mark("users", colAdminUserId);
+  const colBranchAdminUserId = `${P}user-col-bradmin`;
+  await db.collection("users").doc(colBranchAdminUserId).set({
+    email: "zz-iso-college-br-admin@test.local", name: "ZZ Iso College Branch Admin",
+    role: "BRANCH_ADMIN", schoolId: collegeSchoolId, scope: "BRANCH", branchId: colBranchA,
+    active: true, passwordHash: hash(track.creds.collegeBranchAdmin),
+  });
+  mark("users", colBranchAdminUserId);
+
+  const colDeptA = `${P}col-dept-a`;
+  const colDeptB = `${P}col-dept-b`;
+  const colDeptNone = `${P}col-dept-none`;
+  await db.collection("departments").doc(colDeptA).set({
+    id: colDeptA, schoolId: collegeSchoolId, name: "ZZ Iso College Dept A", code: "ZZCA",
+    branchId: colBranchA, headStaffId: null, description: null, status: "ACTIVE", createdAt: now,
+  });
+  mark("departments", colDeptA);
+  await db.collection("departments").doc(colDeptB).set({
+    id: colDeptB, schoolId: collegeSchoolId, name: "ZZ Iso College Dept B", code: "ZZCB",
+    branchId: colBranchB, headStaffId: null, description: null, status: "ACTIVE", createdAt: now,
+  });
+  mark("departments", colDeptB);
+  // The branch-less department: no branchId, so only a SCHOOL-scoped session may touch it.
+  await db.collection("departments").doc(colDeptNone).set({
+    id: colDeptNone, schoolId: collegeSchoolId, name: "ZZ Iso College Dept None", code: "ZZCN",
+    branchId: null, headStaffId: null, description: null, status: "ACTIVE", createdAt: now,
+  });
+  mark("departments", colDeptNone);
+
+  const colProgA = `${P}col-prog-a`;
+  const colProgB = `${P}col-prog-b`;
+  await db.collection("programs").doc(colProgA).set({
+    id: colProgA, schoolId: collegeSchoolId, departmentId: colDeptA, name: "ZZ Iso College Program A",
+    code: "ZZPA", degreeLevel: "HSC", durationYears: 2, branchId: colBranchA, status: "ACTIVE", createdAt: now,
+  });
+  mark("programs", colProgA);
+  await db.collection("programs").doc(colProgB).set({
+    id: colProgB, schoolId: collegeSchoolId, departmentId: colDeptB, name: "ZZ Iso College Program B",
+    code: "ZZPB", degreeLevel: "DEGREE_PASS", durationYears: 3, branchId: colBranchB, status: "ACTIVE", createdAt: now,
+  });
+  mark("programs", colProgB);
+
+  // ---- BOTH tenant WITH college data (one department) + a SCHOOL_ADMIN -------
+  const bothSchoolId = `${P}both`;
+  await db.collection("schools").doc(bothSchoolId).set({
+    id: bothSchoolId, name: "ZZ Iso Both", status: "ACTIVE", plan: "PRO",
+    institutionType: "BOTH", createdAt: now,
+  });
+  mark("schools", bothSchoolId);
+  const bothDeptId = `${P}both-dept`;
+  await db.collection("departments").doc(bothDeptId).set({
+    id: bothDeptId, schoolId: bothSchoolId, name: "ZZ Iso Both Dept", code: "ZZBD",
+    branchId: null, headStaffId: null, description: null, status: "ACTIVE", createdAt: now,
+  });
+  mark("departments", bothDeptId);
+  track.creds.bothAdmin = newPw();
+  const bothAdminUserId = `${P}user-both-admin`;
+  await db.collection("users").doc(bothAdminUserId).set({
+    email: "zz-iso-both-admin@test.local", name: "ZZ Iso Both Admin",
+    role: "SCHOOL_ADMIN", schoolId: bothSchoolId, active: true,
+    passwordHash: hash(track.creds.bothAdmin),
+  });
+  mark("users", bothAdminUserId);
+
+  // ---- BOTH tenant with NO college data (its downgrade must be ALLOWED) -----
+  const bothEmptySchoolId = `${P}both-empty`;
+  await db.collection("schools").doc(bothEmptySchoolId).set({
+    id: bothEmptySchoolId, name: "ZZ Iso Both Empty", status: "ACTIVE", plan: "PRO",
+    institutionType: "BOTH", createdAt: now,
+  });
+  mark("schools", bothEmptySchoolId);
+
   // ---- STUDENT fixture user in the DEMO school (for parity harness) ----
   const demoSchool = process.env.DEMO_SCHOOL_ID;
   if (demoSchool) {
@@ -257,7 +361,8 @@ async function clean() {
   // by the verifier's sign-ins; those belong to the verifier's activity and
   // cannot be attributed to (or safely deleted by) the fixture.
   const owned = ["users", "students", "classes", "sections", "subjects", "teachers",
-    "attendance", "homeworks", "fees", "exams", "routines", "meetingSlots", "conversations", "schools"];
+    "attendance", "homeworks", "fees", "exams", "routines", "meetingSlots", "conversations", "schools",
+    "branches", "departments", "programs"];
   for (const col of owned) {
     const snap = await db.collection(col).where("__name__", ">=", P).where("__name__", "<=", P + "\uf8ff").get();
     for (const d of snap.docs) {
