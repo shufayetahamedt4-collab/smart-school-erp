@@ -2,11 +2,19 @@
 /**
  * Phase 1 — tenant-aware navigation, MECHANISM ONLY.
  *
- * Proves the claim Phase 1 is allowed to make: `navForRole(role, institutionType,
- * mode)` is a **no-op for every tenant** — nothing is marked, nothing is
- * overridden, so it returns `NAVS[role]` *by reference* for every role and every
- * `{institutionType, mode}` pair, and a `SCHOOL` tenant's navigation is not
- * merely equal to yesterday's, it IS yesterday's array.
+ * Phase 1 installed the tenant-aware mechanism as a provable no-op; Phase 2e is
+ * the first phase to consume it, marking the two college destinations
+ * (`/dashboard/departments`, `/dashboard/programs`) for the three college-facing
+ * roles. That is exactly the change docs/COLLEGE-DECISIONS.md §8 ("shelf life")
+ * said the first content phase would have to record, so the assertions below now
+ * prove what still has to hold for every tenant:
+ *
+ *   - a SCHOOL tenant's navigation is the frozen pre-Phase-1 registry, item for
+ *     item — in EVERY mode, and for absent/unknown institution types too;
+ *   - a college-capable tenant sees the two extra destinations only in COLLEGE
+ *     mode, only for a role that carries them, and never in school mode;
+ *   - `navForRole` hands back the registry's own array exactly where nothing was
+ *     filtered (the six unmarked roles), and a fresh copy everywhere else.
  *
  * Read-only and offline. It imports the navigation modules directly (this
  * machine's Node strips the TypeScript types) and reads the frozen pre-Phase-1
@@ -17,11 +25,14 @@
  *
  *   node scripts/verify-nav-scope.mjs
  *
- * WHEN A LATER PHASE ADDS CONTENT: the moment the first `requires` marker or the
- * first `NAV_LABEL_OVERRIDES` entry exists, the identity half of check 3 stops
- * being true by design (a marked item is filtered out of some scopes, so the
- * function must return a copy). That phase must relax the assertion to deep
- * equality and record the change — do not "fix" it by removing the check.
+ * RECORDED BY PHASE 2e: the phase that marks its first item must relax the
+ * Phase-1 identity assertion, and this file now does — checks 1, 3, 4 and 6 each
+ * asserted a *no-op* property ("nothing is marked", "the registry is returned by
+ * reference", "the grouping is untouched") that a marked item necessarily
+ * falsifies. They were re-stated, not removed: each one still fails loudly if a
+ * marker appears on an unexpected href, mode or role, if a school-only scope
+ * drifts from the frozen pre-Phase-1 snapshot, or if `navForRole` returns the
+ * registry array where it must return a copy. Do not delete them.
  */
 
 import { readFileSync } from "node:fs";
@@ -52,9 +63,14 @@ registerHooks({
 const { NAVS, navForRole, groupNavFor, mobileTabsFor, moreItemsFor } = await import(
   "../src/components/nav.ts"
 );
-const { INSTITUTION_TYPES, MODES, NAV_LABEL_OVERRIDES, navLabelFor } = await import(
-  "../src/lib/institution.ts"
-);
+const {
+  INSTITUTION_TYPES,
+  MODES,
+  NAV_LABEL_OVERRIDES,
+  hasCollege,
+  navLabelFor,
+  normalizeInstitutionType,
+} = await import("../src/lib/institution.ts");
 
 const SNAPSHOT = JSON.parse(
   readFileSync(new URL("./nav-scope-snapshot.json", import.meta.url), "utf8")
@@ -62,6 +78,23 @@ const SNAPSHOT = JSON.parse(
 
 /** The mobile tab counts frozen before this phase (`mobileTabsFor` short labels). */
 const FROZEN_MOBILE_TABS = { TEACHER: 4 };
+
+/**
+ * Phase 2e marks exactly these two destinations with `requires: "COLLEGE"`, for
+ * exactly these three roles. Check 1 asserts the marked set equals that product,
+ * so a stray marker (or a missing one) fails loudly; checks 3, 4 and 6 use the
+ * same pair as the definition of "a college item".
+ */
+const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs"];
+const COLLEGE_ROLES = ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR"];
+
+/** Can this tenant run a college at all? Absent/unknown values normalize to SCHOOL. */
+const collegeCapable = (type) => hasCollege(normalizeInstitutionType(type));
+
+/** Should a registry item be listed for this `{institutionType, mode}` pair? */
+const visibleIn = (item, type, mode) =>
+  !item.requires ||
+  (item.requires === mode && (item.requires !== "COLLEGE" || collegeCapable(type)));
 
 let failures = 0;
 const ok = (msg) => console.log(`  ✅ ${msg}`);
@@ -71,14 +104,16 @@ const bad = (scope, msg) => {
 };
 const pairs = (items) => items.map((i) => [i.href, i.label]);
 
-console.log("=== Phase 1 nav scope (mechanism only) ===");
+console.log("=== nav scope (school-output proof + college marks) ===");
 console.log(`snapshot: ${SNAPSHOT.capturedFrom}`);
 console.log(`roles=${SNAPSHOT.roles.length} items=${Object.values(SNAPSHOT.navs).reduce((a, b) => a + b.length, 0)}`);
 
 /* ------------------------------------------------------------------------ 1 */
 
-console.log("\n1. nothing carries a `requires` marker");
+console.log("\n1. the only `requires` markers are the two college destinations, on the three college roles");
 {
+  const marked = [];
+  const byRole = new Map();
   let problem = null;
   for (const role of SNAPSHOT.roles) {
     const items = NAVS[role];
@@ -86,14 +121,35 @@ console.log("\n1. nothing carries a `requires` marker");
       problem = `${role} is missing from NAVS`;
       break;
     }
-    const marked = items.filter((i) => Object.prototype.hasOwnProperty.call(i, "requires"));
-    if (marked.length) {
-      problem = `${role}: ${marked.length} item(s) marked (${marked.map((i) => i.href).join(", ")})`;
-      break;
+    const hits = items
+      .filter((i) => Object.prototype.hasOwnProperty.call(i, "requires"))
+      .map((i) => i.href);
+    if (hits.length) byRole.set(role, hits);
+    for (const href of hits) marked.push(`${role}:${href}`);
+    if (!COLLEGE_ROLES.includes(role) && hits.length)
+      problem ??= `${role} carries a requires marker but is not a college-facing role`;
+    for (const item of items) {
+      if (Object.prototype.hasOwnProperty.call(item, "requires")) {
+        if (item.requires !== "COLLEGE")
+          problem ??= `${role} ${item.href}: requires=${JSON.stringify(item.requires)}, expected "COLLEGE"`;
+        if (!COLLEGE_HREFS.includes(item.href))
+          problem ??= `${role} marks ${item.href}, which is not a college destination`;
+      }
     }
   }
+  // The marked set must be the full product — no extra mark, and none missing.
+  const want = COLLEGE_ROLES.flatMap((role) => COLLEGE_HREFS.map((href) => `${role}:${href}`));
+  if (!problem) {
+    if (marked.length !== want.length)
+      problem = `${marked.length} marked item(s), expected ${want.length}: ${want.join(", ")}`;
+    else for (const key of want) if (!marked.includes(key)) problem = `${key} is not marked`;
+  }
   if (problem) bad("requires", problem);
-  else ok(`${SNAPSHOT.roles.length} roles: no nav item declares a requires marker`);
+  else
+    ok(
+      `${marked.length} marker(s) = ${COLLEGE_HREFS.length} college hrefs × ${COLLEGE_ROLES.length} roles, all ` +
+        `requires:"COLLEGE"; the other ${SNAPSHOT.roles.length - COLLEGE_ROLES.length} roles carry none`
+    );
 }
 
 /* ------------------------------------------------------------------------ 2 */
@@ -126,35 +182,50 @@ console.log("\n2. the label override table is empty in every cell");
 
 /* ------------------------------------------------------------------------ 3 */
 
-console.log("\n3. every role × {SCHOOL,COLLEGE,BOTH} × {SCHOOL,COLLEGE} is unchanged");
-console.log("   (identity for SCHOOL and BOTH+SCHOOL — D21; deep equality elsewhere)");
+console.log("\n3. every role × {SCHOOL,COLLEGE,BOTH} × {SCHOOL,COLLEGE} is the registry filtered for that scope");
+console.log("   (and every school-only scope — school mode, or a tenant that cannot run college — is still the frozen pre-Phase-1 list)");
 {
   const TYPES = ["SCHOOL", "COLLEGE", "BOTH"];
   const MODES_ = ["SCHOOL", "COLLEGE"];
-  const identityScopes = new Set(["SCHOOL|SCHOOL", "SCHOOL|COLLEGE", "BOTH|SCHOOL"]);
   let problem = null;
   let compared = 0;
   let identical = 0;
-  let deepOnly = 0;
+  let copies = 0;
+  let schoolOnly = 0;
 
   outer: for (const role of SNAPSHOT.roles) {
-    const want = SNAPSHOT.navs[role];
+    const registry = NAVS[role];
     for (const type of TYPES) {
       for (const mode of MODES_) {
         compared += 1;
         const got = navForRole(role, type, mode);
-        if (JSON.stringify(pairs(got)) !== JSON.stringify(want)) {
-          problem = `${role} ${type}/${mode}: navigation differs from the pre-Phase-1 snapshot`;
+        const want = registry.filter((i) => visibleIn(i, type, mode));
+        if (JSON.stringify(pairs(got)) !== JSON.stringify(pairs(want))) {
+          problem = `${role} ${type}/${mode}: navigation differs from the registry filtered for this scope`;
           break outer;
         }
-        if (identityScopes.has(`${type}|${mode}`)) {
-          if (got !== NAVS[role]) {
-            problem = `${role} ${type}/${mode}: expected NAVS[role] by reference (no-op scope)`;
+        // School output proof: a school-only scope (school mode, or a tenant that
+        // cannot run a college whatever the mode) is the frozen pre-Phase-1 list.
+        if (mode === "SCHOOL" || !collegeCapable(type)) {
+          schoolOnly += 1;
+          if (JSON.stringify(pairs(got)) !== JSON.stringify(SNAPSHOT.navs[role])) {
+            problem = `${role} ${type}/${mode}: school-only scope differs from the pre-Phase-1 snapshot`;
+            break outer;
+          }
+        }
+        // Identity survives exactly where nothing was dropped or relabelled.
+        if (want.length === registry.length) {
+          if (got !== registry) {
+            problem = `${role} ${type}/${mode}: nothing was filtered, so the registry array must be returned by reference`;
             break outer;
           }
           identical += 1;
         } else {
-          deepOnly += 1;
+          if (got === registry) {
+            problem = `${role} ${type}/${mode}: items were filtered, so a copy must be returned`;
+            break outer;
+          }
+          copies += 1;
         }
       }
     }
@@ -162,8 +233,8 @@ console.log("   (identity for SCHOOL and BOTH+SCHOOL — D21; deep equality else
   if (problem) bad("matrix", problem);
   else
     ok(
-      `${compared} combinations (${SNAPSHOT.roles.length} roles × 3 types × 2 modes) all match the snapshot; ` +
-        `${identical} returned the registry's own array by reference, ${deepOnly} compared deep-equal`
+      `${compared} combinations (${SNAPSHOT.roles.length} roles × 3 types × 2 modes) all match the scope's filtered registry; ` +
+        `${schoolOnly} school-only scopes equal the pre-Phase-1 snapshot; ${identical} by reference, ${copies} as copies`
     );
 }
 
@@ -171,25 +242,45 @@ console.log("   (identity for SCHOOL and BOTH+SCHOOL — D21; deep equality else
 
 console.log("\n4. an absent institution type and an absent mode behave as SCHOOL");
 {
+  const CASES = [
+    [undefined, undefined],
+    [undefined, "COLLEGE"],
+    ["SCHOOL", undefined],
+    [null, null],
+  ];
   let problem = null;
   let n = 0;
-  for (const role of SNAPSHOT.roles) {
-    for (const [type, mode] of [
-      [undefined, undefined],
-      [undefined, "COLLEGE"],
-      ["SCHOOL", undefined],
-      [null, null],
-    ]) {
+  outer: for (const role of SNAPSHOT.roles) {
+    const registry = NAVS[role];
+    const want = registry.filter((i) => !i.requires);
+    for (const [type, mode] of CASES) {
       n += 1;
       const got = navForRole(role, type, mode);
-      if (got !== NAVS[role]) problem = `${role} (${String(type)}/${String(mode)}): not the registry's own array`;
-      else if (JSON.stringify(pairs(got)) !== JSON.stringify(SNAPSHOT.navs[role])) problem = `${role}: content differs`;
-      if (problem) break;
+      if (JSON.stringify(pairs(got)) !== JSON.stringify(pairs(want))) {
+        problem = `${role} (${String(type)}/${String(mode)}): raw/absent values must behave as SCHOOL`;
+        break outer;
+      }
+      if (JSON.stringify(pairs(got)) !== JSON.stringify(SNAPSHOT.navs[role])) {
+        problem = `${role} (${String(type)}/${String(mode)}): not the pre-Phase-1 school list`;
+        break outer;
+      }
+      const expectIdentity = want.length === registry.length;
+      if (expectIdentity && got !== registry) {
+        problem = `${role} (${String(type)}/${String(mode)}): expected the registry's own array`;
+        break outer;
+      }
+      if (!expectIdentity && got === registry) {
+        problem = `${role} (${String(type)}/${String(mode)}): expected a filtered copy`;
+        break outer;
+      }
     }
-    if (problem) break;
   }
   if (problem) bad("absent values", problem);
-  else ok(`${n} absent/raw value combinations (Super Admin, QR sessions, first paint) all return the registry array`);
+  else
+    ok(
+      `${n} absent/raw value combinations (Super Admin, QR sessions, first paint) all read as SCHOOL ` +
+        `and hide every college item — including an absent type with mode=COLLEGE`
+    );
 }
 
 /* ------------------------------------------------------------------------ 5 */
@@ -204,15 +295,27 @@ console.log("\n5. an unknown role still yields an empty list");
 
 /* ------------------------------------------------------------------------ 6 */
 
-console.log("\n6. grouping is unchanged, both from the registry and from the filtered array");
+console.log("\n6. grouping: school buckets unchanged, college items land in `academics`, nothing lost or duplicated");
 {
+  const flat = (g) => (g ? g.map((k) => [k.key, k.label, k.items.map((i) => i.href)]) : null);
+  /** The snapshot shape, with the college items removed and emptied groups dropped. */
+  const stripCollege = (g) =>
+    g
+      ? g
+          .map((k) => ({ key: k.key, label: k.label, items: k.items.filter((i) => !COLLEGE_HREFS.includes(i.href)) }))
+          .filter((k) => k.items.length)
+          .map((k) => [k.key, k.label, k.items.map((i) => i.href)])
+      : null;
+  /** `[groupKey, href]` for every college item the grouped list actually carries. */
+  const collegeIn = (g) =>
+    g ? g.flatMap((k) => k.items.filter((i) => COLLEGE_HREFS.includes(i.href)).map((i) => [k.key, i.href])) : [];
+
   let problem = null;
   let grouped = 0;
   let nulled = 0;
   outer: for (const role of SNAPSHOT.roles) {
     const want = SNAPSHOT.groups[role];
     const fromRegistry = groupNavFor(role);
-    const flat = (g) => (g ? g.map((k) => [k.key, k.label, k.items.map((i) => i.href)]) : null);
 
     if (want === null) {
       if (fromRegistry !== null) {
@@ -221,8 +324,20 @@ console.log("\n6. grouping is unchanged, both from the registry and from the fil
       }
       nulled += 1;
     } else {
-      if (JSON.stringify(flat(fromRegistry)) !== JSON.stringify(want)) {
-        problem = `${role}: groups differ from the snapshot`;
+      // Drop the college items and the registry grouping is the frozen one again.
+      if (JSON.stringify(stripCollege(fromRegistry)) !== JSON.stringify(want)) {
+        problem = `${role}: groups (minus the college items) differ from the snapshot`;
+        break outer;
+      }
+      // The items it does carry are exactly the marked ones, and all in `academics`.
+      const marked = collegeIn(fromRegistry).map((x) => x[1]);
+      const expectMarked = NAVS[role].filter((i) => COLLEGE_HREFS.includes(i.href)).map((i) => i.href);
+      if (JSON.stringify(marked) !== JSON.stringify(expectMarked)) {
+        problem = `${role}: registry grouping lists ${JSON.stringify(marked)}, expected ${JSON.stringify(expectMarked)}`;
+        break outer;
+      }
+      if (collegeIn(fromRegistry).some(([key]) => key !== "academics")) {
+        problem = `${role}: a college item was grouped outside \`academics\``;
         break outer;
       }
       grouped += 1;
@@ -235,14 +350,34 @@ console.log("\n6. grouping is unchanged, both from the registry and from the fil
       ["BOTH", "SCHOOL"],
       ["BOTH", "COLLEGE"],
     ]) {
-      const injected = groupNavFor(role, navForRole(role, type, mode));
+      const nav = navForRole(role, type, mode);
+      const injected = groupNavFor(role, nav);
       if (want === null) {
         if (injected !== null) {
           problem = `${role} ${type}/${mode}: expected null groups from the injected array`;
           break outer;
         }
-      } else if (JSON.stringify(flat(injected)) !== JSON.stringify(want)) {
-        problem = `${role} ${type}/${mode}: injected-array grouping differs from the snapshot`;
+        continue;
+      }
+      if (JSON.stringify(stripCollege(injected)) !== JSON.stringify(want)) {
+        problem = `${role} ${type}/${mode}: injected-array grouping (minus the college items) differs from the snapshot`;
+        break outer;
+      }
+      // Whatever college items the scope shows must be grouped in `academics`…
+      const visible = nav.filter((i) => COLLEGE_HREFS.includes(i.href)).map((i) => i.href);
+      const placed = collegeIn(injected).map((x) => x[1]);
+      if (JSON.stringify(placed) !== JSON.stringify(visible)) {
+        problem = `${role} ${type}/${mode}: grouped ${JSON.stringify(placed)} college item(s), nav lists ${JSON.stringify(visible)}`;
+        break outer;
+      }
+      if (collegeIn(injected).some(([key]) => key !== "academics")) {
+        problem = `${role} ${type}/${mode}: a college item was grouped outside \`academics\``;
+        break outer;
+      }
+      // …and the groups must still be an exact partition of the injected list.
+      const hrefs = injected.flatMap((k) => k.items.map((i) => i.href));
+      if (hrefs.length !== nav.length || new Set(hrefs).size !== nav.length) {
+        problem = `${role} ${type}/${mode}: groups are not a partition of the injected nav (${hrefs.length} vs ${nav.length})`;
         break outer;
       }
     }
@@ -250,7 +385,8 @@ console.log("\n6. grouping is unchanged, both from the registry and from the fil
   if (problem) bad("grouping", problem);
   else
     ok(
-      `${grouped} panel roles grouped identically for the registry call and for all 4 injected scopes; ` +
+      `${grouped} panel roles: registry + all 4 injected scopes group identically once the college items are removed, ` +
+        `every visible college item lands in \`academics\`, and the groups stay a partition; ` +
         `${nulled} non-panel roles (and any unknown role) still return null`
     );
 }
@@ -287,4 +423,4 @@ if (failures) {
   console.log(`❌ nav scope verification FAILED — ${failures} group(s) with problems.`);
   process.exit(1);
 }
-console.log("✅ nav scope verification PASSED — Phase 1 changes nothing for any tenant.");
+console.log("✅ nav scope verification PASSED — school output is the frozen registry, and the college items stay behind the COLLEGE gate.");

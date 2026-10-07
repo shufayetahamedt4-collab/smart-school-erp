@@ -33,9 +33,18 @@ import {
   Briefcase,
   Bell,
   Upload,
+  Network,
+  Layers,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { navLabelFor, normalizeMode, type InstitutionType, type Mode } from "../lib/institution";
+import {
+  hasCollege,
+  navLabelFor,
+  normalizeInstitutionType,
+  normalizeMode,
+  type InstitutionType,
+  type Mode,
+} from "../lib/institution";
 
 /**
  * Navigation registry.
@@ -56,14 +65,19 @@ export interface NavItem {
   label: string;
   icon: LucideIcon;
   /**
-   * Optional visibility marker: the item is shown only while this mode is the
-   * active one. Nothing carries one yet — the table below is the SCHOOL
-   * registry — and an item without a marker is visible in every mode, which is
-   * why an empty marker set is a no-op for every tenant.
+   * Optional visibility marker: shown only to a tenant that can run this mode at
+   * all, and only while that mode is the active one. Phase 2e is the first phase
+   * to use it — the college destinations (`/dashboard/departments`,
+   * `/dashboard/programs`) carry `COLLEGE` for the three college-facing roles
+   * (SCHOOL_ADMIN, BRANCH_ADMIN, REGISTRAR). Nothing else is marked, and an item
+   * without a marker is visible in every mode, so a SCHOOL tenant's sidebar is
+   * still the registry's school items exactly.
    *
    * Mode is UI context and never authorization: this decides what a sidebar
-   * lists, not what a user may reach (`can()` and tenant isolation remain the
-   * only enforcement).
+   * lists, not what a user may reach (`can()` and the tenant gate in
+   * `requireCollege()` remain the only enforcement). The tenant half of the
+   * check is defence in depth: a SCHOOL tenant lists no college link even if a
+   * stale `ss_mode` cookie ever asked for one.
    */
   requires?: Mode;
 }
@@ -98,6 +112,8 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
     { href: "/dashboard/academic-sessions", label: "Academic Sessions", icon: CalendarDays },
     { href: "/dashboard/subjects", label: "Subjects", icon: BookOpen },
+    { href: "/dashboard/departments", label: "Departments", icon: Network, requires: "COLLEGE" },
+    { href: "/dashboard/programs", label: "Programs", icon: Layers, requires: "COLLEGE" },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
@@ -134,6 +150,8 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/classes", label: "Classes & Sections", icon: BookOpen },
     { href: "/dashboard/academic-sessions", label: "Academic Sessions", icon: CalendarDays },
     { href: "/dashboard/subjects", label: "Subjects", icon: BookOpen },
+    { href: "/dashboard/departments", label: "Departments", icon: Network, requires: "COLLEGE" },
+    { href: "/dashboard/programs", label: "Programs", icon: Layers, requires: "COLLEGE" },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
@@ -163,6 +181,8 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/students", label: "Students", icon: GraduationCap },
+    { href: "/dashboard/departments", label: "Departments", icon: Network, requires: "COLLEGE" },
+    { href: "/dashboard/programs", label: "Programs", icon: Layers, requires: "COLLEGE" },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
     { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
@@ -229,22 +249,18 @@ export const NAVS: Record<string, NavItem[]> = {
 /**
  * A role's navigation for one tenant shape and one active mode.
  *
- * Phase 1 (docs/COLLEGE-DECISIONS.md §8) installs the mechanism only: nothing
- * carries `requires` and the label override table is empty, so this returns
- * `NAVS[role]` **by reference** for every role and every `{institutionType, mode}`
- * pair — a no-op `scripts/verify-nav-scope.mjs` proves with `===`.
- *
- * Exactly two data-driven branches can change the result:
- *   - an item whose `requires` names a mode other than the active one is dropped;
+ * Phase 1 (docs/COLLEGE-DECISIONS.md §8) installed the mechanism as a no-op;
+ * Phase 2e is the phase that consumes it, marking the two college destinations
+ * for the three college-facing roles. The result now depends on the data:
+ *   - an item whose `requires` is not the active mode, or whose tenant cannot run
+ *     that mode at all, is dropped;
  *   - an item with an override for this type/mode is returned under that label.
- * The moment either dataset is non-empty the function returns a NEW array, so
- * the reference guarantee is a Phase 1 property, not a permanent one: the phase
- * that marks its first item or adds its first override must relax the identity
- * assertion in `scripts/verify-nav-scope.mjs` to a deep comparison and record
- * that change (docs/COLLEGE-DECISIONS.md §8, "shelf life").
- *
- * An unknown role returns an empty array — the same value the shell has always
- * produced with `NAVS[role] || []`.
+ * When neither changes anything the function still returns `NAVS[role]` **by
+ * reference** — which is now true for the six roles with no college items, not
+ * for the three that carry them (dropping a marked item necessarily returns a
+ * copy, so a marked role's array is no longer the registry's own).
+ * `scripts/verify-nav-scope.mjs` asserts exactly that split, and that a SCHOOL
+ * tenant's list is still the frozen pre-Phase-1 registry.
  */
 export function navForRole(
   role: string,
@@ -255,11 +271,16 @@ export function navForRole(
   if (!items) return [];
 
   const active = normalizeMode(mode);
+  // A marked item needs BOTH halves: the active mode must be the one it requires,
+  // and the tenant must be able to run that mode (COLLEGE = the college-capable
+  // types). Absent/unknown types normalize to SCHOOL, so they never qualify.
+  const collegeCapable = hasCollege(normalizeInstitutionType(institutionType));
   let changed = false;
   const out: NavItem[] = [];
 
   for (const item of items) {
-    if (item.requires && item.requires !== active) {
+    const tenantSupports = item.requires !== "COLLEGE" || collegeCapable;
+    if (item.requires && (item.requires !== active || !tenantSupports)) {
       changed = true;
       continue;
     }
@@ -314,6 +335,8 @@ const SCHOOL_GROUP_OF: Record<string, string> = {
   "/dashboard/classes": "academics",
   "/dashboard/academic-sessions": "academics",
   "/dashboard/subjects": "academics",
+  "/dashboard/departments": "academics",
+  "/dashboard/programs": "academics",
   "/dashboard/routine": "academics",
   "/dashboard/live-classes": "academics",
   "/dashboard/exams": "academics",
