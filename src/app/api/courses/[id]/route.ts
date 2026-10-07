@@ -18,6 +18,8 @@ import { writeGuard } from "@/lib/subscription";
  *      (a foreign/another-tenant id must behave as NOT FOUND, never as a 403
  *       oracle that confirms the row exists)
  *   8. canAccessBranch(row.branchId) → 403
+ *   9. DELETE only: blocked with 400 while the course is mapped to any program
+ *      (a `programCourse` row) — Phase 3c.
  */
 
 const COURSE_TYPES = ["THEORY", "PRACTICAL"] as const;
@@ -178,10 +180,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Hard delete for Phase 3b. LATER PHASE (3c): before deleting, block here when
-  // the course is mapped to a program — count `programCourse` rows with this
-  // `courseId` and return 400, the same way a department is blocked while it
-  // still has programs. Until that collection has rows, the delete is unguarded.
+  // Blocked while this course is mapped to ANY program (Phase 3c), the same way
+  // a department is blocked while it still has programs. A `programCourse` row
+  // is part of a program's term list, so deleting the course under it would
+  // orphan the term — the mapping must be removed first.
+  const mappingCount = await prisma.programCourse.count({ where: { courseId: id } });
+  if (mappingCount > 0) {
+    return NextResponse.json(
+      { error: "Cannot delete a course that is mapped to a program." },
+      { status: 400 }
+    );
+  }
+
   await prisma.course.delete({ where: { id } });
   await audit("COURSE_DELETE", "course", id, { schoolId });
   invalidateReferenceCache(schoolId);

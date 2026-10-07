@@ -680,8 +680,9 @@ const RELS: Record<string, Record<string, Rel>> = {
   // The program→course mapping: which course sits in which term of a program,
   // and whether it is REQUIRED or ELECTIVE. `programId` is repeated here on
   // purpose — a program×term list must be one collection read (the store cannot
-  // join), and the route enforces `programCourse.programId === course.programId`
-  // when a mapping is created.
+  // join). A course no longer names a program (3b made it department-scoped), so
+  // the route enforces only that the course and the program share a `schoolId`;
+  // `(programId, courseId, termNumber)` is unique, checked in-code by the route.
   programCourse: {
     school: { to: "school", fk: "schoolId", kind: "one" },
     program: { to: "program", fk: "programId", kind: "one" },

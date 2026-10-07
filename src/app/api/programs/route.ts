@@ -3,13 +3,26 @@ import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, requireCollege, audit } from "@/lib/auth";
 import { can, scopeWhere, canAccessBranch } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
+import {
+  DEFAULT_TERM_SYSTEM,
+  TERM_SYSTEMS,
+  isTermSystem,
+  normalizeTermSystem,
+  termCount,
+} from "@/lib/college-terms";
 
 /**
  * College support (Phase 2) — programs (collection `programs`).
  *
  * A program belongs to a department (departmentId, required) of the SAME
  * tenant, and inherits that department's branchId by default. `(schoolId, code)`
- * is unique, enforced in-code with `findFirst`. Phase 2 has NO semesters/terms.
+ * is unique, enforced in-code with `findFirst`.
+ *
+ * Phase 3c adds `termSystem` (YEARLY | SEMESTER, default YEARLY, missing-safe on
+ * read) and, with `durationYears`, the DERIVED term count
+ * (`termCount = durationYears × termsPerYear`). Nothing else stores terms: a
+ * `programCourse` row points at one of those terms by `termNumber`, so the count
+ * must be computed the same way here, in `programs/[id]/courses` and in the page.
  *
  * Guard order in EVERY handler:
  *   1. session                 → 401
@@ -70,7 +83,14 @@ export async function GET(req: NextRequest) {
 
   const data = (programs as any[])
     .filter((p) => !departmentIdFilter || p.departmentId === departmentIdFilter)
-    .map((p) => ({ ...p, departmentName: deptName.get(p.departmentId) || null }))
+    .map((p) => ({
+      ...p,
+      // A row written before Phase 3c has no `termSystem`; read it as YEARLY so
+      // an old program behaves exactly like a new YEARLY one (no migration).
+      termSystem: normalizeTermSystem(p.termSystem),
+      termCount: termCount(Number(p.durationYears), p.termSystem),
+      departmentName: deptName.get(p.departmentId) || null,
+    }))
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
   return NextResponse.json({ data });
@@ -132,6 +152,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "durationYears must be a whole number from 1 to 6." }, { status: 400 });
   }
 
+  // `termSystem` is optional and defaults to YEARLY; a value that is supplied but
+  // not one of the two systems is a 400 (only a MISSING value falls back).
+  const termSystem = body?.termSystem === undefined ? DEFAULT_TERM_SYSTEM : readString(body.termSystem);
+  if (!isTermSystem(termSystem)) {
+    return NextResponse.json(
+      { error: `termSystem must be one of: ${TERM_SYSTEMS.join(", ")}.` },
+      { status: 400 }
+    );
+  }
+
   // (schoolId, code) uniqueness — in-code, per tenant.
   const exists = await prisma.program.findFirst({ where: { schoolId, code } });
   if (exists) {
@@ -151,9 +181,12 @@ export async function POST(req: NextRequest) {
   const status = body?.status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
 
   const program = await prisma.program.create({
-    data: { schoolId, departmentId, name, code, degreeLevel, durationYears, branchId, status },
+    data: { schoolId, departmentId, name, code, degreeLevel, durationYears, branchId, status, termSystem },
   });
-  await audit("PROGRAM_CREATE", "program", program.id, { schoolId, departmentId, name, code, branchId });
+  await audit("PROGRAM_CREATE", "program", program.id, { schoolId, departmentId, name, code, branchId, termSystem });
   invalidateReferenceCache(schoolId);
-  return NextResponse.json({ data: program }, { status: 201 });
+  return NextResponse.json(
+    { data: { ...program, termSystem: normalizeTermSystem((program as any).termSystem), termCount: termCount(durationYears, termSystem) } },
+    { status: 201 }
+  );
 }

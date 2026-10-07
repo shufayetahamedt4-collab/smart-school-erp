@@ -3,6 +3,7 @@ import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, requireCollege, audit } from "@/lib/auth";
 import { can, canAccessBranch } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
+import { TERM_SYSTEMS, isTermSystem, normalizeTermSystem, termCount } from "@/lib/college-terms";
 
 /**
  * College support (Phase 2) — update/delete one program.
@@ -16,6 +17,10 @@ import { writeGuard } from "@/lib/subscription";
  *   6. writeGuard(schoolId)     → 402
  *   7. load row by id AND require row.schoolId === schoolId → else 404
  *   8. canAccessBranch(row.branchId) → 403
+ *   9. mapping-aware guards (Phase 3c): a `termSystem` change, or a
+ *      `durationYears` decrease below the highest mapped term, answers 409
+ *      while any `programCourse` row references this program; both are allowed
+ *      once nothing is mapped.
  */
 
 const DEGREE_LEVELS = ["HSC", "DEGREE_PASS", "HONOURS", "MASTERS", "DIPLOMA"] as const;
@@ -95,6 +100,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     data.durationYears = durationYears;
   }
+  if (body?.termSystem !== undefined) {
+    const termSystem = readString(body.termSystem);
+    if (!isTermSystem(termSystem)) {
+      return NextResponse.json(
+        { error: `termSystem must be one of: ${TERM_SYSTEMS.join(", ")}.` },
+        { status: 400 }
+      );
+    }
+    data.termSystem = termSystem;
+  }
   if (body?.status !== undefined) data.status = body.status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
 
   // Re-validate the department when it changes, and re-inherit its branch.
@@ -125,10 +140,52 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.branchId = branchId;
   }
 
+  // Mapping-aware guards (Phase 3c). The program's `programCourse` rows ARE its
+  // terms, so a change that would invalidate them is refused while any exist:
+  // switching YEARLY ⇄ SEMESTER renumbers every term, and shrinking
+  // `durationYears` can land below a term that is already mapped. Both are
+  // allowed once the program has no mappings. Guarded AFTER every field has been
+  // validated, so a bad body is still a 400, never a 409.
+  const currentSystem = normalizeTermSystem((program as any).termSystem);
+  const storedDuration = Number((program as any).durationYears);
+  const effectiveSystem = data.termSystem ?? currentSystem;
+  const effectiveDuration =
+    data.durationYears ?? (Number.isInteger(storedDuration) ? storedDuration : 0);
+  const mappings = await prisma.programCourse.findMany({ where: { programId: id } });
+  if (mappings.length) {
+    if (data.termSystem !== undefined && data.termSystem !== currentSystem) {
+      return NextResponse.json(
+        { error: "Cannot change the term system while courses are mapped to this program." },
+        { status: 409 }
+      );
+    }
+    const highestMappedTerm = mappings.reduce(
+      (max, row) => Math.max(max, Number((row as any).termNumber) || 0),
+      0
+    );
+    const nextTermCount = termCount(effectiveDuration, effectiveSystem);
+    if (highestMappedTerm > nextTermCount) {
+      return NextResponse.json(
+        {
+          error:
+            `This would leave ${nextTermCount} term(s), below the highest mapped term ` +
+            `(${highestMappedTerm}). Remove the later mappings first.`,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const updated = await prisma.program.update({ where: { id }, data });
   await audit("PROGRAM_UPDATE", "program", id, { schoolId, data });
   invalidateReferenceCache(schoolId);
-  return NextResponse.json({ data: updated });
+  return NextResponse.json({
+    data: {
+      ...updated,
+      termSystem: normalizeTermSystem((updated as any).termSystem),
+      termCount: termCount(Number((updated as any).durationYears), (updated as any).termSystem),
+    },
+  });
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -154,10 +211,20 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Hard delete for Phase 2. LATER PHASE: before deleting, block here when the
-  // program has enrolled students or courses (e.g. count students with this
-  // programId / course-registrations referencing it and return 400), the same
-  // way a department is blocked while it still has programs.
+  // Blocked while any course is mapped to this program (Phase 3c), the same way
+  // a department is blocked while it still has programs. The mapping is the
+  // program's term list, so deleting under it would orphan every term row.
+  const mappingCount = await prisma.programCourse.count({ where: { programId: id } });
+  if (mappingCount > 0) {
+    return NextResponse.json(
+      { error: "Cannot delete a program that still has courses mapped to it." },
+      { status: 400 }
+    );
+  }
+
+  // Hard delete. LATER PHASE: before deleting, block here when the program has
+  // enrolled students (count students with this programId and return 400), the
+  // same shape as the mapping guard above.
   await prisma.program.delete({ where: { id } });
   await audit("PROGRAM_DELETE", "program", id, { schoolId });
   invalidateReferenceCache(schoolId);
