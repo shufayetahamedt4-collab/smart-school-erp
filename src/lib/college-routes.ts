@@ -24,12 +24,13 @@
  * the same design as `institution.ts` and `sectors.ts` — so a verifier running
  * under plain `node`, a client component and Edge code can all import it.
  *
- * Phase 3 (`docs/COLLEGE-DECISIONS.md` §10): the catalogue phase. `courses` is
- * added to this list by its own change, together with `programCourses` under the
- * same segment, once those routes exist.
+ * Phase 3 (`docs/COLLEGE-DECISIONS.md` §10): the catalogue phase. `courses` was
+ * added here in 3b, in the same change that created `src/app/api/courses` — a
+ * listed segment with no directory FAILS the guard, which is what keeps this
+ * list and the tree in step. `programCourses` (3c) lives under the same segment.
  */
 
-export const COLLEGE_API_SEGMENTS = ["departments", "programs"] as const;
+export const COLLEGE_API_SEGMENTS = ["departments", "programs", "courses"] as const;
 
 export type CollegeApiSegment = (typeof COLLEGE_API_SEGMENTS)[number];
 

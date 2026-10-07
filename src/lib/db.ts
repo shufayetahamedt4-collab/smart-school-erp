@@ -651,26 +651,30 @@ const RELS: Record<string, Record<string, Rel>> = {
     branch: { to: "branch", fk: "branchId", kind: "one" },
     head: { to: "user", fk: "headStaffId", kind: "one" },
     programs: { to: "program", via: "departmentId", kind: "many" },
+    courses: { to: "course", via: "departmentId", kind: "many" },
   },
   program: {
     school: { to: "school", fk: "schoolId", kind: "one" },
     branch: { to: "branch", fk: "branchId", kind: "one" },
     department: { to: "department", fk: "departmentId", kind: "one" },
-    courses: { to: "course", via: "programId", kind: "many" },
+    // A program's courses are reached THROUGH the mapping (`programCourse`), not
+    // directly: which course sits in which term, and whether it is required or
+    // elective, is a property of the mapping, not of the course.
     programCourses: { to: "programCourse", via: "programId", kind: "many" },
   },
   // ---- College support (Phase 3) ----
-  // A course is a catalogue row under ONE program, so it inherits that program's
-  // department and branch. `branchId` is stored (not only derived) because the
-  // store cannot join and branch scoping (`scopeWhere`) filters on it directly —
-  // the same reason a program stores the branch it inherited from its
-  // department. `creditHours` is optional: a course may carry credits (honours /
-  // masters) or none (HSC). Marks and attendance do NOT link to a course yet;
-  // that is the OPEN decision in docs/COLLEGE-DECISIONS.md §10 (D-3-6).
+  // A course is a catalogue row under ONE DEPARTMENT, and inherits that
+  // department's branch (exactly like a program). `branchId` is stored (not only
+  // derived) because the store cannot join and branch scoping (`scopeWhere`)
+  // filters on it directly. `creditHours` is optional: a course may carry credits
+  // (honours / masters) or none (HSC), and stores `null` when it carries none.
+  // Marks and attendance do NOT link to a course yet — that is the OPEN decision
+  // in docs/COLLEGE-DECISIONS.md §10 (D-3-6). A course reaches a program only
+  // through `programCourse` (3c).
   course: {
     school: { to: "school", fk: "schoolId", kind: "one" },
     branch: { to: "branch", fk: "branchId", kind: "one" },
-    program: { to: "program", fk: "programId", kind: "one" },
+    department: { to: "department", fk: "departmentId", kind: "one" },
     programCourses: { to: "programCourse", via: "courseId", kind: "many" },
   },
   // The program→course mapping: which course sits in which term of a program,
