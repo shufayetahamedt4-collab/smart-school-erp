@@ -195,3 +195,88 @@ Phase 2e is the first content phase: it marks the two college destinations, so t
   — still equals the frozen snapshot; check 4 proves an absent type in COLLEGE mode hides every
   college item; check 6 proves every visible college item is grouped in `academics` and that the
   groups remain an exact partition of the injected list. No assertion was deleted or weakened.
+
+## 10. Phase 3 decisions (courses before terms, and the re-scoping of plan-Phase-3)
+
+Phase 3 delivers the **academic catalogue under a program**: courses, the program→course mapping,
+and the program's term shape. It delivers **no** course registration, **no** student enrolment,
+**no** attendance, **no** grading and **no** fees. This is a deliberate **re-scoping** of
+`docs/COLLEGE-PLAN-DELTA.md` §6, recorded here because the delta's own table still reads as if the
+next step were "semester = extended class".
+
+- **D-3-1 — the catalogue precedes the term rows, and the delta's Phase 3 is deferred.** The delta's
+  **Phase 3** ("semester = extended class, per-program ladder") is **deferred to Phase 5**; its
+  premise — that `classes` carry a stored `mode` — does not hold (see the corrections below). The
+  **catalogue half** of the delta's **Phase 4** ("courses") is **pulled forward** into Phase 3; the
+  *registration* and *approval* halves stay in Phase 4. The delta's requirement to add `mode` to
+  `subjects` is **dropped**: courses are a separate, program-owned collection and inherit the college
+  context from their program, so no school subject file is touched.
+- **D-3-2 — a term is an INTEGER in Phase 3.** `programCourses.termNumber` and (later)
+  `students.termNumber` are plain integers validated against the program's derived term count. There
+  is **no `programTerms` collection** in Phase 3. Term **rows** arrive in Phase 5 together with the
+  promotion ladder, when a term needs its own dates, registration window and cap. Deriving the term
+  list from `termSystem` + `durationYears` is sufficient — and only sufficient — while a term has no
+  identity of its own.
+- **D-3-3 — Phase 3 touches no school file.** `classes`, `sections`, `subjects`, `students`,
+  `attendance`, `students/promote`, `grading`/`grading-store`, `routine`/`timetableSlots` and the
+  `exam`/`marks` routes are **not modified** by Phase 3. `students.programId` and
+  `students.termNumber` are **deferred to Phase 4 (enrolment)**; the Phase 4 preflight must re-verify
+  that adding them then still needs **no backfill** (both nullable, absent meaning "not a college
+  student"), the same "missing = the old behaviour" convention as §1 and §4.
+- **D-3-4 — the term shape and its guard.** `program.termSystem` is `YEARLY | SEMESTER`, default
+  `YEARLY`. It is editable **only while the program has no course mappings**; once a mapping exists
+  a `termSystem` change is refused with **409**. Lowering `durationYears` **below the highest mapped
+  `termNumber`** is also refused with **409** — never silently orphan a mapping. Raising
+  `durationYears` stays allowed while it is within the existing `1..6` bound.
+- **D-3-5 — `DIPLOMA` default duration.** The program form's `SUGGESTED_YEARS` gains
+  `DIPLOMA` → **2**, alongside the existing level defaults (HSC 2, Degree 3, Honours 4, Masters 1).
+  This is a **form default only** — the API still accepts any whole number in `1..6`.
+- **D-3-6 — courses are a SEPARATE collection (Option A).** A `courses` collection, program-scoped,
+  with an **optional** `creditHours`, is chosen over a `subjects` type flag: it keeps every school
+  code path (`subjects`, marks, routine, exams) byte-identical, which is the whole point of this
+  phase. **OPEN DECISION, to be locked before Phase 4:** whether college **marks** and **attendance**
+  attach to a `course` or keep using the school `subject` spine. The standing preference is
+  **separate college collections** (e.g. `courseAttendance`) and **never** altering the school
+  `attendance` key — `attendance` is upserted on a `studentId_date` unique key, so one row per pupil
+  per day; per-course attendance cannot be retro-fitted onto it without breaking school attendance.
+
+### The reconciled phase list (single source of truth)
+
+| Phase | One-line scope |
+|---|---|
+| **3-pre** | The college-route guard: one exported list of college API segments, plus an offline verifier that fails when a listed handler omits `requireCollege` first, or when an unlisted college directory appears. |
+| **3a** | The data layer: `courses` (and `programCourses`) in `COLS`/`RELS` with hand-written accessors; the `courses` permission module and its `can()` assertion. |
+| **3b** | The course catalogue API — program-scoped, `requireCollege` first, 404 on a foreign id, 400 on a foreign id in a body, audit rows. |
+| **3c** | The program's term shape and the program→course map: `program.termSystem`, derived terms, `programCourses`, and the `PATCH`/`DELETE` guards of D-3-4. |
+| **3d** | The college course/department/program pages, the nav item behind `requires:"COLLEGE"`, the school-nav deep-equal snapshot, a production-less `next build`, and screenshots. |
+| **3e** | Isolation proof: fixture and tenant/branch harness additions, **baseline first**, the same shape as Phase 2h. |
+| **4** | Course registration + approval (the delta's Phase 4 remainder), and `students.programId`/`termNumber` at enrolment. |
+| **5** | Terms as rows: `classes` gain their program/term identity and the per-program promotion ladder (the deferred delta Phase 3). |
+| **6** | Credit-weighted GPA/CGPA + transcript (the delta's Phase 5). |
+| **7** | College fee basis (the delta's Phase 6). |
+| **8a/8b/8c** | College dashboard / reports / import (the delta's Phase 7a/7b/7c). |
+
+The delta's phase numbers are kept where the scope is unchanged and renumbered only where the scope
+moved, so no phase silently changes meaning.
+
+### Corrections to `docs/COLLEGE-PLAN-DELTA.md`, recorded deliberately
+
+Three statements in the delta are contradicted by the shipped code or by the repository itself. They
+are corrected here so a later reader does not inherit them:
+
+1. **`classes.mode` does not exist.** The delta's §6 says the delta's Phase 3 needs it ("Classes need
+   `mode`"), and its §3 describes `mode` as stored on `classes`/`subjects`/`students`. **No such field
+   exists:** `src/app/api/classes/route.ts` creates `{ schoolId, name, order, branchId }`, and
+   `RELS.classRoom` in `src/lib/db.ts` lists school/sections/students/assignments/routines/homeworks/
+   exams only. Phase M shipped **key-scoping** (`modeScopedKey`, `currentSessionKey`) and the cookie
+   model, **not** stored `mode` on core rows — which §4 of this document already calls "a later
+   phase". Deferring the delta's Phase 3 is therefore safe, *provided* this is recorded, which it now
+   is.
+2. **"The data layer pushes only one equality filter to Firestore" is outdated.** The delta's §3
+   uses it to justify storing `mode`. `src/lib/query-diagnostics.ts` `pushdownConditionsFor` pushes
+   **every** scalar equality (and scalar `in`), sorted; a field is skipped only when it names a
+   *relation*. The recommendation to store `mode` still stands — the stated *reason* does not.
+3. **`docs/COLLEGE-PLAN.md` is absent from this repository.** The plan's own A–I detail was delivered
+   as chat prose and never written to disk (see this document's preamble), so the delta's §6 table is
+   the **only** in-repo evidence for phases 4–8. Anything in a phase-4+ preflight that depends on
+   A–I detail must **re-supply** it rather than recall it.
