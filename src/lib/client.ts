@@ -1,5 +1,7 @@
 "use client";
 
+import { normalizeInstitutionType, normalizeMode, type InstitutionType, type Mode } from "@/lib/institution";
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -45,6 +47,54 @@ export function clearApiCache(): void {
   inflight.clear();
 }
 
+/* --------------------------------------------------------------- UI mode */
+
+/**
+ * Mode-scoped reads (docs/COLLEGE-DECISIONS.md §3, §9).
+ *
+ * The client memo is keyed by URL alone, so two modes would otherwise share one
+ * entry: switching to College would paint the School payload (or vice-versa)
+ * until the TTL expired. A BOTH tenant therefore carries its mode in the URL,
+ * which keeps the two contexts' cached reads apart — and only for the endpoints
+ * whose server behaviour depends on mode, and only for a BOTH tenant, so a
+ * SCHOOL or COLLEGE tenant's URLs stay exactly what they are today.
+ */
+const MODE_SCOPED_PATHS: ReadonlySet<string> = new Set([
+  "/api/stats",
+  "/api/exams",
+  "/api/grading-scheme",
+  "/api/routine-config",
+]);
+
+let modeContext: { type: InstitutionType; mode: Mode } | null = null;
+
+/**
+ * Tell the client cache which mode is active. Called by the shell once the
+ * session payload resolves (and again after a switch). A change drops every
+ * cached read, so nothing computed for the previous mode can be served for the
+ * new one.
+ */
+export function setClientMode(
+  institutionType: InstitutionType | null | undefined,
+  mode: Mode | null | undefined
+): void {
+  const type = normalizeInstitutionType(institutionType);
+  const next: Mode = normalizeMode(mode);
+  const changed = !modeContext || modeContext.type !== type || modeContext.mode !== next;
+  modeContext = { type, mode: next };
+  if (changed) clearApiCache();
+}
+
+/** The URL a mode-scoped read should actually hit — identity unless BOTH. */
+function scopedUrl(url: string): string {
+  if (!modeContext || modeContext.type !== "BOTH") return url;
+  const q = url.indexOf("?");
+  const path = q === -1 ? url : url.slice(0, q);
+  if (!MODE_SCOPED_PATHS.has(path)) return url;
+  if (/([?&])mode=/.test(url)) return url;
+  return `${url}${q === -1 ? "?" : "&"}mode=${modeContext.mode}`;
+}
+
 async function request<T>(url: string, opts: RequestInit): Promise<T> {
   const res = await fetch(url, opts);
   const body = await res.json().catch(() => null);
@@ -82,7 +132,8 @@ export async function api<T = unknown>(url: string, opts: RequestInit = {}): Pro
     return data;
   }
 
-  const key = `GET ${url}`;
+  const scoped = scopedUrl(url);
+  const key = `GET ${scoped}`;
   const noStore = opts.cache === "no-store";
 
   // A `no-store` read must always observe the network, so it is never served
@@ -92,7 +143,7 @@ export async function api<T = unknown>(url: string, opts: RequestInit = {}): Pro
     if (hit && Date.now() - hit.at < READ_TTL_MS) {
       // Refresh only once the cached copy is meaningfully old: a prefetch that
       // just landed must not be re-fetched a moment later by the page's own read.
-      if (Date.now() - hit.at >= REVALIDATE_AFTER_MS) revalidate<T>(key, url, req);
+      if (Date.now() - hit.at >= REVALIDATE_AFTER_MS) revalidate<T>(key, scoped, req);
       return hit.data;
     }
   }
@@ -106,7 +157,7 @@ export async function api<T = unknown>(url: string, opts: RequestInit = {}): Pro
   // still memoised, so ordinary readers may reuse it.
   let pending = inflight.get(key);
   if (!pending) {
-    pending = request<T>(url, req)
+    pending = request<T>(scoped, req)
       .then((data) => {
         memo.set(key, { at: Date.now(), data });
         return data;
@@ -174,7 +225,7 @@ export function prefetch(urls: Iterable<string>, staggerMs = 0): void {
 
 /** True when a read is already cached (TTL-fresh) or in flight — nothing to warm. */
 function isFresh(url: string): boolean {
-  const key = `GET ${url}`;
+  const key = `GET ${scopedUrl(url)}`;
   if (inflight.has(key)) return true;
   const hit = memo.get(key);
   return !!hit && Date.now() - hit.at < READ_TTL_MS;

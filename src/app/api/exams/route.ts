@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, schoolReference } from "@/lib/db";
-import { getSession, audit, guardianChildId } from "@/lib/auth";
+import { getSession, audit, guardianChildId, resolveActiveMode } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 import { isBranchScoped } from "@/lib/permissions";
@@ -55,7 +55,10 @@ export async function GET(req: NextRequest) {
   // Branch scoping (PRD §12.3): a branch admin only sees exams of their
   // branch's classes — the cache key carries the branch so lists never mix.
   const branchScoped = isBranchScoped(session);
-  const cacheKey = `${schoolId}|${classId || ""}|${branchScoped ? session.branchId || "" : ""}`;
+  // Mode is part of the key (docs/COLLEGE-DECISIONS.md §3), so a BOTH tenant's
+  // School and College exam lists are cached separately. The payload itself is
+  // unchanged.
+  const cacheKey = `${schoolId}|${classId || ""}|${branchScoped ? session.branchId || "" : ""}|${await resolveActiveMode(schoolId)}`;
   const cached = examsCacheGet(cacheKey);
   if (cached) return NextResponse.json({ data: cached });
 

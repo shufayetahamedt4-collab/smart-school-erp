@@ -1,6 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import type { Role } from "@/lib/db";
+import { MODE_COOKIE, allowedModes, isMode, normalizeInstitutionType, type Mode } from "./institution";
 
 export const SESSION_COOKIE = "ss_token";
 
@@ -48,6 +49,45 @@ export async function getSessionOrThrow(): Promise<SessionUser> {
   const session = await getSession();
   if (!session) throw new Error("Unauthorized");
   return session;
+}
+
+/**
+ * The active UI mode for a tenant — the ONE server-side mode resolver.
+ *
+ * Mode is UI context, never authorization (docs/COLLEGE-DECISIONS.md §3). The
+ * resolution is deliberately tenant-first and never trusts the client:
+ *
+ *   - SCHOOL tenant  → SCHOOL, always (an `ss_mode` cookie is ignored);
+ *   - COLLEGE tenant → COLLEGE, always;
+ *   - BOTH tenant    → the `ss_mode` cookie the switcher wrote, else the user's
+ *                      own `lastMode`, else SCHOOL.
+ *
+ * Any value that is not a mode, or that the tenant does not allow, is ignored
+ * rather than honoured — an old cookie can never make a SCHOOL tenant render as
+ * a college. Every mode-scoped cache key and settings key is built from this
+ * one answer, so a request cannot mix modes.
+ */
+export async function resolveActiveMode(schoolId: string | null | undefined): Promise<Mode> {
+  if (!schoolId) return "SCHOOL";
+  const { prisma } = await import("./db");
+  const school = await prisma.school
+    .findUnique({ where: { id: schoolId }, select: { institutionType: true } })
+    .catch(() => null);
+  const allowed = allowedModes(normalizeInstitutionType((school as any)?.institutionType));
+  // A single-mode tenant has exactly one valid answer; the cookie cannot change it.
+  if (allowed.length <= 1) return allowed[0] ?? "SCHOOL";
+  const store = await cookies();
+  const fromCookie = store.get(MODE_COOKIE)?.value;
+  if (isMode(fromCookie) && allowed.includes(fromCookie)) return fromCookie;
+  const session = await getSession();
+  if (session?.schoolId && session.schoolId === schoolId) {
+    const user = await prisma.user
+      .findUnique({ where: { id: session.id }, select: { lastMode: true } })
+      .catch(() => null);
+    const last = (user as any)?.lastMode;
+    if (isMode(last) && allowed.includes(last)) return last;
+  }
+  return "SCHOOL";
 }
 
 export { homeForRole } from "./permissions";

@@ -70,6 +70,41 @@ export function allowedModes(type: InstitutionType): Mode[] {
   return modes;
 }
 
+/** A tenant or user with no usable mode preference shows SCHOOL. */
+export const DEFAULT_MODE: Mode = "SCHOOL";
+
+/**
+ * The one cookie that carries the current UI mode. It is written by
+ * `POST /api/mode` and by nothing else — never by a page, never by a GET.
+ * It is UI context only: the server always re-validates it against the
+ * tenant's `institutionType`, and it never grants access (docs/COLLEGE-DECISIONS.md §3).
+ */
+export const MODE_COOKIE = "ss_mode";
+
+/** The storable mode, or the SCHOOL default. Never throws. */
+export function normalizeMode(value: unknown): Mode {
+  return isMode(value) ? value : DEFAULT_MODE;
+}
+
+/**
+ * The suffix appended to a College-scoped settings key. Empty for SCHOOL, so a
+ * school-mode key is byte-identical to the key it has always used.
+ */
+export const COLLEGE_KEY_SUFFIX = "__college";
+
+/**
+ * A mode-scoped settings key.
+ *
+ * This is the whole backward-compatibility guarantee for stored settings
+ * (docs/COLLEGE-DECISIONS.md §4): the SCHOOL branch returns `base` untouched, so
+ * an existing tenant's saved grading scheme, routine config and academic session
+ * continue to live under exactly the key they were written with. Only COLLEGE
+ * gets a distinct suffix — a tenant that never ran a college cannot be affected.
+ */
+export function modeScopedKey(base: string, mode: Mode | null | undefined): string {
+  return mode === "COLLEGE" ? `${base}${COLLEGE_KEY_SUFFIX}` : base;
+}
+
 /** Human labels for the platform console. Not wired into end-user screens yet. */
 export const INSTITUTION_TYPE_LABELS: Record<InstitutionType, string> = {
   SCHOOL: "School",

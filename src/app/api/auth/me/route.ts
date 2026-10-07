@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, guardianChildId } from "@/lib/auth";
+import { getSession, guardianChildId, resolveActiveMode } from "@/lib/auth";
+import { allowedModes, normalizeInstitutionType } from "@/lib/institution";
 
 export async function GET() {
   const session = await getSession();
@@ -40,6 +41,8 @@ export async function GET() {
       return NextResponse.json({ error: "School unavailable" }, { status: 401 });
     }
 
+    // Mode context for this tenant (docs/COLLEGE-DECISIONS.md §3) — additive.
+    const institutionType = normalizeInstitutionType(school.institutionType);
     // Minimal identity — same shape /api/auth/me returns for account guardians.
     return NextResponse.json({
       data: {
@@ -53,6 +56,9 @@ export async function GET() {
         },
         school,
         student,
+        institutionType,
+        allowedModes: allowedModes(institutionType),
+        mode: await resolveActiveMode(schoolId),
       },
     });
   }
@@ -97,5 +103,17 @@ export async function GET() {
     }) : null;
   }
 
-  return NextResponse.json({ data: { user, school, student } });
+  // Mode context for this tenant (docs/COLLEGE-DECISIONS.md §3) — additive
+  // fields only; every existing field above is unchanged.
+  const institutionType = normalizeInstitutionType((school as any)?.institutionType);
+  return NextResponse.json({
+    data: {
+      user,
+      school,
+      student,
+      institutionType,
+      allowedModes: allowedModes(institutionType),
+      mode: await resolveActiveMode(user.schoolId),
+    },
+  });
 }

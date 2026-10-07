@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSession, guardianChildren } from "@/lib/auth";
+import { getSession, guardianChildren, resolveActiveMode } from "@/lib/auth";
 import { isBranchScoped } from "@/lib/permissions";
 import { statsCacheRead, statsCompute, statsRefresh } from "@/lib/stats-cache";
 import { money } from "@/lib/utils";
@@ -42,7 +42,10 @@ export async function GET(req: NextRequest) {
     // PRD §12.3 — a branch-scoped session's dashboard reflects their branch only.
     const branchId = session.role !== "SUPER_ADMIN" && isBranchScoped(session) ? session.branchId || "" : null;
 
-    const cacheKey = `admin|${session.id}|${sid}|${branchId || ""}`;
+    // Mode is part of the key (docs/COLLEGE-DECISIONS.md §3): a BOTH tenant's
+    // School and College dashboards never share one cached payload. SCHOOL and
+    // COLLEGE tenants only ever resolve to their single mode.
+    const cacheKey = `admin|${session.id}|${sid}|${branchId || ""}|${await resolveActiveMode(sid)}`;
     // Built as a thunk so the cache below can serve a previous payload now and
     // refresh it in the background, and so concurrent cold readers share ONE
     // recomputation instead of each pulling every collection again.
@@ -138,7 +141,7 @@ export async function GET(req: NextRequest) {
 
   // ---- TEACHER
   if (session.role === "TEACHER") {
-    const cacheKey = `teacher|${session.id}|${schoolId}`;
+    const cacheKey = `teacher|${session.id}|${schoolId}|${await resolveActiveMode(schoolId)}`;
     // Same two-layer cache as the admin branch. A previous payload is served
     // now while a fresh one is computed behind it, and concurrent cold readers
     // collapse into ONE recomputation (statsCompute). Correctness does NOT rest
@@ -225,7 +228,7 @@ export async function GET(req: NextRequest) {
 
   // ---- GUARDIAN
   if (session.role === "GUARDIAN") {
-    const cacheKey = `guardian|${session.id}|${schoolId}`;
+    const cacheKey = `guardian|${session.id}|${schoolId}|${await resolveActiveMode(schoolId)}`;
 
     // Recompute (and cache) the payload. Kept as a thunk so a warm reader is
     // served instantly and a merely-stale one refreshes in the background — the

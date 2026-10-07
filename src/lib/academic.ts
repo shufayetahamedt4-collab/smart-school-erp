@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+import { modeScopedKey, type Mode } from "@/lib/institution";
+import { resolveActiveMode } from "@/lib/auth";
 
 /**
  * Academic session helpers (Phase 1 foundation).
@@ -17,8 +19,9 @@ import { prisma } from "@/lib/db";
  */
 
 /** The current session id for a school, or null. */
-export async function getCurrentSessionId(schoolId: string): Promise<string | null> {
-  const row = await prisma.setting.findUnique({ where: { key: currentSessionKey(schoolId) } }).catch(() => null);
+export async function getCurrentSessionId(schoolId: string, mode?: Mode | null): Promise<string | null> {
+  const m = mode === undefined ? await resolveActiveMode(schoolId) : mode;
+  const row = await prisma.setting.findUnique({ where: { key: currentSessionKey(schoolId, m) } }).catch(() => null);
   const stored = row?.value ? String(row.value) : null;
   if (stored) {
     const session = await prisma.academicSession.findUnique({ where: { id: stored } }).catch(() => null);
@@ -34,15 +37,24 @@ export async function getCurrentSessionId(schoolId: string): Promise<string | nu
  * Resolve the session a new/updated student should carry: the explicit id when it
  * is a real session of this school, otherwise the school's current session.
  */
-export async function resolveSessionId(schoolId: string, explicit?: string | null): Promise<string | null> {
+export async function resolveSessionId(schoolId: string, explicit?: string | null, mode?: Mode | null): Promise<string | null> {
   const wanted = explicit ? String(explicit) : null;
   if (wanted) {
     const session = await prisma.academicSession.findUnique({ where: { id: wanted } }).catch(() => null);
     if (session && session.schoolId === schoolId) return session.id;
   }
-  return getCurrentSessionId(schoolId);
+  const m = mode === undefined ? await resolveActiveMode(schoolId) : mode;
+  return getCurrentSessionId(schoolId, m);
 }
 
-export function currentSessionKey(schoolId: string): string {
-  return `school.${schoolId}.current_session`;
+/**
+ * The session pointer's key is mode-scoped (docs/COLLEGE-DECISIONS.md §2, §4).
+ * With the mode omitted it is today's exact key
+ * (`school.<schoolId>.current_session`): the SCHOOL branch of `modeScopedKey`
+ * returns the base untouched, so an existing tenant's saved pointer is read and
+ * written under exactly the key it has always had. Only college mode uses the
+ * suffixed key.
+ */
+export function currentSessionKey(schoolId: string, mode?: Mode | null): string {
+  return modeScopedKey(`school.${schoolId}.current_session`, mode);
 }

@@ -1,4 +1,6 @@
 import { prisma } from "./db";
+import { modeScopedKey, type Mode } from "./institution";
+import { resolveActiveMode } from "./auth";
 
 /**
  * A school's timetable shape — how many periods a day, when each one runs, and
@@ -27,7 +29,15 @@ export interface RoutineConfig {
   periods: RoutinePeriod[];
 }
 
-export const routineConfigKey = (schoolId: string): string => `routine_config_${schoolId}`;
+/**
+ * The timetable-shape key is mode-scoped (docs/COLLEGE-DECISIONS.md §2, §4).
+ * With the mode omitted it is today's exact key (`routine_config_<schoolId>`):
+ * the SCHOOL branch of `modeScopedKey` returns the base untouched, so an
+ * existing tenant's saved config is read and written under exactly the key it
+ * has always had. Only a college-mode read/write uses the suffixed key.
+ */
+export const routineConfigKey = (schoolId: string, mode?: Mode | null): string =>
+  modeScopedKey(`routine_config_${schoolId}`, mode);
 
 export const MIN_PERIODS = 1;
 export const MAX_PERIODS = 12;
@@ -122,14 +132,16 @@ export function validateRoutineConfig(value: unknown): ConfigCheck {
   return { ok: true, config: { days: days.sort((a, b) => a - b), periods } };
 }
 
-export async function loadRoutineConfig(schoolId: string | null | undefined): Promise<RoutineConfig> {
+export async function loadRoutineConfig(schoolId: string | null | undefined, mode?: Mode | null): Promise<RoutineConfig> {
   if (!schoolId) return DEFAULT_ROUTINE_CONFIG;
-  const row = await prisma.setting.findUnique({ where: { key: routineConfigKey(schoolId) } }).catch(() => null);
+  const m = mode === undefined ? await resolveActiveMode(schoolId) : mode;
+  const row = await prisma.setting.findUnique({ where: { key: routineConfigKey(schoolId, m) } }).catch(() => null);
   return coerceRoutineConfig((row as any)?.value ?? null);
 }
 
-export async function saveRoutineConfig(schoolId: string, config: RoutineConfig): Promise<void> {
-  const key = routineConfigKey(schoolId);
+export async function saveRoutineConfig(schoolId: string, config: RoutineConfig, mode?: Mode | null): Promise<void> {
+  const m = mode === undefined ? await resolveActiveMode(schoolId) : mode;
+  const key = routineConfigKey(schoolId, m);
   await prisma.setting.upsert({
     where: { key },
     create: { key, value: config as any },

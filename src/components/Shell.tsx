@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Crown, GraduationCap, LogOut, Menu, X, UserRound, ChevronDown, ChevronRight } from "lucide-react";
-import { api, prefetch } from "@/lib/client";
+import { api, prefetch, setClientMode } from "@/lib/client";
 import { cn, initials } from "@/lib/utils";
 import { sectorForRole } from "@/lib/sectors";
-import type { InstitutionType } from "@/lib/institution";
+import { isMode, type InstitutionType, type Mode } from "@/lib/institution";
 import { dataForRoute, warmListForSector } from "@/lib/route-data";
 import { NAVS, NOTIFICATIONS_HREF, PROFILE_HREF, groupNavFor, type NavGroup, type NavItem } from "./nav";
+import { Segmented } from "./app-ui";
 import { PageSkeleton } from "./PageSkeleton";
 import { NotificationBell } from "./NotificationBell";
 
@@ -47,6 +48,10 @@ export interface Me {
     classRoom?: { name: string } | null;
     section?: { name: string } | null;
   } | null;
+  /** Tenant shape (absent = SCHOOL) + the active UI mode — docs/COLLEGE-DECISIONS.md §3. */
+  institutionType?: InstitutionType | null;
+  allowedModes?: Mode[] | null;
+  mode?: Mode | null;
 }
 
 /** PRD §12.2 white-label: paint the UI with the school's brand color. */
@@ -227,6 +232,7 @@ export function useMe() {
   const refresh = useCallback(async () => {
     try {
       const data = await api<Me>("/api/auth/me");
+      setClientMode(data?.school?.institutionType, data?.mode);
       setMe(data);
       writeCachedMe(data);
       applyBrandColor(data?.school?.themeColor);
@@ -250,6 +256,7 @@ export function useMe() {
   useEffect(() => {
     const cached = readCachedMe();
     if (!cached) return;
+    setClientMode(cached.school?.institutionType, cached.mode);
     setMe(cached);
     applyBrandColor(cached.school?.themeColor);
     setLoading(false);
@@ -259,13 +266,72 @@ export function useMe() {
     refresh();
   }, [refresh]);
 
-  return { me, loading, error, refresh };
+  /**
+   * Switch the tenant's UI mode IN PLACE: POST /api/mode (the only writer of the
+   * mode cookie), then update the client cache scope and rewrite the tab's
+   * session cache. No browser reload.
+   */
+  const setMode = useCallback(
+    async (next: Mode): Promise<Mode> => {
+      const data = await api<{ mode?: Mode }>("/api/mode", {
+        method: "POST",
+        body: JSON.stringify({ mode: next }),
+      });
+      const resolved: Mode = isMode(data?.mode) ? data.mode : next;
+      setClientMode(me?.school?.institutionType, resolved);
+      setMe((prev) => {
+        const updated = prev ? { ...prev, mode: resolved } : prev;
+        if (updated) writeCachedMe(updated);
+        return updated;
+      });
+      return resolved;
+    },
+    [me?.school?.institutionType]
+  );
+
+  return { me, loading, error, refresh, setMode };
+}
+
+/**
+ * School | College switcher — rendered ONLY for a BOTH tenant
+ * (docs/COLLEGE-DECISIONS.md §3, §5). A SCHOOL or COLLEGE tenant never sees it,
+ * and no teacher/guardian variant exists (those are later phases).
+ */
+function ModeSwitcher({ me, onChange }: { me: Me | null; onChange: (mode: Mode) => Promise<Mode> }) {
+  const current: Mode = me?.mode === "COLLEGE" ? "COLLEGE" : "SCHOOL";
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="hidden shrink-0 sm:block" title={error || undefined}>
+      <Segmented<Mode>
+        label="School or college"
+        className="w-44"
+        value={current}
+        options={[
+          { value: "SCHOOL", label: "School" },
+          { value: "COLLEGE", label: "College" },
+        ]}
+        onChange={async (next) => {
+          if (next === current || busy) return;
+          setBusy(true);
+          setError(null);
+          try {
+            await onChange(next);
+          } catch (e: any) {
+            setError(e?.message || "Could not switch mode");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
+    </div>
+  );
 }
 
 export function Shell({ role, children }: { role: string; children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { me, loading } = useMe();
+  const { me, loading, setMode } = useMe();
   const [drawer, setDrawer] = useState(false);
   const warmed = useRef(false);
 
@@ -314,6 +380,7 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
   const logout = async () => {
     await api("/api/auth/logout", { method: "POST" }).catch(() => null);
     writeCachedMe(null);
+    setClientMode(null, null);
     router.replace("/login");
   };
 
@@ -421,6 +488,10 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
               {!groups && me?.school?.plan && <span className="ml-2 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-600">{me.school.plan} plan</span>}
             </div>
           </div>
+
+          {/* A BOTH tenant runs both halves; its users pick which one they are
+              looking at. Every other tenant shape has no switcher. */}
+          {me?.school?.institutionType === "BOTH" && <ModeSwitcher me={me} onChange={setMode} />}
 
           {user && (
             <div className="flex items-center gap-2">

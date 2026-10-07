@@ -1,5 +1,7 @@
 import { prisma } from "./db";
 import { coerceScheme, type GradingScheme } from "./grading";
+import { modeScopedKey, type Mode } from "./institution";
+import { resolveActiveMode } from "./auth";
 
 /**
  * Persistence for a school's grading scheme.
@@ -14,16 +16,26 @@ import { coerceScheme, type GradingScheme } from "./grading";
  * generic /api/settings endpoint.
  */
 
-export const schemeKey = (schoolId: string): string => `grading_scheme_${schoolId}`;
+/**
+ * The scheme key is mode-scoped (docs/COLLEGE-DECISIONS.md §2, §4). With the
+ * mode omitted it is today's exact key (`grading_scheme_<schoolId>`): the SCHOOL
+ * branch of `modeScopedKey` returns the base untouched, so an existing tenant's
+ * saved scheme is read and written under exactly the key it has always had.
+ * Only a college-mode read/write uses the suffixed key.
+ */
+export const schemeKey = (schoolId: string, mode?: Mode | null): string =>
+  modeScopedKey(`grading_scheme_${schoolId}`, mode);
 
-export async function loadScheme(schoolId: string | null | undefined): Promise<GradingScheme> {
+export async function loadScheme(schoolId: string | null | undefined, mode?: Mode | null): Promise<GradingScheme> {
   if (!schoolId) return coerceScheme(null);
-  const row = await prisma.setting.findUnique({ where: { key: schemeKey(schoolId) } }).catch(() => null);
+  const m = mode === undefined ? await resolveActiveMode(schoolId) : mode;
+  const row = await prisma.setting.findUnique({ where: { key: schemeKey(schoolId, m) } }).catch(() => null);
   return coerceScheme((row as any)?.value ?? null);
 }
 
-export async function saveScheme(schoolId: string, scheme: GradingScheme): Promise<void> {
-  const key = schemeKey(schoolId);
+export async function saveScheme(schoolId: string, scheme: GradingScheme, mode?: Mode | null): Promise<void> {
+  const m = mode === undefined ? await resolveActiveMode(schoolId) : mode;
+  const key = schemeKey(schoolId, m);
   await prisma.setting.upsert({
     where: { key },
     create: { key, value: scheme as any },
