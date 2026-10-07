@@ -153,6 +153,12 @@ const COLS: Record<string, string> = {
   // code)` uniqueness is enforced in-code by the route, exactly like a branch.
   department: "departments",
   program: "programs",
+  // ---- College support (Phase 3) ----
+  // Same rule as department/program: ordinary catalogue rows, so there is NO
+  // `idFor`/`idForCreate` entry and `create` falls back to `rand()` (a random
+  // id). Uniqueness is enforced in-code by the route, not by the store.
+  course: "courses",
+  programCourse: "programCourses",
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
@@ -333,6 +339,9 @@ const RELS: Record<string, Record<string, Rel>> = {
     // ---- College support (Phase 2) ----
     departments: { to: "department", via: "schoolId", kind: "many" },
     programs: { to: "program", via: "schoolId", kind: "many" },
+    // ---- College support (Phase 3) ----
+    courses: { to: "course", via: "schoolId", kind: "many" },
+    programCourses: { to: "programCourse", via: "schoolId", kind: "many" },
   },
   user: {
     school: { to: "school", fk: "schoolId", kind: "one" },
@@ -647,6 +656,32 @@ const RELS: Record<string, Record<string, Rel>> = {
     school: { to: "school", fk: "schoolId", kind: "one" },
     branch: { to: "branch", fk: "branchId", kind: "one" },
     department: { to: "department", fk: "departmentId", kind: "one" },
+    courses: { to: "course", via: "programId", kind: "many" },
+    programCourses: { to: "programCourse", via: "programId", kind: "many" },
+  },
+  // ---- College support (Phase 3) ----
+  // A course is a catalogue row under ONE program, so it inherits that program's
+  // department and branch. `branchId` is stored (not only derived) because the
+  // store cannot join and branch scoping (`scopeWhere`) filters on it directly —
+  // the same reason a program stores the branch it inherited from its
+  // department. `creditHours` is optional: a course may carry credits (honours /
+  // masters) or none (HSC). Marks and attendance do NOT link to a course yet;
+  // that is the OPEN decision in docs/COLLEGE-DECISIONS.md §10 (D-3-6).
+  course: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    program: { to: "program", fk: "programId", kind: "one" },
+    programCourses: { to: "programCourse", via: "courseId", kind: "many" },
+  },
+  // The program→course mapping: which course sits in which term of a program,
+  // and whether it is REQUIRED or ELECTIVE. `programId` is repeated here on
+  // purpose — a program×term list must be one collection read (the store cannot
+  // join), and the route enforces `programCourse.programId === course.programId`
+  // when a mapping is created.
+  programCourse: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    program: { to: "program", fk: "programId", kind: "one" },
+    course: { to: "course", fk: "courseId", kind: "one" },
   },
   twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
@@ -1973,5 +2008,8 @@ export const prisma = {
   // ---- College support (Phase 2) ----
   department: model("department"),
   program: model("program"),
+  // ---- College support (Phase 3) ----
+  course: model("course"),
+  programCourse: model("programCourse"),
   $transaction: transaction,
 };

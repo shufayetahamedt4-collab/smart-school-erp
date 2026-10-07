@@ -25,7 +25,9 @@ export type ModuleKey =
   | "staff"
   // ---- College support (Phase 2) ----
   | "departments"
-  | "programs";
+  | "programs"
+  // ---- College support (Phase 3) ----
+  | "courses";
 
 export type Action = "view" | "viewOwn" | "viewOwnChild" | "viewOwnClass" | "entry" | "full" | "pay" | "upload" | "billing";
 
@@ -139,6 +141,17 @@ export const MATRIX: Record<ModuleKey, Partial<Record<Role, Actions>>> = {
     REGISTRAR: [R.view],
   },
   programs: {
+    SCHOOL_ADMIN: [R.full],
+    BRANCH_ADMIN: [R.full],
+    REGISTRAR: [R.view],
+  },
+  // ---- College support (Phase 3) ----
+  // The course catalogue, under a program. Same shape as departments/programs:
+  // the main admin and a branch admin manage it (a BRANCH_ADMIN only its own
+  // branch's rows, via scopeWhere), and a REGISTRAR reads it. No new role.
+  // SUPER_ADMIN is deliberately NOT listed — `can()` short-circuits it to true
+  // for every module by design, and listing it would hide that fact.
+  courses: {
     SCHOOL_ADMIN: [R.full],
     BRANCH_ADMIN: [R.full],
     REGISTRAR: [R.view],

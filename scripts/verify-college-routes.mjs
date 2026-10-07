@@ -415,8 +415,12 @@ console.log("\n3. no misplaced college access — a non-college directory may no
   if (offenders.length) {
     for (const o of offenders) bad("misplaced", o);
   } else {
-    const scanned = topLevel.filter((n) => !collegeSet.has(n)).reduce((n, d) => n + tsFilesUnder(join(API_DIR, d)).length, 0);
-    ok(`${scanned} file(s) under ${topLevel.length - collegeSet.size} non-college director(ies): none calls requireCollege() or touches a college model`);
+    // Count the directories actually scanned, not `total - college` — a listed
+    // segment with no directory yet (or an unlisted one) would make subtraction
+    // disagree with the real walk.
+    const scannedDirs = topLevel.filter((n) => !collegeSet.has(n));
+    const scanned = scannedDirs.reduce((n, d) => n + tsFilesUnder(join(API_DIR, d)).length, 0);
+    ok(`${scanned} file(s) under ${scannedDirs.length} non-college director(ies): none calls requireCollege() or touches a college model`);
   }
 }
 
