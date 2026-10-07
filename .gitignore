@@ -67,3 +67,7 @@ scripts/.qa-fixtures.json
 # "run it on this PC" artifacts (npm run app writes these)
 .app.pid
 app.log
+
+# scratch/temporary verification artifacts (agent-authored, never committed)
+_tmp-*/
+scripts/_tmp-*
