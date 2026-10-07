@@ -35,6 +35,7 @@ import {
   Upload,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { navLabelFor, normalizeMode, type InstitutionType, type Mode } from "../lib/institution";
 
 /**
  * Navigation registry.
@@ -54,6 +55,17 @@ export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
+  /**
+   * Optional visibility marker: the item is shown only while this mode is the
+   * active one. Nothing carries one yet — the table below is the SCHOOL
+   * registry — and an item without a marker is visible in every mode, which is
+   * why an empty marker set is a no-op for every tenant.
+   *
+   * Mode is UI context and never authorization: this decides what a sidebar
+   * lists, not what a user may reach (`can()` and tenant isolation remain the
+   * only enforcement).
+   */
+  requires?: Mode;
 }
 
 export interface NavGroup {
@@ -215,6 +227,57 @@ export const NAVS: Record<string, NavItem[]> = {
 };
 
 /**
+ * A role's navigation for one tenant shape and one active mode.
+ *
+ * Phase 1 (docs/COLLEGE-DECISIONS.md §8) installs the mechanism only: nothing
+ * carries `requires` and the label override table is empty, so this returns
+ * `NAVS[role]` **by reference** for every role and every `{institutionType, mode}`
+ * pair — a no-op `scripts/verify-nav-scope.mjs` proves with `===`.
+ *
+ * Exactly two data-driven branches can change the result:
+ *   - an item whose `requires` names a mode other than the active one is dropped;
+ *   - an item with an override for this type/mode is returned under that label.
+ * The moment either dataset is non-empty the function returns a NEW array, so
+ * the reference guarantee is a Phase 1 property, not a permanent one: the phase
+ * that marks its first item or adds its first override must relax the identity
+ * assertion in `scripts/verify-nav-scope.mjs` to a deep comparison and record
+ * that change (docs/COLLEGE-DECISIONS.md §8, "shelf life").
+ *
+ * An unknown role returns an empty array — the same value the shell has always
+ * produced with `NAVS[role] || []`.
+ */
+export function navForRole(
+  role: string,
+  institutionType?: InstitutionType | null,
+  mode?: Mode | null
+): NavItem[] {
+  const items = NAVS[role];
+  if (!items) return [];
+
+  const active = normalizeMode(mode);
+  let changed = false;
+  const out: NavItem[] = [];
+
+  for (const item of items) {
+    if (item.requires && item.requires !== active) {
+      changed = true;
+      continue;
+    }
+    const label = navLabelFor(item.href, institutionType, mode);
+    if (label !== undefined && label !== item.label) {
+      changed = true;
+      out.push({ ...item, label });
+    } else {
+      out.push(item);
+    }
+  }
+
+  // Nothing was dropped and nothing was relabelled — hand back the registry's
+  // own array so "unchanged" is an identity, not a deep-equality guess.
+  return changed ? out : items;
+}
+
+/**
  * Module groups for the School Admin panel (SCHOOL_ADMIN, BRANCH_ADMIN and the
  * back-office sub-roles). These are section headers only — every member below
  * is an existing route, unchanged.
@@ -289,13 +352,19 @@ const SCHOOL_GROUP_OF: Record<string, string> = {
  * fixed group order, and drops any group the role has no members for. Items whose
  * href is not mapped (there should be none for school roles) fall back to the
  * last group so nothing can silently disappear.
+ *
+ * Pass an already-filtered array (`navForRole(...)`) as the second argument to
+ * group a mode-aware list; called with the role alone it buckets the registry
+ * entry itself, exactly as it always has.
  */
-export function groupNavFor(role: string): NavGroup[] | null {
+export function groupNavFor(role: string, items?: NavItem[]): NavGroup[] | null {
   if (!SCHOOL_PANEL_ROLES.includes(role)) return null;
-  const items = NAVS[role];
-  if (!items) return null;
+  // The optional argument is the already-filtered array (`navForRole`); omitted,
+  // this buckets the role's registry entry exactly as it always has.
+  const list = items ?? NAVS[role];
+  if (!list) return null;
   const buckets = new Map<string, NavItem[]>();
-  for (const item of items) {
+  for (const item of list) {
     const key = SCHOOL_GROUP_OF[item.href] || "operations";
     buckets.set(key, [...(buckets.get(key) || []), item]);
   }

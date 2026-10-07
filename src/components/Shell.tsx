@@ -9,7 +9,7 @@ import { cn, initials } from "@/lib/utils";
 import { sectorForRole } from "@/lib/sectors";
 import { isMode, type InstitutionType, type Mode } from "@/lib/institution";
 import { dataForRoute, warmListForSector } from "@/lib/route-data";
-import { NAVS, NOTIFICATIONS_HREF, PROFILE_HREF, groupNavFor, type NavGroup, type NavItem } from "./nav";
+import { NOTIFICATIONS_HREF, PROFILE_HREF, groupNavFor, navForRole, type NavGroup, type NavItem } from "./nav";
 import { Segmented } from "./app-ui";
 import { PageSkeleton } from "./PageSkeleton";
 import { NotificationBell } from "./NotificationBell";
@@ -339,7 +339,16 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
   // ACCOUNTANT, LIBRARIAN, FRONT_DESK) — the sidebar always follows the
   // session's real role, not the layout's placeholder prop.
   const effRole = me?.user?.role || role;
-  const nav = NAVS[effRole] || [];
+  // Tenant shape + active UI mode. Both already ride the session payload, so the
+  // sidebar needs no cookie read and no extra request. Mode is UI context only
+  // (never authorization) and is written by POST /api/mode alone, so switching a
+  // mode re-renders this list without refetching the page's data.
+  const institutionType = me?.school?.institutionType ?? me?.institutionType ?? null;
+  const mode = me?.mode ?? null;
+  const nav = useMemo(
+    () => navForRole(effRole, institutionType, mode),
+    [effRole, institutionType, mode]
+  );
   const user = me?.user;
   /** Which app is this shell? (each sector has its own name and nav) */
   const app = sectorForRole(effRole);
@@ -347,7 +356,7 @@ export function Shell({ role, children }: { role: string; children: React.ReactN
 
   // School Admin panel roles get the grouped sidebar; every other sector keeps
   // the original flat list, untouched.
-  const groups = useMemo(() => groupNavFor(effRole), [effRole]);
+  const groups = useMemo(() => groupNavFor(effRole, nav), [effRole, nav]);
 
   // Once the shell knows who is signed in, warm the rest of this app's reads in
   // the background — pre-paying them is what makes the *first* click on any

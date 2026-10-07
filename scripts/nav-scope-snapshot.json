@@ -1,0 +1,812 @@
+{
+  "capturedFrom": "406ee9b:src/components/nav.ts (pre-Phase-1)",
+  "roles": [
+    "SUPER_ADMIN",
+    "SCHOOL_ADMIN",
+    "BRANCH_ADMIN",
+    "REGISTRAR",
+    "ACCOUNTANT",
+    "LIBRARIAN",
+    "FRONT_DESK",
+    "TEACHER",
+    "GUARDIAN"
+  ],
+  "navs": {
+    "SUPER_ADMIN": [
+      [
+        "/admin",
+        "Dashboard"
+      ],
+      [
+        "/admin/notifications",
+        "Notifications"
+      ],
+      [
+        "/admin/schools",
+        "Schools"
+      ],
+      [
+        "/admin/billing",
+        "Billing & Plans"
+      ],
+      [
+        "/admin/settings",
+        "Global Settings"
+      ]
+    ],
+    "SCHOOL_ADMIN": [
+      [
+        "/dashboard",
+        "Dashboard"
+      ],
+      [
+        "/dashboard/notifications",
+        "Notifications"
+      ],
+      [
+        "/dashboard/admissions",
+        "Admissions"
+      ],
+      [
+        "/dashboard/students",
+        "Students"
+      ],
+      [
+        "/dashboard/students/import",
+        "Bulk Import"
+      ],
+      [
+        "/dashboard/onboarding",
+        "Guardian Onboarding"
+      ],
+      [
+        "/dashboard/teachers",
+        "Teachers"
+      ],
+      [
+        "/dashboard/classes",
+        "Classes & Sections"
+      ],
+      [
+        "/dashboard/academic-sessions",
+        "Academic Sessions"
+      ],
+      [
+        "/dashboard/subjects",
+        "Subjects"
+      ],
+      [
+        "/dashboard/routine",
+        "Routine"
+      ],
+      [
+        "/dashboard/live-classes",
+        "Live Classes"
+      ],
+      [
+        "/dashboard/exams",
+        "Exams & Results"
+      ],
+      [
+        "/dashboard/grades",
+        "Grading & GPA"
+      ],
+      [
+        "/dashboard/notices",
+        "Notice Board"
+      ],
+      [
+        "/dashboard/fees",
+        "Fees"
+      ],
+      [
+        "/dashboard/fees/structure",
+        "Fee structure"
+      ],
+      [
+        "/dashboard/fees/payments",
+        "Payment channels"
+      ],
+      [
+        "/dashboard/ledger",
+        "Ledger"
+      ],
+      [
+        "/dashboard/leaves",
+        "Leave Requests"
+      ],
+      [
+        "/dashboard/meetings",
+        "PTM Slots"
+      ],
+      [
+        "/dashboard/gallery",
+        "Gallery"
+      ],
+      [
+        "/dashboard/complaints",
+        "Feedback Box"
+      ],
+      [
+        "/dashboard/promotion",
+        "Promotion & Alumni"
+      ],
+      [
+        "/dashboard/library",
+        "Library & Books"
+      ],
+      [
+        "/dashboard/resources",
+        "Materials"
+      ],
+      [
+        "/dashboard/guardians",
+        "Guardians"
+      ],
+      [
+        "/dashboard/guardian-app",
+        "Parents App"
+      ],
+      [
+        "/dashboard/id-cards",
+        "ID Cards"
+      ],
+      [
+        "/dashboard/reports",
+        "Reports"
+      ],
+      [
+        "/dashboard/messages",
+        "Messages"
+      ],
+      [
+        "/dashboard/branches",
+        "Branches"
+      ],
+      [
+        "/dashboard/staff",
+        "Staff & Roles"
+      ],
+      [
+        "/dashboard/settings",
+        "Settings"
+      ]
+    ],
+    "BRANCH_ADMIN": [
+      [
+        "/dashboard",
+        "Dashboard"
+      ],
+      [
+        "/dashboard/notifications",
+        "Notifications"
+      ],
+      [
+        "/dashboard/admissions",
+        "Admissions"
+      ],
+      [
+        "/dashboard/students",
+        "Students"
+      ],
+      [
+        "/dashboard/students/import",
+        "Bulk Import"
+      ],
+      [
+        "/dashboard/onboarding",
+        "Guardian Onboarding"
+      ],
+      [
+        "/dashboard/teachers",
+        "Teachers"
+      ],
+      [
+        "/dashboard/classes",
+        "Classes & Sections"
+      ],
+      [
+        "/dashboard/academic-sessions",
+        "Academic Sessions"
+      ],
+      [
+        "/dashboard/subjects",
+        "Subjects"
+      ],
+      [
+        "/dashboard/routine",
+        "Routine"
+      ],
+      [
+        "/dashboard/live-classes",
+        "Live Classes"
+      ],
+      [
+        "/dashboard/exams",
+        "Exams & Results"
+      ],
+      [
+        "/dashboard/grades",
+        "Grading & GPA"
+      ],
+      [
+        "/dashboard/notices",
+        "Notice Board"
+      ],
+      [
+        "/dashboard/fees",
+        "Fees"
+      ],
+      [
+        "/dashboard/fees/structure",
+        "Fee structure"
+      ],
+      [
+        "/dashboard/fees/payments",
+        "Payment channels"
+      ],
+      [
+        "/dashboard/ledger",
+        "Ledger"
+      ],
+      [
+        "/dashboard/leaves",
+        "Leave Requests"
+      ],
+      [
+        "/dashboard/meetings",
+        "PTM Slots"
+      ],
+      [
+        "/dashboard/gallery",
+        "Gallery"
+      ],
+      [
+        "/dashboard/complaints",
+        "Feedback Box"
+      ],
+      [
+        "/dashboard/library",
+        "Library & Books"
+      ],
+      [
+        "/dashboard/resources",
+        "Materials"
+      ],
+      [
+        "/dashboard/guardians",
+        "Guardians"
+      ],
+      [
+        "/dashboard/guardian-app",
+        "Parents App"
+      ],
+      [
+        "/dashboard/id-cards",
+        "ID Cards"
+      ],
+      [
+        "/dashboard/reports",
+        "Reports"
+      ],
+      [
+        "/dashboard/messages",
+        "Messages"
+      ],
+      [
+        "/dashboard/branches",
+        "My Branch"
+      ],
+      [
+        "/dashboard/staff",
+        "Branch Staff"
+      ],
+      [
+        "/dashboard/settings",
+        "Settings"
+      ]
+    ],
+    "REGISTRAR": [
+      [
+        "/dashboard",
+        "Dashboard"
+      ],
+      [
+        "/dashboard/notifications",
+        "Notifications"
+      ],
+      [
+        "/dashboard/admissions",
+        "Admissions"
+      ],
+      [
+        "/dashboard/students",
+        "Students"
+      ],
+      [
+        "/dashboard/fees",
+        "Fees"
+      ],
+      [
+        "/dashboard/notices",
+        "Notice Board"
+      ],
+      [
+        "/dashboard/messages",
+        "Messages"
+      ]
+    ],
+    "ACCOUNTANT": [
+      [
+        "/dashboard",
+        "Dashboard"
+      ],
+      [
+        "/dashboard/notifications",
+        "Notifications"
+      ],
+      [
+        "/dashboard/admissions",
+        "Admissions"
+      ],
+      [
+        "/dashboard/students",
+        "Students"
+      ],
+      [
+        "/dashboard/fees",
+        "Fees"
+      ],
+      [
+        "/dashboard/fees/structure",
+        "Fee structure"
+      ],
+      [
+        "/dashboard/fees/payments",
+        "Payment channels"
+      ],
+      [
+        "/dashboard/ledger",
+        "Ledger"
+      ]
+    ],
+    "LIBRARIAN": [
+      [
+        "/dashboard",
+        "Dashboard"
+      ],
+      [
+        "/dashboard/notifications",
+        "Notifications"
+      ],
+      [
+        "/dashboard/library",
+        "Library & Books"
+      ]
+    ],
+    "FRONT_DESK": [
+      [
+        "/dashboard",
+        "Dashboard"
+      ],
+      [
+        "/dashboard/notifications",
+        "Notifications"
+      ],
+      [
+        "/dashboard/admissions",
+        "Admissions"
+      ],
+      [
+        "/dashboard/notices",
+        "Notice Board"
+      ]
+    ],
+    "TEACHER": [
+      [
+        "/teacher",
+        "Dashboard"
+      ],
+      [
+        "/teacher/notifications",
+        "Notifications"
+      ],
+      [
+        "/teacher/classes",
+        "My Classes"
+      ],
+      [
+        "/teacher/attendance",
+        "Attendance"
+      ],
+      [
+        "/teacher/remarks",
+        "Daily Remarks"
+      ],
+      [
+        "/teacher/homework",
+        "Homework"
+      ],
+      [
+        "/teacher/marks",
+        "Marks Entry"
+      ],
+      [
+        "/teacher/results",
+        "Results"
+      ],
+      [
+        "/teacher/grades",
+        "Grading & GPA"
+      ],
+      [
+        "/teacher/resources",
+        "My Materials"
+      ],
+      [
+        "/teacher/quizzes",
+        "Quizzes"
+      ],
+      [
+        "/teacher/leaves",
+        "My Leaves"
+      ],
+      [
+        "/teacher/meetings",
+        "PTM Slots"
+      ],
+      [
+        "/teacher/messages",
+        "Messages"
+      ]
+    ],
+    "GUARDIAN": [
+      [
+        "/parent",
+        "Dashboard"
+      ],
+      [
+        "/parent/notifications",
+        "Notifications"
+      ],
+      [
+        "/parent/live-classes",
+        "Live Classes"
+      ],
+      [
+        "/parent/attendance",
+        "Attendance"
+      ],
+      [
+        "/parent/homework",
+        "Homework"
+      ],
+      [
+        "/parent/quizzes",
+        "Quizzes"
+      ],
+      [
+        "/parent/remarks",
+        "Teacher Remarks"
+      ],
+      [
+        "/parent/results",
+        "Exam Results"
+      ],
+      [
+        "/parent/fees",
+        "Fees & Payments"
+      ],
+      [
+        "/parent/books",
+        "My Books"
+      ],
+      [
+        "/parent/resources",
+        "Class Materials"
+      ],
+      [
+        "/parent/gallery",
+        "Gallery"
+      ],
+      [
+        "/parent/meetings",
+        "Book PTM"
+      ],
+      [
+        "/parent/leave",
+        "Apply Leave"
+      ],
+      [
+        "/parent/feedback",
+        "Complaints"
+      ],
+      [
+        "/parent/notices",
+        "Notices"
+      ],
+      [
+        "/parent/messages",
+        "Messages"
+      ],
+      [
+        "/parent/profile",
+        "My Profile"
+      ]
+    ]
+  },
+  "groups": {
+    "SUPER_ADMIN": null,
+    "SCHOOL_ADMIN": [
+      [
+        "overview",
+        "Overview",
+        [
+          "/dashboard"
+        ]
+      ],
+      [
+        "academics",
+        "Academics",
+        [
+          "/dashboard/classes",
+          "/dashboard/academic-sessions",
+          "/dashboard/subjects",
+          "/dashboard/routine",
+          "/dashboard/live-classes",
+          "/dashboard/exams",
+          "/dashboard/grades",
+          "/dashboard/library",
+          "/dashboard/resources"
+        ]
+      ],
+      [
+        "people",
+        "People",
+        [
+          "/dashboard/admissions",
+          "/dashboard/students",
+          "/dashboard/students/import",
+          "/dashboard/onboarding",
+          "/dashboard/teachers",
+          "/dashboard/promotion",
+          "/dashboard/guardians",
+          "/dashboard/staff"
+        ]
+      ],
+      [
+        "finance",
+        "Finance",
+        [
+          "/dashboard/fees",
+          "/dashboard/fees/structure",
+          "/dashboard/fees/payments",
+          "/dashboard/ledger"
+        ]
+      ],
+      [
+        "communication",
+        "Communication",
+        [
+          "/dashboard/notifications",
+          "/dashboard/notices",
+          "/dashboard/meetings",
+          "/dashboard/complaints",
+          "/dashboard/guardian-app",
+          "/dashboard/messages"
+        ]
+      ],
+      [
+        "operations",
+        "Operations",
+        [
+          "/dashboard/leaves",
+          "/dashboard/gallery",
+          "/dashboard/id-cards",
+          "/dashboard/reports",
+          "/dashboard/branches"
+        ]
+      ],
+      [
+        "system",
+        "System",
+        [
+          "/dashboard/settings"
+        ]
+      ]
+    ],
+    "BRANCH_ADMIN": [
+      [
+        "overview",
+        "Overview",
+        [
+          "/dashboard"
+        ]
+      ],
+      [
+        "academics",
+        "Academics",
+        [
+          "/dashboard/classes",
+          "/dashboard/academic-sessions",
+          "/dashboard/subjects",
+          "/dashboard/routine",
+          "/dashboard/live-classes",
+          "/dashboard/exams",
+          "/dashboard/grades",
+          "/dashboard/library",
+          "/dashboard/resources"
+        ]
+      ],
+      [
+        "people",
+        "People",
+        [
+          "/dashboard/admissions",
+          "/dashboard/students",
+          "/dashboard/students/import",
+          "/dashboard/onboarding",
+          "/dashboard/teachers",
+          "/dashboard/guardians",
+          "/dashboard/staff"
+        ]
+      ],
+      [
+        "finance",
+        "Finance",
+        [
+          "/dashboard/fees",
+          "/dashboard/fees/structure",
+          "/dashboard/fees/payments",
+          "/dashboard/ledger"
+        ]
+      ],
+      [
+        "communication",
+        "Communication",
+        [
+          "/dashboard/notifications",
+          "/dashboard/notices",
+          "/dashboard/meetings",
+          "/dashboard/complaints",
+          "/dashboard/guardian-app",
+          "/dashboard/messages"
+        ]
+      ],
+      [
+        "operations",
+        "Operations",
+        [
+          "/dashboard/leaves",
+          "/dashboard/gallery",
+          "/dashboard/id-cards",
+          "/dashboard/reports",
+          "/dashboard/branches"
+        ]
+      ],
+      [
+        "system",
+        "System",
+        [
+          "/dashboard/settings"
+        ]
+      ]
+    ],
+    "REGISTRAR": [
+      [
+        "overview",
+        "Overview",
+        [
+          "/dashboard"
+        ]
+      ],
+      [
+        "people",
+        "People",
+        [
+          "/dashboard/admissions",
+          "/dashboard/students"
+        ]
+      ],
+      [
+        "finance",
+        "Finance",
+        [
+          "/dashboard/fees"
+        ]
+      ],
+      [
+        "communication",
+        "Communication",
+        [
+          "/dashboard/notifications",
+          "/dashboard/notices",
+          "/dashboard/messages"
+        ]
+      ]
+    ],
+    "ACCOUNTANT": [
+      [
+        "overview",
+        "Overview",
+        [
+          "/dashboard"
+        ]
+      ],
+      [
+        "people",
+        "People",
+        [
+          "/dashboard/admissions",
+          "/dashboard/students"
+        ]
+      ],
+      [
+        "finance",
+        "Finance",
+        [
+          "/dashboard/fees",
+          "/dashboard/fees/structure",
+          "/dashboard/fees/payments",
+          "/dashboard/ledger"
+        ]
+      ],
+      [
+        "communication",
+        "Communication",
+        [
+          "/dashboard/notifications"
+        ]
+      ]
+    ],
+    "LIBRARIAN": [
+      [
+        "overview",
+        "Overview",
+        [
+          "/dashboard"
+        ]
+      ],
+      [
+        "academics",
+        "Academics",
+        [
+          "/dashboard/library"
+        ]
+      ],
+      [
+        "communication",
+        "Communication",
+        [
+          "/dashboard/notifications"
+        ]
+      ]
+    ],
+    "FRONT_DESK": [
+      [
+        "overview",
+        "Overview",
+        [
+          "/dashboard"
+        ]
+      ],
+      [
+        "people",
+        "People",
+        [
+          "/dashboard/admissions"
+        ]
+      ],
+      [
+        "communication",
+        "Communication",
+        [
+          "/dashboard/notifications",
+          "/dashboard/notices"
+        ]
+      ]
+    ],
+    "TEACHER": null,
+    "GUARDIAN": null
+  }
+}

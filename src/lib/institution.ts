@@ -105,6 +105,51 @@ export function modeScopedKey(base: string, mode: Mode | null | undefined): stri
   return mode === "COLLEGE" ? `${base}${COLLEGE_KEY_SUFFIX}` : base;
 }
 
+/* ------------------------------------------------------------ nav labels */
+
+/**
+ * Navigation label overrides, keyed `[institutionType][mode][href]`
+ * (docs/COLLEGE-PLAN-DELTA.md §4).
+ *
+ * Phase 1 installs the **structure only**: the table is empty, so every lookup
+ * falls through and `NAVS` stays the literal registry it has always been. Each
+ * later phase adds its own entry in the same change that creates the route the
+ * label belongs to (docs/COLLEGE-DECISIONS.md §8 — "Phase 1 decisions").
+ *
+ * Two properties worth knowing before adding to it:
+ *  - the key is the **href**, so one entry applies to every role whose nav
+ *    contains that href. A per-role wording (the registry already has
+ *    "Branches" vs "My Branch") cannot be expressed here — if that is ever
+ *    needed, this key shape has to change first.
+ *  - an absent `institutionType` reads as SCHOOL, so a raw or partial tenant
+ *    document and the Super Admin console keep behaving like a school tenant.
+ */
+export type NavLabelOverrides = Partial<
+  Record<InstitutionType, Partial<Record<Mode, Readonly<Record<string, string>>>>>
+>;
+
+/** The overrides themselves — deliberately empty until a phase adds one. */
+export const NAV_LABEL_OVERRIDES: NavLabelOverrides = {};
+
+/**
+ * The label override for one href, or `undefined` when none is configured.
+ *
+ * Safe for a raw tenant value, an absent institution type and an absent mode;
+ * never throws. Callers treat `undefined` as "keep the item's own label", which
+ * is what makes an empty table a true no-op.
+ */
+export function navLabelFor(
+  href: string,
+  institutionType: InstitutionType | null | undefined,
+  mode: Mode | null | undefined
+): string | undefined {
+  const byType = NAV_LABEL_OVERRIDES[normalizeInstitutionType(institutionType)];
+  if (!byType) return undefined;
+  const byMode = byType[normalizeMode(mode)];
+  if (!byMode) return undefined;
+  return byMode[href];
+}
+
 /** Human labels for the platform console. Not wired into end-user screens yet. */
 export const INSTITUTION_TYPE_LABELS: Record<InstitutionType, string> = {
   SCHOOL: "School",
