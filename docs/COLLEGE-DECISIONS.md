@@ -89,11 +89,13 @@ refused with an explicit reason until a later phase gives it a rule. Changing a 
 no-op.
 
 The point of the restriction is honesty: a tenant that already holds college rows must not be
-silently turned into a school-only tenant, or those rows would become unreachable. Until the college
-collections exist, "has college data" is a function that truthfully reports **no college data**, and
-the downgrade is therefore permitted in practice today. That function is the single place later
-phases must extend — see `src/lib/institution.ts` (`schoolHasCollegeData` and
-`canChangeInstitutionType`). Setting the type at tenant **creation** accepts all three values; the
+silently turned into a school-only tenant, or those rows would become unreachable. Phase 2g made
+"has college data" real: `schoolHasCollegeData(schoolId)` counts this tenant's **own** departments and
+programs with a `schoolId`-scoped query, and fails safe (a store read error reads as "has data"), so
+the downgrade is now **blocked** whenever college rows exist and allowed only when there are none.
+The pure rule `canChangeInstitutionType` stays in `src/lib/institution.ts`; the DB half lives in
+`src/lib/auth.ts` beside `requireCollege`. Setting the type at tenant **creation** accepts all three
+values; the
 table above governs only **changes**.
 
 ## 7. Phase M inherits these
@@ -157,3 +159,39 @@ marks its first item — a marked item is filtered out of some scopes, so the fu
 copy — or adds its first override. **The first phase to do either must record that change explicitly**
 and relax the identity assertion in `scripts/verify-nav-scope.mjs` to a deep comparison, rather than
 letting it surface later as an apparent regression.
+
+## 9. Phase 2e decisions (the first nav marking)
+
+Phase 2e is the first content phase: it marks the two college destinations, so this section is the
+"record that change explicitly" §8's shelf-life rule asks for.
+
+- **D-2e-1 — the nav layer now filters by tenant type AND mode.** A `requires` marker means "this
+  tenant can run this mode, **and** this mode is the active one": a marked item is listed only when
+  `hasCollege(normalizeInstitutionType(institutionType))` holds and `requires === normalizeMode(mode)`.
+  Absent and unknown types normalize to `SCHOOL`, so they never qualify. **This supersedes Phase 1's
+  "the nav layer filters by MODE only"** (stated in `navForRole`'s comment and in
+  `scripts/verify-college-gate.mjs`), which was sufficient only while nothing was marked — it leaned
+  on `resolveActiveMode()` already coercing a `SCHOOL` tenant to `SCHOOL`. The type half is defence in
+  depth: a stale `ss_mode` cookie can no longer surface a college link to a school tenant. Mode stays
+  UI context and never authorization — `can()` and `requireCollege()` remain the only enforcement.
+- **D-2e-2 — the first `requires:"COLLEGE"` markers.** `/dashboard/departments` and
+  `/dashboard/programs`, for `SCHOOL_ADMIN`, `BRANCH_ADMIN` and `REGISTRAR` only (6 markers), both
+  mapped to `academics` in `SCHOOL_GROUP_OF`. No other href, mode, role or group is marked, and D-B
+  still holds: every unmarked item is visible in every mode.
+- **D-2e-3 — `navForRole` returns a copy wherever it filters.** The "original `NAVS[role]` array
+  reference" guarantee of §8/D21 is now conditional, not permanent: it survives for the six roles
+  that carry no college item, and for the three that do the function must return a fresh array in
+  every scope, because a dropped item cannot be filtered in place. "Unchanged" for a school tenant
+  is therefore **content** (href, label, order and group membership), still proved item-for-item
+  against the frozen pre-Phase-1 snapshot.
+- **D-2e-4 — `verify-nav-scope.mjs` checks 1, 3, 4 and 6 were restated, not only check 3.** §8
+  anticipated relaxing the identity assertion; in practice **four** checks asserted Phase-1-only
+  no-op properties and each failed independently the moment an item was marked — check 1 ("nothing
+  carries a `requires` marker"), check 3 (identity for the no-op scopes), check 4 (absent values
+  return the registry array by reference) and check 6 ("the registry grouping equals the snapshot").
+  All four now assert the post-marking invariant, and each is **stricter** than what it replaced:
+  check 1 fails unless the marked set is exactly the 2 hrefs × 3 roles, all `requires:"COLLEGE"`;
+  check 3 additionally proves every school-only scope — school mode **or** a non-college-capable type
+  — still equals the frozen snapshot; check 4 proves an absent type in COLLEGE mode hides every
+  college item; check 6 proves every visible college item is grouped in `academics` and that the
+  groups remain an exact partition of the injected list. No assertion was deleted or weakened.
