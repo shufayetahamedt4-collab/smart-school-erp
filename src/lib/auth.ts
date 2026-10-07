@@ -1,7 +1,8 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import type { Role } from "@/lib/db";
-import { MODE_COOKIE, allowedModes, isMode, normalizeInstitutionType, type Mode } from "./institution";
+import { MODE_COOKIE, allowedModes, collegeGateDecision, isMode, normalizeInstitutionType, type Mode } from "./institution";
 
 export const SESSION_COOKIE = "ss_token";
 
@@ -88,6 +89,73 @@ export async function resolveActiveMode(schoolId: string | null | undefined): Pr
     if (isMode(last) && allowed.includes(last)) return last;
   }
   return "SCHOOL";
+}
+
+/**
+ * The COLLEGE-tenant gate — the one check every college surface calls first.
+ *
+ * College features (departments, programs, and everything later phases add)
+ * exist only for a tenant whose `institutionType` is COLLEGE or BOTH. The Edge
+ * middleware gates by host and role only (`src/middleware.ts`), and it cannot
+ * see `institutionType`, so this in-route check is the sole enforcement: a route
+ * that forgets it would let a SCHOOL tenant reach college data by URL.
+ *
+ * Resolves the tenant's real type server-side (never from the request) and
+ * returns a **403** response for a school-only tenant — or **null** when the
+ * caller may proceed, the same return shape as `writeGuard()`
+ * (`src/lib/subscription.ts`), so a handler reads:
+ *
+ *   const gate = await requireCollege(session);
+ *   if (gate) return gate;
+ *
+ * `session` only needs `schoolId`; a route that resolves a different tenant
+ * (the Super Admin's `?schoolId=`) passes that id explicitly. A caller with no
+ * tenant context is a 400, not an allow.
+ */
+export async function requireCollege(
+  session: { schoolId?: string | null } | null | undefined
+): Promise<NextResponse | null> {
+  const schoolId = session?.schoolId;
+  if (!schoolId) return NextResponse.json({ error: "No school context" }, { status: 400 });
+  const { prisma } = await import("./db");
+  const school = await prisma.school
+    .findUnique({ where: { id: schoolId }, select: { institutionType: true } })
+    .catch(() => null);
+  if (collegeGateDecision((school as any)?.institutionType) === "ALLOW") return null;
+  return NextResponse.json(
+    { error: "This feature is available to college tenants only." },
+    { status: 403 }
+  );
+}
+
+/**
+ * Does this tenant currently hold any **college** data?
+ *
+ * The DB half of the institution-type change rule (`canChangeInstitutionType`),
+ * which stays pure in `./institution`. Phase 2g: the college collections now
+ * exist, so this counts **this tenant's own** `departments` and `programs` —
+ * always with a `schoolId`-scoped query, never unscoped, so another tenant's
+ * rows can never make this tenant look like it holds college data.
+ *
+ * **Fails SAFE.** If the store cannot be read, this reports `true` ("has college
+ * data"), which makes a COLLEGE/BOTH → SCHOOL downgrade *refused* rather than
+ * allowed. A false refusal is recoverable; a wrong downgrade would strand the
+ * tenant's college rows behind a school-only shape. It lives here, beside
+ * `requireCollege`, because this is the module allowed to import the store.
+ */
+export async function schoolHasCollegeData(schoolId: string): Promise<boolean> {
+  // No tenant to scope to is treated as "holds data": never downgrade blind.
+  if (!schoolId) return true;
+  try {
+    const { prisma } = await import("./db");
+    const [departments, programs] = await Promise.all([
+      prisma.department.count({ where: { schoolId } }),
+      prisma.program.count({ where: { schoolId } }),
+    ]);
+    return departments > 0 || programs > 0;
+  } catch {
+    return true;
+  }
 }
 
 export { homeForRole } from "./permissions";

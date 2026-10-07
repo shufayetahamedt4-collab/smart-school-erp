@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, invalidateReferenceCache } from "@/lib/db";
-import { getSession, audit } from "@/lib/auth";
+import { getSession, audit, schoolHasCollegeData } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { slugify } from "@/lib/utils";
 import { writeGuard } from "@/lib/subscription";
@@ -8,7 +8,6 @@ import {
   canChangeInstitutionType,
   isInstitutionType,
   normalizeInstitutionType,
-  schoolHasCollegeData,
   type InstitutionType,
 } from "@/lib/institution";
 

@@ -147,6 +147,12 @@ const COLS: Record<string, string> = {
   // ---- Bulk import (Phase 2) ----
   importBatch: "importBatches",
   importBatchRow: "importBatchRows",
+  // ---- College support (Phase 2) ----
+  // No `idFor`/`idForCreate` entry on purpose: these are ordinary catalogue
+  // rows with a random id (`create` falls back to `rand()`), and `(schoolId,
+  // code)` uniqueness is enforced in-code by the route, exactly like a branch.
+  department: "departments",
+  program: "programs",
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
@@ -324,6 +330,9 @@ const RELS: Record<string, Record<string, Rel>> = {
     vendors: { to: "vendor", via: "schoolId", kind: "many" },
     subscription: { to: "subscription", via: "schoolId", kind: "oneInverse" },
     invoices: { to: "invoice", via: "schoolId", kind: "many" },
+    // ---- College support (Phase 2) ----
+    departments: { to: "department", via: "schoolId", kind: "many" },
+    programs: { to: "program", via: "schoolId", kind: "many" },
   },
   user: {
     school: { to: "school", fk: "schoolId", kind: "one" },
@@ -625,6 +634,20 @@ const RELS: Record<string, Record<string, Rel>> = {
     substituteTeacher: { to: "teacher", fk: "substituteTeacherId", kind: "one" },
   },
   calendarEvent: { school: { to: "school", fk: "schoolId", kind: "one" } },
+  // ---- College support (Phase 2) ----
+  // A department is tenant-owned, may be tied to one branch, and may name a
+  // staff head (`headStaffId` → a user). Programs hang off a department.
+  department: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    head: { to: "user", fk: "headStaffId", kind: "one" },
+    programs: { to: "program", via: "departmentId", kind: "many" },
+  },
+  program: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    department: { to: "department", fk: "departmentId", kind: "one" },
+  },
   twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
 };
@@ -1947,5 +1970,8 @@ export const prisma = {
   classSession: model("classSession"),
   calendarEvent: model("calendarEvent"),
   twoFactor: model("twoFactor"),
+  // ---- College support (Phase 2) ----
+  department: model("department"),
+  program: model("program"),
   $transaction: transaction,
 };

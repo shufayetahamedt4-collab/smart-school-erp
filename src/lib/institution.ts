@@ -60,6 +60,22 @@ export function hasCollege(type: InstitutionType): boolean {
 }
 
 /**
+ * The COLLEGE feature gate, as a pure decision over any stored/raw value.
+ *
+ * `ALLOW` for a tenant that runs a college (COLLEGE or BOTH); `DENY` otherwise
+ * — a SCHOOL tenant, and every absent/empty/unknown value (which normalize to
+ * SCHOOL). This is the "decide from the tenant's type" half of the gate, kept
+ * dependency-free so the offline verifier (`scripts/verify-college-gate.mjs`)
+ * can prove the decision table without a database. The async, DB-resolving half
+ * is `requireCollege()` in `./auth` (the only place that may import the store).
+ */
+export type CollegeGateDecision = "ALLOW" | "DENY";
+
+export function collegeGateDecision(value: unknown): CollegeGateDecision {
+  return hasCollege(normalizeInstitutionType(value)) ? "ALLOW" : "DENY";
+}
+
+/**
  * The modes this tenant is allowed to show:
  * SCHOOL → [SCHOOL], COLLEGE → [COLLEGE], BOTH → [SCHOOL, COLLEGE].
  */
@@ -165,21 +181,17 @@ export function institutionTypeLabel(value: unknown): string {
 /* ------------------------------------------------------------ change rule */
 
 /**
- * Does this tenant currently hold any **college** data?
+ * Does this tenant currently hold any **college** data? — the DB half of the
+ * rule below.
  *
- * Phase 0: the college collections do not exist yet, so the honest answer is
- * always "no college data" — there is nothing that a downgrade could strand.
- *
- * This is the single place later phases MUST extend: when the college's own
- * classes / programs / students (and anything else college-only) exist, replace
- * the body with a real existence check and return true the moment any such row
- * is present. Until then, `schoolHasCollegeData` is what makes the
- * COLLEGE/BOTH → SCHOOL downgrade safe.
+ * Implemented in `./auth` as `schoolHasCollegeData(schoolId)`, next to
+ * `requireCollege`, because that is the module allowed to import the store —
+ * this module stays dependency-free (see the file header). Phase 2g made it
+ * real: it counts this tenant's **own** departments and programs with a
+ * `schoolId`-scoped query (never unscoped), and it fails SAFE — a store read
+ * error reports "has college data", so a COLLEGE/BOTH → SCHOOL downgrade is
+ * refused rather than wrongly allowed.
  */
-export async function schoolHasCollegeData(schoolId: string): Promise<boolean> {
-  void schoolId; // no college collections exist yet (Phase 0)
-  return false;
-}
 
 export interface InstitutionTypeChangeCheck {
   allowed: boolean;
