@@ -103,3 +103,57 @@ every decision above** and must not restate them differently: mode stays UI cont
 authorization; `SCHOOL`/`COLLEGE` tenants stay switcher-free; the type change rule is unchanged; and
 core rows keep the `missing = SCHOOL` convention. Where the delta plan and this document disagree,
 this document wins, and the delta plan is corrected.
+
+## 8. Phase 1 decisions (nav + terminology, mechanism only)
+
+Phase 1 makes navigation mode-aware. It is **mechanism only**: it adds no college screen, no link and
+no wording, so every tenant sees exactly the navigation it saw before. Approved decisions:
+
+- **D-A — no college nav items.** Phase 1 adds none. Phases 2, 3 and 4 each add their own nav entry,
+  `requires` marker, group mapping and label override in the same change that creates the route, so
+  no link can ever point at a page that does not exist.
+- **D-B — nothing is hidden.** An item without `requires` is visible in every mode. A `COLLEGE`
+  tenant therefore still sees today's list until the phases above give it college entries; that
+  interim state is intentional.
+- **D-C — `NavItem.requires?: Mode`.** An item carrying a marker is visible only when the effective
+  mode equals it. Nothing is marked yet, and an absent/unknown mode reads as `SCHOOL`, matching the
+  `missing = SCHOOL` convention used everywhere else.
+- **D-D — `NAV_LABEL_OVERRIDES` is structure only.** It lives in `src/lib/institution.ts`, keyed
+  `[institutionType][mode][href]`, and is **empty** in Phase 1. `SCHOOL`, an absent
+  `institutionType` and `BOTH` + `SCHOOL` mode must return the original `NAVS[role]` array
+  **reference**, untouched.
+- **D-E — no structural expansion.** No new `SCHOOL_GROUP_ORDER` / `SCHOOL_GROUP_META` module, no
+  teacher/guardian shell change, and `smoke-all`'s app-nav partition assertion stays untouched.
+- **D-F — signature.** `navForRole(role, institutionType, mode)`; it does not consume
+  `me.allowedModes`.
+- **D15 — `groupNavFor(role, items?)`.** The filtered array is injected through an optional second
+  argument, so existing one-argument calls keep working unchanged.
+- **D16 — the Shell is wired now.** `Shell.tsx` calls `navForRole` and feeds both the flat list and
+  `groupNavFor`; the memo dependencies gain the institution type and the mode. No fetch, no reload
+  and no `router.refresh()` is added on a mode switch — the sidebar re-renders from the session
+  payload, and page data still refreshes on the next navigation (Phase M, frozen).
+- **D21 — the acceptance test.** "Unchanged" means the **same array reference** for `SCHOOL`, an
+  absent type and `BOTH` + `SCHOOL`, and deep equality (hrefs, labels, order, group membership)
+  everywhere else.
+- **D22 — one script proves it.** `scripts/verify-nav-scope.mjs` runs in-process under plain `node`
+  (this machine's Node imports the `.ts` modules directly), touches no database and no network, and
+  therefore carries no `requireEmulator()` guard.
+
+### Three deviations from the delta plan, recorded deliberately
+
+1. `docs/COLLEGE-PLAN-DELTA.md` §4/§6 give Phase 1 "new hrefs mapped in `SCHOOL_GROUP_OF`" and the
+   `AppShell.tsx` change. **D-A and D-E move both to Phases 2–4**, which add each entry together
+   with its route. Phase 1 adds no href and touches no app-shell file.
+2. The delta's §6 table lists `navForRole` under Phase M. Phase M was implemented and frozen
+   **without** it, so the function lands in Phase 1 instead.
+3. The delta says a `COLLEGE`-only tenant's nav is the "college list". In Phase 1 it is today's list,
+   because the college list is empty by construction (D-A). Not a contradiction — a deferral.
+
+### The reference guarantee has a shelf life
+
+"An absent or `SCHOOL` type returns the original array reference" is a **Phase 1 property only**. It
+holds because nothing is marked and nothing is overridden. It stops being true the moment a phase
+marks its first item — a marked item is filtered out of some scopes, so the function must return a
+copy — or adds its first override. **The first phase to do either must record that change explicitly**
+and relax the identity assertion in `scripts/verify-nav-scope.mjs` to a deep comparison, rather than
+letting it surface later as an apparent regression.
