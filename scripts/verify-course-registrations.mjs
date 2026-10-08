@@ -15,7 +15,10 @@
  *   • only PENDING can be withdrawn; delete of a decided row is 409;
  *   • branch confinement: a branch-A admin cannot read/decide/withdraw a branch-B row;
  *   • a mapping or a course cannot be deleted under a PENDING/APPROVED registration;
- *   • a dangling course (deleted after its REJECTED row) renders as unavailable, no crash.
+ *   • a dangling course (deleted after its REJECTED row) renders as unavailable, no crash;
+ *   • 4b-2 — a STUDENT with a PENDING/APPROVED registration cannot be deleted (409),
+ *     a REJECTED row does not block and is left behind, the dangling-student reads
+ *     never crash, and a SCHOOL tenant's student DELETE is unchanged.
  *
  * Usage: SMOKE_PORT=3000 node scripts/verify-course-registrations.mjs
  * Needs the isolation fixture:  node scripts/isolation-fixture.mjs create
@@ -347,6 +350,61 @@ console.log("\n### a dangling course renders as unavailable, never a crash");
   const li = await get(`/api/course-registrations?studentId=${ts.id}`, collegeAdmin);
   const row = (li.data || []).find((r) => r.id === reg.data.id);
   check("the list GET also returns it, no crash", li.status === 200 && !!row && row.courseAvailable === false, `HTTP ${li.status} found=${!!row} available=${row?.courseAvailable}`);
+}
+
+/* -------------------- 4b-2: a student DELETE is refused while a place is held */
+console.log("\n### 4b-2 — a student cannot be deleted while a registration holds a place");
+{
+  // (a) PENDING blocks; withdraw it; then the DELETE succeeds.
+  const tp = await makeProgram("DELPEND");
+  const tc = await makeCourse("DELPEND");
+  await makeMapping(tp, tc, 1);
+  const ts = await makeStudent("STU-DELPEND", tp);
+  const reg = await makeRegistration(ts.id, tc);
+  check("(4b-2) a PENDING registration is created for the delete-guard student (201)", reg.status === 201 && !!ts.id, `HTTP ${reg.status} ${reg.error || ""}`);
+  const blocked = await del(`/api/students/${ts.id}`, collegeAdmin);
+  check("(4b-2) DELETE student is refused (409) while a PENDING registration holds a place", blocked.status === 409, `HTTP ${blocked.status} ${blocked.error || ""}`);
+  const w = await del(`/api/course-registrations/${reg.data.id}`, collegeAdmin);
+  check("(4b-2) the PENDING registration is withdrawn (200)", w.status === 200, `HTTP ${w.status} ${w.error || ""}`);
+  if (w.status === 200) created.registrations.splice(created.registrations.indexOf(reg.data.id), 1);
+  const ok = await del(`/api/students/${ts.id}`, collegeAdmin);
+  check("(4b-2) after the withdrawal the student DELETE succeeds (200)", ok.status === 200, `HTTP ${ok.status} ${ok.error || ""}`);
+}
+{
+  // (b) APPROVED holds a place too (and is terminal, so it always blocks).
+  const tp = await makeProgram("DELAPPR");
+  const tc = await makeCourse("DELAPPR");
+  await makeMapping(tp, tc, 1);
+  const ts = await makeStudent("STU-DELAPPR", tp);
+  const reg = await makeRegistration(ts.id, tc);
+  await patch(`/api/course-registrations/${reg.data.id}`, { status: "APPROVED" }, collegeAdmin);
+  const blocked = await del(`/api/students/${ts.id}`, collegeAdmin);
+  check("(4b-2) DELETE student is refused (409) while an APPROVED registration holds a place", blocked.status === 409, `HTTP ${blocked.status} ${blocked.error || ""}`);
+}
+{
+  // (c) REJECTED does not block; the row survives, and the reads never crash.
+  const tp = await makeProgram("DELREJ");
+  const tc = await makeCourse("DELREJ");
+  await makeMapping(tp, tc, 1);
+  const ts = await makeStudent("STU-DELREJ", tp);
+  const reg = await makeRegistration(ts.id, tc);
+  await patch(`/api/course-registrations/${reg.data.id}`, { status: "REJECTED" }, collegeAdmin);
+  const ok = await del(`/api/students/${ts.id}`, collegeAdmin);
+  check("(4b-2) a REJECTED row does not block: student DELETE succeeds (200)", ok.status === 200, `HTTP ${ok.status} ${ok.error || ""}`);
+  const survives = (await db.collection("courseRegistrations").doc(reg.data.id).get()).exists;
+  check("(4b-2) the REJECTED row is left behind after the student is gone", survives, `exists=${survives}`);
+  const one = await get(`/api/course-registrations/${reg.data.id}`, collegeAdmin);
+  check("(4b-2) GET one does not crash on the deleted student (200, studentName null)", one.status === 200 && one.data?.studentName === null, `HTTP ${one.status} studentName=${JSON.stringify(one.data?.studentName)}`);
+  const li = await get(`/api/course-registrations?studentId=${ts.id}`, collegeAdmin);
+  const row = (li.data || []).find((r) => r.id === reg.data.id);
+  check("(4b-2) the list GET does not crash on the deleted student (200, row present, studentName null)", li.status === 200 && !!row && row.studentName === null, `HTTP ${li.status} found=${!!row}`);
+}
+{
+  // (d) A SCHOOL tenant's student DELETE is untouched: 200, no 403, standard cascade.
+  const ts = await makeStudent("STU-SCHOOL-DEL", null, schoolAdmin);
+  check("(4b-2) a SCHOOL tenant student is created (201)", ts.status === 201 && !!ts.id, `HTTP ${ts.status} ${ts.error || ""}`);
+  const ok = await del(`/api/students/${ts.id}`, schoolAdmin);
+  check("(4b-2) a SCHOOL tenant student DELETE is unchanged: 200 (never a 403) with the cascade payload", ok.status === 200 && ok.data?.ok === true && !!ok.data?.cascade, `HTTP ${ok.status} ok=${ok.data?.ok}`);
 }
 
 /* --------------------------------------------------------------- cleanup */

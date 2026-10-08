@@ -35,6 +35,7 @@ import { requireCollege, type SessionUser } from "./auth";
 import { canAccessBranch } from "./permissions";
 import { isValidTermNumber, termCount } from "./college-terms";
 import { isBlockingRegistration } from "./registration-status";
+import { collegeGateDecision } from "./institution";
 
 export type CollegeEnrolmentResult =
   | { kind: "gate"; response: NextResponse }
@@ -139,5 +140,47 @@ async function guardProgramChange(
     status: 409,
     message:
       "This student has course registrations. Withdraw them before changing the student's programme.",
+  };
+}
+
+/**
+ * The result of a student-lifecycle college guard: a refusal to return, or null
+ * to proceed. Narrow on purpose — these guards never allow, they only refuse.
+ */
+export type CollegeGuardRefusal = { kind: "error"; status: number; message: string } | null;
+
+/**
+ * Phase 4b-2 — refuse deleting a student who still holds a place in a course.
+ *
+ * A `students` DELETE cascades a pupil's own rows, but a course registration is
+ * a claim on a seat that a human must withdraw first; deleting the pupil would
+ * orphan a PENDING/APPROVED row mid-flow. So this guard BLOCKS (409) instead of
+ * cascading. A REJECTED row holds no place and does not block — and is left
+ * behind (D-4b-11: the guard never silently destroys a decided trail).
+ *
+ * SCHOOL tenants are untouched: the decision comes from the TARGET tenant's
+ * `institutionType`, and a tenant that is not a college (absent / `SCHOOL` /
+ * unknown) returns null WITHOUT reading the registrations collection — so a
+ * school student's DELETE pays no registration read, gets no 403, and returns
+ * exactly the response it did before. `requireCollege` is deliberately NOT
+ * called here: it answers 403 for a school tenant, and `students` is a
+ * BOTH-tenant route, not a college surface.
+ */
+export async function guardStudentDelete(input: {
+  schoolId: string;
+  studentId: string;
+}): Promise<CollegeGuardRefusal> {
+  const school = await prisma.school
+    .findUnique({ where: { id: input.schoolId }, select: { institutionType: true } })
+    .catch(() => null);
+  // Not a college tenant → nothing to guard, and the registrations collection is
+  // never touched (a SCHOOL tenant can never hold a registration anyway).
+  if (collegeGateDecision((school as any)?.institutionType) !== "ALLOW") return null;
+  const rows = await prisma.courseRegistration.findMany({ where: { studentId: input.studentId } });
+  if (!(rows as any[]).some((r) => isBlockingRegistration(r.status))) return null;
+  return {
+    kind: "error",
+    status: 409,
+    message: "This student has course registrations. Withdraw them before deleting the student.",
   };
 }

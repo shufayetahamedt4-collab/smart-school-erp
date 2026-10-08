@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession, audit, guardianOwnsStudent } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
-import { resolveCollegeEnrolment } from "@/lib/college-enrollment";
+import { resolveCollegeEnrolment, guardStudentDelete } from "@/lib/college-enrollment";
 import { FieldValue } from "firebase-admin/firestore";
 
 /**
@@ -167,6 +167,15 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!student || student.schoolId !== session.schoolId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  // Phase 4b-2 — a student who still holds a place in a course (a PENDING or
+  // APPROVED registration) cannot be deleted, or the claim would be orphaned
+  // mid-flow; a REJECTED row does not block. The helper decides from the TARGET
+  // tenant's institution type, so a SCHOOL tenant reads no registrations and its
+  // DELETE is byte-identical to before (no requireCollege here — that would 403
+  // a school tenant).
+  const guarded = await guardStudentDelete({ schoolId: session.schoolId!, studentId: id });
+  if (guarded) return NextResponse.json({ error: guarded.message }, { status: guarded.status });
 
   // A pupil is referenced from all over the school. Deleting the identity doc
   // alone left fees, attendance, marks, remarks, leave requests, book issues

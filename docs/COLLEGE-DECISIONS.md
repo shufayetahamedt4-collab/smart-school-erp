@@ -406,10 +406,14 @@ route files.
 - **D-4b-10 — a dangling course never crashes a read.** A course deleted after its mapping was
   removed can still be referenced by a REJECTED row; the list and the one-row `GET` return the row
   with the course shown as unavailable (`courseAvailable: false`).
-- **D-4b-11 — a known residual gap, deferred.** `DELETE /api/students/[id]` (Phase 4a-2) does not
-  cascade `courseRegistrations`, and D-4b-7 forbids the students route from naming a college model,
-  so a deleted student can leave orphaned registration rows. Handling it (a college-side cascade
-  helper) is deferred to a later commit; the dangling-read rule (D-4b-10) keeps those rows harmless.
+- **D-4b-11 — student DELETE is blocked while a registration holds a place (closed by 4b-2).**
+  `DELETE /api/students/[id]` returns **409** while the student has a PENDING or APPROVED
+  registration; REJECTED rows do not block and are left in place. The guard is a college-side helper
+  in `src/lib/college-enrollment.ts` (`guardStudentDelete`) that decides from the TARGET tenant's
+  `institutionType`, so the students route still names no college model (D-4b-7) and a SCHOOL
+  tenant's student DELETE is byte-identical — one extra `schools` read to learn the type, and the
+  `courseRegistrations` collection is never read for a non-college tenant. The dangling-read rule
+  (D-4b-10) still keeps a leftover REJECTED row harmless.
 - **D-4b-12 — no SCHOOL path is altered.** `db.ts` (COLS/RELS/prisma), `permissions.ts`
   (`ModuleKey`/`MATRIX`) and `college-routes.ts` (`COLLEGE_API_SEGMENTS`) change **additively** only;
   `subjects`/`mode` and the school `attendance`/marks spine are untouched (D-3-6 stays locked). The
