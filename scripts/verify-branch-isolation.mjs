@@ -346,6 +346,61 @@ console.log("\n### college departments/programs — branch admin confinement");
     );
     const missingCourseMap = await post(HOSTS.school, `/api/programs/${progA}/courses`, { termNumber: 2 }, collegeAdmin);
     check("a MISSING courseId is also refused with 400 (same status)", missingCourseMap.status === 400, `HTTP ${missingCourseMap.status}`);
+
+    // 8. Course registrations (Phase 4d). A registration stores the branch it
+    //    inherited from its programme, so branch confinement applies to it exactly
+    //    as to the programme: a branch admin lists and reads only its own
+    //    branch's rows, and every foreign-branch probe is a 403 that changes
+    //    nothing. Nothing here is compared against an exact count — the branch A
+    //    row must be present and the branch B row absent, whatever else the
+    //    tenant holds.
+    const colRegA = `${P}col-reg-a`; // branch A — the branch admin's own row
+    const colRegB = `${P}col-reg-b`; // branch B — another branch of the SAME tenant
+    const colStuB = `${P}col-stu-b`; // a branch-B student, for the POST probe
+
+    const bRegs = (await req(HOSTS.school, "/api/course-registrations", { cookie: collegeBranchAdmin })).data || [];
+    const bRegIds = bRegs.map((r) => r.id);
+    check(
+      "branch admin's registration list carries its own branch's row and NOT another branch's",
+      bRegIds.includes(colRegA) && !bRegIds.includes(colRegB),
+      JSON.stringify(bRegIds)
+    );
+
+    const regForeignGet = await req(HOSTS.school, `/api/course-registrations/${colRegB}`, { cookie: collegeBranchAdmin });
+    check("branch admin CANNOT GET another branch's registration (403)", regForeignGet.status === 403, `HTTP ${regForeignGet.status}`);
+    const regForeignPatch = await patch(HOSTS.school, `/api/course-registrations/${colRegB}`, { status: "APPROVED" }, collegeBranchAdmin);
+    check("branch admin CANNOT PATCH another branch's registration (403)", regForeignPatch.status === 403, `HTTP ${regForeignPatch.status}`);
+    const regForeignDelete = await req(HOSTS.school, `/api/course-registrations/${colRegB}`, { cookie: collegeBranchAdmin, method: "DELETE" });
+    check("branch admin CANNOT DELETE another branch's registration (403)", regForeignDelete.status === 403, `HTTP ${regForeignDelete.status}`);
+    // The registration inherits the PROGRAMME's branch, so registering a
+    // branch-B student is confined by the branch-B programme — a 403.
+    const regForeignPost = await post(HOSTS.school, "/api/course-registrations", { studentId: colStuB, courseId: courseB }, collegeBranchAdmin);
+    check("a BRANCH-scoped admin CANNOT register another branch's student (403)", regForeignPost.status === 403, `HTTP ${regForeignPost.status}`);
+
+    // The COLLEGE-scoped admin (SCHOOL_ADMIN) reaches BOTH branches' rows…
+    const aRegs = (await req(HOSTS.school, "/api/course-registrations", { cookie: collegeAdmin })).data || [];
+    const aRegIds = aRegs.map((r) => r.id);
+    check(
+      "a SCHOOL-scoped college admin sees BOTH branches' registrations",
+      aRegIds.includes(colRegA) && aRegIds.includes(colRegB),
+      JSON.stringify(aRegIds)
+    );
+    // …and the branch admin's OWN row is readable — the positive control beside
+    // every 403 above.
+    const ownRegGet = await req(HOSTS.school, `/api/course-registrations/${colRegA}`, { cookie: collegeBranchAdmin });
+    check(
+      "branch admin CAN read its own branch's registration (200)",
+      ownRegGet.status === 200 && ownRegGet.data?.id === colRegA,
+      `HTTP ${ownRegGet.status}`
+    );
+
+    // None of the foreign probes above may have touched branch B's row.
+    const regBRow = (await db.collection("courseRegistrations").doc(colRegB).get()).data();
+    check(
+      "the other branch's registration row is unchanged after the foreign probes",
+      regBRow?.status === "PENDING" && regBRow?.branchId === `${P}col-br-b` && regBRow?.decidedById === null,
+      `${regBRow?.status} / ${regBRow?.branchId} / decidedById=${regBRow?.decidedById}`
+    );
   }
 }
 

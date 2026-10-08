@@ -98,6 +98,31 @@ async function patchJSON(cookie, route, body) {
   try { parsed = JSON.parse(text); } catch { parsed = { __raw: text.slice(0, 120) }; }
   return { status: res.status, body: parsed };
 }
+/** POST helper (Phase 4d) for the cross-tenant course-registration probes. */
+async function postJSON(cookie, route, body) {
+  const res = await fetch(`${BASE}${route}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60000),
+  });
+  const text = await res.text();
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { parsed = { __raw: text.slice(0, 120) }; }
+  return { status: res.status, body: parsed };
+}
+/** DELETE helper (Phase 4d) for the cross-tenant course-registration probes. */
+async function delJSON(cookie, route) {
+  const res = await fetch(`${BASE}${route}`, {
+    method: "DELETE",
+    headers: { cookie },
+    signal: AbortSignal.timeout(60000),
+  });
+  const text = await res.text();
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { parsed = { __raw: text.slice(0, 120) }; }
+  return { status: res.status, body: parsed };
+}
 
 /**
  * Names + ids of every tenant EXCEPT `own`, including departments and programs.
@@ -370,6 +395,131 @@ const collectStrings = (body) => {
   check(
     !mStr.has(`${P}both-map`) && !mStr.has(`${P}both-course`),
     "the mapping list carries no foreign (BOTH-tenant) mapping or course id"
+  );
+}
+
+/* ---------- course registrations: cross-tenant isolation (Phase 4d) ---------- */
+// A registration in college tenant C1 must be invisible AND untouchable from
+// every other tenant: the SCHOOL tenant (gate), and the BOTH tenant (the
+// second college-capable tenant, whose row set must never include C1's). A
+// foreign id is NOT FOUND (404) or GATED (403) — never an oracle — and the
+// foreign row is asserted unchanged afterwards. No app source is exercised
+// beyond what 4b already shipped.
+console.log("\n### course registrations — a COLLEGE tenant's rows are invisible and untouchable elsewhere");
+{
+  const C1 = `${P}college`;
+  const colRegA = `${P}col-reg-a`;
+  const colStuA = `${P}col-stu-a`;
+  const colStuB = `${P}col-stu-b`;
+  const colCourseA = `${P}col-course-a`;
+  const bothStu = `${P}both-stu`;
+  const bothCourse = `${P}both-course`;
+  const bothReg = `${P}both-reg`;
+
+  const collegeCookie = await login("zz-iso-college-admin@test.local", CRED.collegeAdmin);
+  const bothCookie = await login("zz-iso-both-admin@test.local", CRED.bothAdmin);
+  const sCookie = await login("zz-iso-admin@test.local", CRED.admin);
+
+  // (1) C1 sees its own two registrations...
+  const own = await getJSON(collegeCookie, "/api/course-registrations");
+  const ownIds = (own.body.data || []).map((r) => r.id);
+  check(own.status === 200, `/api/course-registrations → 200 for a COLLEGE tenant (got ${own.status})`);
+  check(
+    ownIds.includes(colRegA) && ownIds.includes(`${P}col-reg-b`),
+    `C1 sees both of its own registrations (${JSON.stringify(ownIds)})`
+  );
+  // (2) ...and no foreign row or name anywhere in the payload.
+  const foreign = await referenceDataExcept(C1);
+  const oStr = collectStrings(own.body);
+  const oLeakNames = [...foreign.names].filter((n) => oStr.has(n));
+  const oLeakIds = [...foreign.ids].filter((id) => oStr.has(id));
+  check(
+    oLeakNames.length === 0 && oLeakIds.length === 0,
+    `/api/course-registrations — no foreign id or name${oLeakNames.length ? ` (NAMES: ${oLeakNames.slice(0, 3).join(", ")})` : ""}${oLeakIds.length ? ` (IDS: ${oLeakIds.slice(0, 3).join(", ")})` : ""}`
+  );
+
+  // (3) A SCHOOL tenant hits the COLLEGE gate: 403 with ZERO data (list).
+  const sList = await getJSON(sCookie, "/api/course-registrations");
+  check(
+    sList.status === 403 && sList.body?.data === undefined,
+    `/api/course-registrations → 403 with ZERO data for a SCHOOL tenant (status=${sList.status}, data=${JSON.stringify(sList.body?.data)})`
+  );
+
+  // (4) The BOTH tenant's list is 200 and carries ONLY its own registration.
+  const bList = await getJSON(bothCookie, "/api/course-registrations");
+  const bIds = (bList.body.data || []).map((r) => r.id);
+  check(
+    bList.status === 200 && bIds.includes(bothReg) && !bIds.includes(colRegA) && !bIds.includes(`${P}col-reg-b`),
+    `the BOTH tenant sees only its own registration (${JSON.stringify(bIds)})`
+  );
+
+  // (5) A SCHOOL tenant's one-row read is the gate, NOT an id oracle: a REAL C1
+  //     id and a GHOST id answer the SAME 403 with byte-identical bodies, so the
+  //     status cannot be used to learn that the C1 row exists.
+  const sOne = await getJSON(sCookie, `/api/course-registrations/${colRegA}`);
+  const sGhost = await getJSON(sCookie, `/api/course-registrations/${P}no-such-reg`);
+  check(
+    sOne.status === 403 && sGhost.status === 403 && JSON.stringify(sOne.body) === JSON.stringify(sGhost.body),
+    `a SCHOOL tenant GET one is 403 for BOTH a real and a ghost id, byte-identical (gate, not oracle) — real=${sOne.status} ghost=${sGhost.status}`
+  );
+
+  // (6) A foreign id from the COLLEGE tenant is NOT FOUND for the BOTH tenant.
+  const bOne = await getJSON(bothCookie, `/api/course-registrations/${colRegA}`);
+  check(bOne.status === 404, `the BOTH tenant GET one (foreign C1 id) → 404 (got ${bOne.status})`);
+
+  // (7) PATCH and DELETE on the foreign row are 404 too (never a 403 oracle).
+  const bPatch = await patchJSON(bothCookie, `/api/course-registrations/${colRegA}`, { status: "APPROVED" });
+  const bDel = await delJSON(bothCookie, `/api/course-registrations/${colRegA}`);
+  check(
+    bPatch.status === 404 && bDel.status === 404,
+    `the BOTH tenant PATCH/DELETE of the foreign C1 row → 404/404 (got ${bPatch.status}/${bDel.status})`
+  );
+
+  // (8) …and the C1 row is UNCHANGED after every foreign attempt.
+  const regRow = (await db.collection("courseRegistrations").doc(colRegA).get()).data();
+  check(
+    regRow?.status === "PENDING" && regRow?.schoolId === C1 && regRow?.branchId === `${P}col-br-a`,
+    `the C1 registration row is unchanged after the foreign attempts (${regRow?.status} / ${regRow?.schoolId} / ${regRow?.branchId})`
+  );
+
+  // (9) A FOREIGN studentId in a BOTH-tenant POST is the SAME 400 as a ghost id.
+  const fStu = await postJSON(bothCookie, "/api/course-registrations", { studentId: colStuA, courseId: bothCourse });
+  const gStu = await postJSON(bothCookie, "/api/course-registrations", { studentId: `${P}no-such-student`, courseId: bothCourse });
+  check(
+    fStu.status === 400 && JSON.stringify(fStu.body) === JSON.stringify(gStu.body),
+    `a foreign studentId in a POST is 400, byte-identical to a ghost (foreign=${JSON.stringify(fStu.body)} ghost=${JSON.stringify(gStu.body)})`
+  );
+
+  // (10) A FOREIGN courseId in a BOTH-tenant POST is the SAME 400 as a ghost id.
+  const fCourse = await postJSON(bothCookie, "/api/course-registrations", { studentId: bothStu, courseId: colCourseA });
+  const gCourse = await postJSON(bothCookie, "/api/course-registrations", { studentId: bothStu, courseId: `${P}no-such-course` });
+  check(
+    fCourse.status === 400 && JSON.stringify(fCourse.body) === JSON.stringify(gCourse.body),
+    `a foreign courseId in a POST is 400, byte-identical to a ghost (foreign=${JSON.stringify(fCourse.body)} ghost=${JSON.stringify(gCourse.body)})`
+  );
+
+  // (11) …and the reverse: C1 cannot pull another tenant's student/course into
+  //      a registration either — the same 400 as a ghost, so no oracle.
+  const cFStu = await postJSON(collegeCookie, "/api/course-registrations", { studentId: bothStu, courseId: colCourseA });
+  const cGStu = await postJSON(collegeCookie, "/api/course-registrations", { studentId: `${P}no-such-student`, courseId: colCourseA });
+  check(
+    cFStu.status === 400 && JSON.stringify(cFStu.body) === JSON.stringify(cGStu.body),
+    `C1 POST with a foreign (BOTH) studentId is 400, byte-identical to a ghost (foreign=${JSON.stringify(cFStu.body)} ghost=${JSON.stringify(cGStu.body)})`
+  );
+  const cFCourse = await postJSON(collegeCookie, "/api/course-registrations", { studentId: colStuB, courseId: bothCourse });
+  const cGCourse = await postJSON(collegeCookie, "/api/course-registrations", { studentId: colStuB, courseId: `${P}no-such-course` });
+  check(
+    cFCourse.status === 400 && JSON.stringify(cFCourse.body) === JSON.stringify(cGCourse.body),
+    `C1 POST with a foreign (BOTH) courseId is 400, byte-identical to a ghost (foreign=${JSON.stringify(cFCourse.body)} ghost=${JSON.stringify(cGCourse.body)})`
+  );
+
+  // (12) Another tenant's student DELETE neither sees nor is blocked by C1's
+  //      registrations: the C1 student is NOT FOUND and its row survives.
+  const bDelStu = await delJSON(bothCookie, `/api/students/${colStuA}`);
+  const stuRow = (await db.collection("students").doc(colStuA).get()).data();
+  check(
+    bDelStu.status === 404 && stuRow?.schoolId === C1 && stuRow?.name === "ZZ Iso College Student A",
+    `another tenant's student DELETE of a C1 student is 404 and leaves the row (status=${bDelStu.status}, schoolId=${stuRow?.schoolId}, name=${stuRow?.name})`
   );
 }
 

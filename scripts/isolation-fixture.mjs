@@ -231,6 +231,18 @@ async function create() {
   });
   mark("users", colBranchAdminUserId);
 
+  // A permanent REGISTRAR (Phase 4d) — the third role that carries the
+  // `registration` permission as `full`, so the fixture no longer needs a
+  // throwaway browser harness to prove a registrar reaches the page/API.
+  track.creds.collegeRegistrar = newPw();
+  const colRegistrarUserId = `${P}user-col-registrar`;
+  await db.collection("users").doc(colRegistrarUserId).set({
+    email: "zz-iso-college-registrar@test.local", name: "ZZ Iso College Registrar",
+    role: "REGISTRAR", schoolId: collegeSchoolId, scope: null, branchId: null,
+    active: true, passwordHash: hash(track.creds.collegeRegistrar),
+  });
+  mark("users", colRegistrarUserId);
+
   const colDeptA = `${P}col-dept-a`;
   const colDeptB = `${P}col-dept-b`;
   const colDeptNone = `${P}col-dept-none`;
@@ -310,6 +322,41 @@ async function create() {
   });
   mark("programCourses", colMapB);
 
+  // ---- College students + course registrations (Phase 4d) --------------------
+  //      Two students, one per branch-bound programme, so each has a registration
+  //      in the branch its programme belongs to. Written RAW (the fixture never
+  //      calls the app), carrying the same schoolId/branchId/programId/termNumber
+  //      shape the students and course-registration routes write, so the branch
+  //      and tenant probes exercise the real confinement.
+  const colStuA = `${P}col-stu-a`;
+  await db.collection("students").doc(colStuA).set({
+    id: colStuA, schoolId: collegeSchoolId, branchId: colBranchA, name: "ZZ Iso College Student A",
+    admissionNo: "ZZ4D-COL-A", programId: colProgA, termNumber: 1, active: true, createdAt: now,
+  });
+  mark("students", colStuA);
+  const colStuB = `${P}col-stu-b`;
+  await db.collection("students").doc(colStuB).set({
+    id: colStuB, schoolId: collegeSchoolId, branchId: colBranchB, name: "ZZ Iso College Student B",
+    admissionNo: "ZZ4D-COL-B", programId: colProgB, termNumber: 1, active: true, createdAt: now,
+  });
+  mark("students", colStuB);
+
+  // One PENDING registration per branch — the state a PATCH/DELETE probe may act on.
+  const colRegA = `${P}col-reg-a`;
+  await db.collection("courseRegistrations").doc(colRegA).set({
+    id: colRegA, schoolId: collegeSchoolId, branchId: colBranchA, studentId: colStuA,
+    courseId: colCourseA, programId: colProgA, termNumber: 1, status: "PENDING",
+    requestedById: `${P}user-col-admin`, decidedById: null, decidedAt: null, createdAt: now,
+  });
+  mark("courseRegistrations", colRegA);
+  const colRegB = `${P}col-reg-b`;
+  await db.collection("courseRegistrations").doc(colRegB).set({
+    id: colRegB, schoolId: collegeSchoolId, branchId: colBranchB, studentId: colStuB,
+    courseId: colCourseB, programId: colProgB, termNumber: 1, status: "PENDING",
+    requestedById: `${P}user-col-admin`, decidedById: null, decidedAt: null, createdAt: now,
+  });
+  mark("courseRegistrations", colRegB);
+
   // ---- BOTH tenant WITH college data (one department) + a SCHOOL_ADMIN -------
   const bothSchoolId = `${P}both`;
   await db.collection("schools").doc(bothSchoolId).set({
@@ -346,6 +393,22 @@ async function create() {
     termNumber: 1, requirement: "REQUIRED", createdAt: now,
   });
   mark("programCourses", bothMap);
+  // A BOTH-tenant student + registration (Phase 4d): the second college-capable
+  // tenant's OWN row, so its list shows exactly this and never the COLLEGE
+  // tenant's. Written raw, same shape as the routes.
+  const bothStu = `${P}both-stu`;
+  await db.collection("students").doc(bothStu).set({
+    id: bothStu, schoolId: bothSchoolId, branchId: null, name: "ZZ Iso Both Student",
+    admissionNo: "ZZ4D-BOTH-1", programId: bothProg, termNumber: 1, active: true, createdAt: now,
+  });
+  mark("students", bothStu);
+  const bothReg = `${P}both-reg`;
+  await db.collection("courseRegistrations").doc(bothReg).set({
+    id: bothReg, schoolId: bothSchoolId, branchId: null, studentId: bothStu,
+    courseId: bothCourse, programId: bothProg, termNumber: 1, status: "PENDING",
+    requestedById: `${P}user-both-admin`, decidedById: null, decidedAt: null, createdAt: now,
+  });
+  mark("courseRegistrations", bothReg);
   track.creds.bothAdmin = newPw();
   const bothAdminUserId = `${P}user-both-admin`;
   await db.collection("users").doc(bothAdminUserId).set({
@@ -400,6 +463,7 @@ async function create() {
     demoStudent: { email: "zz-iso-demo-student@test.local", password: track.creds.demoStudent },
     classId, sectionId, subjectId, studentId, teacherId, examId, feeId, hwId, convId,
     colCourseA, colCourseB, colCourseNone, colMapA, colMapB, bothCourse, bothProg, bothMap,
+    colStuA, colStuB, colRegA, colRegB, bothStu, bothReg,
   }, null, 2));
 }
 
@@ -432,7 +496,7 @@ async function clean() {
   // cannot be attributed to (or safely deleted by) the fixture.
   const owned = ["users", "students", "classes", "sections", "subjects", "teachers",
     "attendance", "homeworks", "fees", "exams", "routines", "meetingSlots", "conversations", "schools",
-    "branches", "departments", "programs", "courses", "programCourses"];
+    "branches", "departments", "programs", "courses", "programCourses", "courseRegistrations"];
   for (const col of owned) {
     const snap = await db.collection(col).where("__name__", ">=", P).where("__name__", "<=", P + "\uf8ff").get();
     for (const d of snap.docs) {
