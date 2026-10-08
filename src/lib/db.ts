@@ -1637,7 +1637,8 @@ async function findFirst(model: string, args: any): Promise<any> {
   }
   if (!doc) {
     const list = await fetchAll(model, args?.where);
-    const matched = await filterList(list, model, args?.where, ctx);
+    let matched = await filterList(list, model, args?.where, ctx);
+    if (args?.orderBy) matched = sortBy(matched, args.orderBy);
     doc = matched[0] ?? null;
   }
   if (!doc) return null;
