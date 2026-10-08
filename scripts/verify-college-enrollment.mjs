@@ -15,6 +15,9 @@
  *     college key;
  *   • DELETE /api/programs/[id] is blocked (400) while a student is enrolled,
  *     and succeeds once none is.
+ *   • 4a-2 — PATCH { programId: null } un-enrols: it clears BOTH keys (absent,
+ *     not null); { programId: null, termNumber: N } is still 400; a SCHOOL
+ *     tenant sending programId null is still 403 with no write.
  *
  * Usage: SMOKE_PORT=3000 node scripts/verify-college-enrollment.mjs
  * Needs the isolation fixture:  node scripts/isolation-fixture.mjs create
@@ -82,6 +85,7 @@ const schoolAdmin = await login("zz-iso-admin@test.local", CRED.admin);
 const stamp = Date.now();
 const createdAdm = [];
 let tempProgramId = null;
+let tempProgramId2 = null;
 
 /* ------------------------------------------- a COLLEGE tenant can enrol a student */
 console.log("\n### enrolment into a program + term");
@@ -131,6 +135,27 @@ console.log("\n### enrolment into a program + term");
     check("PATCH with a term past the end is refused (400)", pBad.status === 400, `HTTP ${pBad.status} ${pBad.error || ""}`);
     const pTermOnly = await patch(`/api/students/${okStudentId}`, { termNumber: 2 }, collegeAdmin);
     check("PATCH with a term but no program is refused (400)", pTermOnly.status === 400, `HTTP ${pTermOnly.status} ${pTermOnly.error || ""}`);
+
+    // 4a-2 — a term alongside a null program is still a term with no program.
+    const pNullTerm = await patch(`/api/students/${okStudentId}`, { programId: null, termNumber: 2 }, collegeAdmin);
+    check("PATCH with programId null AND a term is refused (400)", pNullTerm.status === 400, `HTTP ${pNullTerm.status} ${pNullTerm.error || ""}`);
+
+    // 4a-2 — an explicit un-enrol (programId: null) clears BOTH college keys.
+    const un = await patch(`/api/students/${okStudentId}`, { programId: null }, collegeAdmin);
+    check("PATCH with programId null un-enrols the student (200)", un.status === 200, `HTTP ${un.status} ${un.error || ""}`);
+    check(
+      "…the response carries neither programId nor termNumber",
+      un.data && un.data.programId === undefined && un.data.termNumber === undefined,
+      `programId=${JSON.stringify(un.data?.programId)} term=${JSON.stringify(un.data?.termNumber)}`
+    );
+    const cleared = (await db.collection("students").doc(okStudentId).get()).data() || {};
+    check(
+      "…and BOTH keys are REMOVED from the document (absent, not written null)",
+      !("programId" in cleared) && !("termNumber" in cleared),
+      `college keys still present: ${JSON.stringify(Object.keys(cleared).filter((k) => k === "programId" || k === "termNumber"))}`
+    );
+    const un2 = await patch(`/api/students/${okStudentId}`, { programId: null }, collegeAdmin);
+    check("re-clearing an already un-enrolled student is an idempotent no-op (200)", un2.status === 200, `HTTP ${un2.status}`);
   }
 }
 
@@ -163,6 +188,15 @@ console.log("\n### a SCHOOL tenant naming a program or a term");
     check("a SCHOOL tenant PATCHing a programId gets 403", pProg.status === 403, `HTTP ${pProg.status} ${pProg.error || ""}`);
     const pTerm = await patch(`/api/students/${own.data.id}`, { termNumber: 1 }, schoolAdmin);
     check("a SCHOOL tenant PATCHing a termNumber gets 403", pTerm.status === 403, `HTTP ${pTerm.status} ${pTerm.error || ""}`);
+    // 4a-2 — a null programId KEY is still a college key: refused, no write.
+    const pNull = await patch(`/api/students/${own.data.id}`, { programId: null }, schoolAdmin);
+    check("a SCHOOL tenant PATCHing programId null gets 403 (never ignored)", pNull.status === 403, `HTTP ${pNull.status} ${pNull.error || ""}`);
+    const ownDoc = (await db.collection("students").doc(own.data.id).get()).data() || {};
+    check(
+      "…and the refused null write left no college key behind",
+      !("programId" in ownDoc) && !("termNumber" in ownDoc),
+      `college keys present: ${JSON.stringify(Object.keys(ownDoc).filter((k) => k === "programId" || k === "termNumber"))}`
+    );
     const pName = await patch(`/api/students/${own.data.id}`, { name: `CE Own Renamed ${stamp}` }, schoolAdmin);
     check(
       "a plain school rename still works and writes no college key (200)",
@@ -201,6 +235,40 @@ console.log("\n### DELETE is blocked while a student is enrolled");
     check("DELETE succeeds once no student is enrolled (200)", after.status === 200, `HTTP ${after.status} ${after.error || ""}`);
     if (after.status === 200) tempProgramId = null;
   }
+
+  // 4a-2 — DELETE also succeeds after an UN-ENROL that does NOT delete the
+  // student, proving the guard keys on enrolment (students.programId), not on
+  // the student row existing.
+  const prog2 = await post("/api/programs", {
+    name: `CE Temp Program2 ${stamp}`, code: `ZZ-CE2-${stamp}`,
+    departmentId: `${P}col-dept-a`, degreeLevel: "HSC", durationYears: 2,
+  }, collegeAdmin);
+  tempProgramId2 = prog2.data?.id || null;
+  check("a second throwaway college program was created (201)", prog2.status === 201 && !!tempProgramId2, `HTTP ${prog2.status} ${prog2.error || ""}`);
+
+  if (tempProgramId2) {
+    const adm2 = `CE-UNENROL-${stamp}`; createdAdm.push(adm2);
+    const g2 = await post("/api/students", {
+      name: `CE Unenrol ${stamp}`, admissionNo: adm2, createFees: false, createGuardian: false,
+      programId: tempProgramId2, termNumber: 1,
+    }, collegeAdmin);
+    check("a student was enrolled into the second program (201)", g2.status === 201 && g2.data?.programId === tempProgramId2, `HTTP ${g2.status} ${g2.error || ""}`);
+
+    const blocked2 = await req(`/api/programs/${tempProgramId2}`, { cookie: collegeAdmin, method: "DELETE" });
+    check("DELETE is blocked while that student is enrolled (400)", blocked2.status === 400, `HTTP ${blocked2.status} ${blocked2.error || ""}`);
+
+    const unenrol = g2.data?.id ? await patch(`/api/students/${g2.data.id}`, { programId: null }, collegeAdmin) : { status: null };
+    check("the student is un-enrolled via programId null (200)", unenrol.status === 200, `HTTP ${unenrol.status}`);
+
+    const after2 = await req(`/api/programs/${tempProgramId2}`, { cookie: collegeAdmin, method: "DELETE" });
+    check("DELETE succeeds after the un-enrol WITHOUT deleting the student (200)", after2.status === 200, `HTTP ${after2.status} ${after2.error || ""}`);
+    if (after2.status === 200) tempProgramId2 = null;
+
+    if (g2.data?.id) {
+      const still = await req(`/api/students/${g2.data.id}`, { cookie: collegeAdmin });
+      check("…and the un-enrolled student still exists, with no college key (200)", still.status === 200 && still.data?.programId === undefined, `HTTP ${still.status} programId=${JSON.stringify(still.data?.programId)}`);
+    }
+  }
 }
 
 /* --------------------------------------------------------------- cleanup */
@@ -216,6 +284,7 @@ for (const adm of createdAdm) {
   }
 }
 if (tempProgramId) await db.collection("programs").doc(tempProgramId).delete();
+if (tempProgramId2) await db.collection("programs").doc(tempProgramId2).delete();
 
 console.log(
   failures

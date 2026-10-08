@@ -5,6 +5,7 @@ import { getSession, audit, guardianOwnsStudent } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 import { resolveCollegeEnrolment } from "@/lib/college-enrollment";
+import { FieldValue } from "firebase-admin/firestore";
 
 /**
  * PRD §7.2 — "Separate, limited-permission login from Guardian (school will
@@ -121,8 +122,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
     if (res.kind === "gate") return res.response;
     if (res.kind === "error") return NextResponse.json({ error: res.message }, { status: res.status });
-    if (res.programId) data.programId = res.programId;
-    if (res.termNumber) data.termNumber = res.termNumber;
+    if (res.programId) {
+      data.programId = res.programId;
+      if (res.termNumber) data.termNumber = res.termNumber;
+    } else if (body.programId !== undefined) {
+      // Phase 4a-2 — explicit un-enrol. The caller sent `programId: null` (or
+      // ""), so the student leaves the college roll. BOTH keys are REMOVED, not
+      // written as a literal null (D-4a-2: "absent" reads as null for readers,
+      // and a school student's doc never carries the keys at all). The store's
+      // `clean()`/set(merge) hands FieldValue straight to Firestore untouched
+      // (src/lib/db.ts), so the keys genuinely disappear from the document.
+      data.programId = FieldValue.delete();
+      data.termNumber = FieldValue.delete();
+    }
   }
   for (const key of allowed) {
     if (body[key] !== undefined) data[key] = key === "dob" || key === "admissionDate" ? (body[key] ? new Date(body[key]) : null) : body[key];
