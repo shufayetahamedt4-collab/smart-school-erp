@@ -317,3 +317,39 @@ application source: only `scripts/isolation-fixture.mjs`, `scripts/verify-branch
 - **D-3e-6 — cleanup is proven, not assumed.** `isolation-fixture.mjs clean` gains `courses` and
   `programCourses` in its prefix-sweep `owned` list, and the fixture stays `requireEmulator()`-guarded
   and `zziso-`-prefixed, so a 3e run cannot touch production and leaves no catalogue row behind.
+
+## 12. Phase 4a decisions (the student's college identity at enrolment)
+
+Phase 4a delivers the first half of plan-Phase 4 (`docs/COLLEGE-DECISIONS.md` §10, reconciled table):
+an optional **program** and **term** on a student, so the registration phase (4b) knows which term
+list applies. It adds no new screen and no new collection — only two nullable fields, one shared
+helper, and the guards around them.
+
+- **D-4a-0 — D-3-6 is LOCKED.** The open decision recorded in §10 is now closed at its standing
+  preference: college marks and attendance will live in **separate college collections** (e.g. a
+  future `courseAttendance`), and the school `attendance` key — upserted on a `studentId_date`
+  unique key, one row per pupil per day — is **never** altered. Phase 4 does not depend on that
+  work; the decision is recorded here so a later phase does not reopen it.
+- **D-4a-1 — `students.programId` / `students.termNumber`, both nullable.** No backfill and no
+  migration: a student without a `programId` is simply "not a college student", the same
+  `missing = the old behaviour` convention as §1 and D-3-3. Existing rows — and every school
+  tenant — are untouched.
+- **D-4a-2 — one shared helper, in `src/lib/college-enrollment.ts`.** `resolveCollegeEnrolment()` is
+  the single place that decides the college half: it calls `requireCollege({ schoolId })` on the
+  **target tenant** first, then validates the program (same tenant, `ACTIVE`), the branch
+  (`canAccessBranch`), and the term (via `college-terms.ts`). It lives in `src/lib`, not under a
+  college API segment, so `scripts/verify-college-routes.mjs` rule 3 (which forbids a literal
+  `requireCollege(`/college-model call in a non-college `src/app/api` directory) stays strict and
+  **unexempted** — the `students` routes import the helper and never spell the gate themselves.
+- **D-4a-3 — a SCHOOL tenant is refused, never silently ignored.** A request that names a program or
+  a term against a tenant with no `institutionType` answers **403** from the gate, exactly like the
+  college routes. The helper is invoked **only** when the request names a program or a term, so a
+  plain school student create/patch never reaches the gate.
+- **D-4a-4 — the school path is byte-identical.** Because the fields are written **only when
+  actually set**, a school student's stored document and API response gain no new keys; "absent"
+  reads as `null` for the college pages (D-3-3). The school-student POST/PATCH response is captured
+  before the change and compared deep-equal after it.
+- **D-4a-5 — a program with enrolled students cannot be deleted.** `DELETE /api/programs/[id]`
+  answers **400** while any `students.programId` equals the id, the same shape as the
+  still-has-mappings guard of Phase 3c — replacing the `LATER PHASE` placeholder comment that stood
+  in this exact spot.

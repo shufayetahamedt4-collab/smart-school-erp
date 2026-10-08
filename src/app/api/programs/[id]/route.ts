@@ -222,9 +222,16 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     );
   }
 
-  // Hard delete. LATER PHASE: before deleting, block here when the program has
-  // enrolled students (count students with this programId and return 400), the
-  // same shape as the mapping guard above.
+  // Hard delete. Phase 4a: block while any student is enrolled in this program,
+  // the same shape as the mapping guard above — a program a student points at
+  // must not vanish from under them.
+  const enrolledCount = await prisma.student.count({ where: { programId: id } });
+  if (enrolledCount > 0) {
+    return NextResponse.json(
+      { error: "Cannot delete a program that still has students enrolled in it." },
+      { status: 400 }
+    );
+  }
   await prisma.program.delete({ where: { id } });
   await audit("PROGRAM_DELETE", "program", id, { schoolId });
   invalidateReferenceCache(schoolId);

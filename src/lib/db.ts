@@ -366,6 +366,10 @@ const RELS: Record<string, Record<string, Rel>> = {
     classRoom: { to: "classRoom", fk: "classId", kind: "one" },
     section: { to: "section", fk: "sectionId", kind: "one" },
     guardianUser: { to: "user", fk: "guardianUserId", kind: "one" },
+    // ---- College support (Phase 4a) ----
+    // The student's program (nullable). A student with no `programId` is simply
+    // "not a college student" — the same missing-safe convention as §1/D-3-3.
+    program: { to: "program", fk: "programId", kind: "one" },
     attendance: { to: "attendance", via: "studentId", kind: "many" },
     remarks: { to: "dailyRemark", via: "studentId", kind: "many" },
     submissions: { to: "homeworkSubmission", via: "studentId", kind: "many" },
@@ -661,6 +665,8 @@ const RELS: Record<string, Record<string, Rel>> = {
     // directly: which course sits in which term, and whether it is required or
     // elective, is a property of the mapping, not of the course.
     programCourses: { to: "programCourse", via: "programId", kind: "many" },
+    // Phase 4a — the students enrolled in this program (via `students.programId`).
+    students: { to: "student", via: "programId", kind: "many" },
   },
   // ---- College support (Phase 3) ----
   // A course is a catalogue row under ONE DEPARTMENT, and inherits that

@@ -9,6 +9,7 @@ import { queryId } from "@/lib/utils";
 import { resolveBranchId } from "@/lib/branches";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
+import { resolveCollegeEnrolment } from "@/lib/college-enrollment";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -102,6 +103,23 @@ export async function POST(req: NextRequest) {
     // (body.createGuardian && email), the fee defaults and the fee rows are all
     // exactly what this route did inline before — only the code moved. The one
     // addition is the resolved academic session.
+    // Phase 4a — a program/term is college-only. The college helper is invoked
+    // ONLY when the request names one, so a plain school student never reaches
+    // the college gate (and its request/response stay byte-identical). A SCHOOL
+    // tenant that DOES name one is refused 403, never silently ignored.
+    let college: { programId: string | null; termNumber: number | null } | null = null;
+    if (body.programId !== undefined || body.termNumber !== undefined) {
+      const res = await resolveCollegeEnrolment({
+        session,
+        schoolId,
+        programId: body.programId,
+        termNumber: body.termNumber,
+      });
+      if (res.kind === "gate") return res.response;
+      if (res.kind === "error") return NextResponse.json({ error: res.message }, { status: res.status });
+      college = { programId: res.programId, termNumber: res.termNumber };
+    }
+
     const sessionId = await resolveSessionId(schoolId, body.sessionId || null);
     const enrolled = await enrollStudent({
       schoolId,
@@ -131,6 +149,11 @@ export async function POST(req: NextRequest) {
         qrToken: token,
         qrPin: pin,
         sessionId,
+        // Stored only when actually set — a school student never gains the
+        // keys, so its stored doc and response are unchanged ("absent" reads
+        // as null for the college pages, per D-3-3).
+        ...(college?.programId ? { programId: college.programId } : {}),
+        ...(college?.termNumber ? { termNumber: college.termNumber } : {}),
       },
       guardian: {
         create: !!body.createGuardian,

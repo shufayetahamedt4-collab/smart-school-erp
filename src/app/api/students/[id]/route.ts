@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession, audit, guardianOwnsStudent } from "@/lib/auth";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
+import { resolveCollegeEnrolment } from "@/lib/college-enrollment";
 
 /**
  * PRD §7.2 — "Separate, limited-permission login from Guardian (school will
@@ -108,6 +109,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     "emergencyContact", "address", "medicalInfo", "photoUrl", "active", "qrPin",
   ];
   const data: any = {};
+  // Phase 4a — a program/term is college-only and validated by the shared
+  // helper, which gates on the TARGET tenant (a SCHOOL tenant gets 403). The
+  // helper runs ONLY when the request names a program or a term.
+  if (body.programId !== undefined || body.termNumber !== undefined) {
+    const res = await resolveCollegeEnrolment({
+      session,
+      schoolId: session.schoolId!,
+      programId: body.programId,
+      termNumber: body.termNumber,
+    });
+    if (res.kind === "gate") return res.response;
+    if (res.kind === "error") return NextResponse.json({ error: res.message }, { status: res.status });
+    if (res.programId) data.programId = res.programId;
+    if (res.termNumber) data.termNumber = res.termNumber;
+  }
   for (const key of allowed) {
     if (body[key] !== undefined) data[key] = key === "dob" || key === "admissionDate" ? (body[key] ? new Date(body[key]) : null) : body[key];
   }
