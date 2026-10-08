@@ -80,12 +80,12 @@ const SNAPSHOT = JSON.parse(
 const FROZEN_MOBILE_TABS = { TEACHER: 4 };
 
 /**
- * Phase 2e marks exactly these two destinations with `requires: "COLLEGE"`, for
+ * Phase 2e and 3d mark exactly these destinations with `requires: "COLLEGE"`, for
  * exactly these three roles. Check 1 asserts the marked set equals that product,
  * so a stray marker (or a missing one) fails loudly; checks 3, 4 and 6 use the
- * same pair as the definition of "a college item".
+ * same list as the definition of "a college item".
  */
-const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs"];
+const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses"];
 const COLLEGE_ROLES = ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR"];
 
 /** Can this tenant run a college at all? Absent/unknown values normalize to SCHOOL. */

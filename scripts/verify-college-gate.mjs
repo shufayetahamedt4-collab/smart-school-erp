@@ -13,11 +13,12 @@
  *      by the isolation harnesses once the routes exist (Phase 2c/2d).
  *
  *   2. The **nav-layer invariant** for the college destinations
- *      (`/dashboard/departments`, `/dashboard/programs`) and the exact table of
- *      who may see them: the registry carries both hrefs for exactly the three
+ *      (`/dashboard/departments`, `/dashboard/programs`, `/dashboard/courses`)
+ *      and the exact table of who may see them: the registry carries every one
+ *      of them for exactly the three
  *      college-facing roles (SCHOOL_ADMIN, BRANCH_ADMIN, REGISTRAR) and for no
- *      other role; a SCHOOL tenant lists them in NO mode; a COLLEGE or BOTH
- *      tenant lists both, and only in COLLEGE mode. Phase 2e marked the items,
+ *      other role; a SCHOOL tenant lists none of them in NO mode; a COLLEGE or
+ *      BOTH tenant lists all of them, and only in COLLEGE mode. Phase 2e/3d marked them,
  *      so this half is no longer vacuous — it is what keeps a stray marker, a
  *      wrong mode or a wrong-role mark from shipping.
  *
@@ -62,8 +63,8 @@ const {
   normalizeInstitutionType,
 } = await import("../src/lib/institution.ts");
 
-/** The college-only destinations Phase 2 introduces (marked by Phase 2e). */
-const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs"];
+/** The college-only destinations Phase 2 introduces (marked by Phase 2e/3d). */
+const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses"];
 /** The only roles that carry them. */
 const COLLEGE_ROLES = ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR"];
 
