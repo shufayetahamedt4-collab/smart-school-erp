@@ -20,7 +20,9 @@
  *     FOREIGN programme id are all 400 (the foreign id byte-identical to a ghost,
  *     so it is never a 404 oracle);
  *   • auth: anonymous 401, a wrong role 403, and a SCHOOL tenant 403 with zero rows
- *     written; a REFUSED apply writes nothing at all;
+ *     written; a REFUSED apply writes nothing at all — proved twice, by a
+ *     per-student term/status snapshot AND by a tenant document count
+ *     (`auditLogs` excluding LOGIN), so a stray create or destroy shows up;
  *   • apply: an advance moves exactly the cohort one term; a RE-RUN is a no-op
  *     (structural idempotency — no marker, D2); registrations are untouched (D7);
  *     the last term graduates to ALUMNI (D5), applied by a REGISTRAR (the Phase 5
@@ -175,6 +177,30 @@ async function snapshot() {
 }
 const sameSnapshot = (a, b) => created.students.every((id) => a[id] === b[id]);
 
+/**
+ * Document counts for the refusal checks, scoped to THIS tenant.
+ *
+ * The field snapshot above proves no tracked student's term/status changed; these
+ * counts prove the independent property that the request created or destroyed NO
+ * document at all. `auditLogs` excludes `action: "LOGIN"` because the verifier's
+ * own five sign-ins write those rows — they are not the request under test —
+ * while every other row of the tenant is counted, including this verifier's own
+ * programmes/students/registrations (present in BOTH counts, so they cancel).
+ *
+ * The two counts must bracket the refused request alone: nothing else may write
+ * between them.
+ */
+async function tenantDocCounts() {
+  const counts = {};
+  for (const col of ["students", "programs", "courseRegistrations"]) {
+    counts[col] = (await db.collection(col).where("schoolId", "==", COLLEGE).get()).size;
+  }
+  const audits = await db.collection("auditLogs").where("schoolId", "==", COLLEGE).get();
+  counts["auditLogs(not LOGIN)"] = audits.docs.filter((d) => d.data().action !== "LOGIN").length;
+  return counts;
+}
+const sameCounts = (a, b) => Object.keys(a).every((k) => a[k] === b[k]);
+
 /* ------------------------------------------------------------------- set-up */
 console.log(`\n=== set-up (${BASE})`);
 
@@ -306,12 +332,19 @@ console.log("\n### validation — every bad position is a 400, never an oracle")
     `foreign=${JSON.stringify(foreign.error)} ghost=${JSON.stringify(ghost.error)}`
   );
 
+  const docsBefore = await tenantDocCounts();
   const refusedApply = await apply(FOREIGN_PROG, 1, collegeAdmin);
+  const docsAfter = await tenantDocCounts();
   const after = await snapshot();
   check(
     "a REFUSED apply (400) writes NOTHING — every term/status is unchanged",
     refusedApply.status === 400 && sameSnapshot(before, after),
     `HTTP ${refusedApply.status} unchanged=${sameSnapshot(before, after)}`
+  );
+  check(
+    "…and creates or destroys NO document in the tenant (students/programmes/registrations/audit excl. LOGIN)",
+    sameCounts(docsBefore, docsAfter),
+    `before=${JSON.stringify(docsBefore)} after=${JSON.stringify(docsAfter)}`
   );
 }
 
@@ -334,12 +367,19 @@ console.log("\n### a SCHOOL tenant is refused with zero rows written");
   const before = await snapshot();
   const sGet = await preview(PROG2, 1, schoolAdmin);
   check("a SCHOOL tenant's preview is 403 with ZERO data", sGet.status === 403 && sGet.data === null, `HTTP ${sGet.status} data=${JSON.stringify(sGet.data)}`);
+  const docsBefore = await tenantDocCounts();
   const sPost = await apply(PROG2, 1, schoolAdmin);
+  const docsAfter = await tenantDocCounts();
   const after = await snapshot();
   check(
     "a SCHOOL tenant's apply is 403 and writes ZERO rows",
     sPost.status === 403 && sameSnapshot(before, after),
     `HTTP ${sPost.status} unchanged=${sameSnapshot(before, after)}`
+  );
+  check(
+    "…and creates or destroys NO document in the college tenant (audit excl. LOGIN)",
+    sameCounts(docsBefore, docsAfter),
+    `before=${JSON.stringify(docsBefore)} after=${JSON.stringify(docsAfter)}`
   );
 }
 
