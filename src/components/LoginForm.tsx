@@ -19,7 +19,7 @@ import {
   HeartHandshake,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { api, prefetch } from "@/lib/client";
+import { api, clearApiCache, prefetch } from "@/lib/client";
 import { Spinner } from "@/components/ui";
 import { SECTORS, sectorForRole, type SectorKey } from "@/lib/sectors";
 import { warmListForSector } from "@/lib/route-data";
@@ -47,6 +47,25 @@ const HUB_BULLETS = [
   "Teacher App — attendance, homework, marks and messages",
   "Parents App — your child's attendance, results, fees and notices",
 ];
+
+/**
+ * Sign-in is the mirror of sign-out, and the tab's caches belong to the tab, not
+ * to the account that filled them: without the drop below, a second account
+ * signing in in the same tab paints the PREVIOUS account's session payload
+ * (`ss_me_v1` — see Shell's `useMe`) and can be served reads memoised for that
+ * account, until `/api/auth/me` lands. `/login` is reachable while signed in, so
+ * this is an ordinary user switch, not a corner case. Shell documents that a
+ * previous account's chrome can never outlive its session; sign-out and a 401
+ * both clear it, and this is the one remaining way in.
+ */
+function clearSessionCaches(): void {
+  try {
+    sessionStorage.removeItem("ss_me_v1");
+  } catch {
+    /* private mode / quota — sign-in must still complete */
+  }
+  clearApiCache();
+}
 
 /**
  * The sign-in screen for ONE app. It only offers the credentials and entry
@@ -94,6 +113,9 @@ export default function LoginForm({ sector: sectorKey, hub = false }: { sector?:
           body: JSON.stringify({ purpose: "2fa", challengeId: challenge.challengeId, totp }),
         });
         const next = searchParams.get("next");
+        // A second factor just completed the session: drop the previous
+        // account's caches BEFORE warming, so the warm belongs to the new one.
+        clearSessionCaches();
         // Start warming this app's reads before the destination even mounts, so
         // the dashboard is not the only fast screen on a fresh sign-in.
         prefetch(warmListForSector(sectorKey || "school"), 200);
@@ -118,6 +140,9 @@ export default function LoginForm({ sector: sectorKey, hub = false }: { sector?:
       // address the account just told us which app it belongs to.
       const warmSector = sectorKey ?? sectorForRole(res.user?.role)?.key ?? "school";
       const next = searchParams.get("next");
+      // Drop the previous account's caches BEFORE warming, so what we warm (and
+      // what the destination paints) is this session's, never the last one's.
+      clearSessionCaches();
       prefetch(warmListForSector(warmSector), 200);
       router.replace(next || res.redirect);
     } catch (err: any) {
