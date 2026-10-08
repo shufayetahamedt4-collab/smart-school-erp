@@ -468,3 +468,80 @@ API already exposes everything the screen needs (`GET`/`POST /api/course-registr
   and a BOTH tenant in SCHOOL mode is snapshotted before the nav edit and compared deep-equal after;
   the two nav verifiers gain the new href in `COLLEGE_HREFS` and nothing else, and the frozen
   `nav-scope-snapshot.json` is untouched.
+
+## 15. Phase 5a decisions (the per-program promotion ladder — pure logic)
+
+Phase 5 was **redefined** by ruling (recorded in §10 and in `docs/COLLEGE-PLAN-DELTA.md` §6): the
+per-program promotion ladder for **college students**, advancing `students.programId`/`termNumber`.
+**No term rows, no new collection, and `classes` untouched.** Phase 5 is staged 5a → 5b → 5c:
+
+- **5a (this section)** — the pure ladder logic plus an offline verifier. No route, no UI, no write.
+- **5b** — the promotion API: a preview, then an apply, in a **new college API segment**
+  `college-promotion` (added to `COLLEGE_API_SEGMENTS`).
+- **5c** — the page and its nav item, at a **new href** `/dashboard/college-promotion`.
+
+The decisions below were taken up front and are **final**; 5a implements the pure half of them.
+
+- **D1 — the API lives in a NEW college segment.** `src/app/api/college-promotion/…`, added to
+  `COLLEGE_API_SEGMENTS` in the same change that creates it (the 3b/4b precedent). It is **not** a
+  branch of `/api/students/promote`: `scripts/verify-college-routes.mjs` check 3 forbids a
+  non-college `src/app/api` directory from touching `prisma.program`, so the ladder's DB half cannot
+  live in the school route's directory.
+- **D2 — no marker field and no retain.** Idempotency is **structural**: the cohort is defined by an
+  exact `termNumber`, so after an advance a re-run of the same `fromTermNumber` selects nobody. There
+  is **no** `promotionSessionId`-style marker for the ladder, and **no `retain` action** in Phase 5.
+- **D3 — the cohort is strict.** A student is in the cohort only when `programId` **and**
+  `termNumber` both equal the target position.
+- **D4 — only students with a programme.** A student with no `programId` is never promoted by the
+  ladder; the **school ladder is untouched** and keeps selecting every student of a class by
+  `classId`. Because `POST /api/students` writes `classId` and `programId` independently, one student
+  may hold **both**, so the preview must **warn** about every cohort member that also holds a
+  `classId` — an operator then sees that the school ladder may move the same student too.
+- **D5 — the last term graduates.** At the programme's final term the action is `graduate` and the
+  caller stamps `status = "ALUMNI"` (the school ladder's existing terminal value). A graduating run
+  is reported separately in the preview (`graduating`), and a graduating row carries no destination
+  term.
+- **D6 — course progress is not consulted.** No pass/fail or completeness rule exists for college
+  students (college marks are deferred and locked to separate collections, D-3-6 / D-4a-0). The
+  preview may show a student's **pending-registration count as information only** — it never excludes
+  anybody and never blocks a promotion.
+- **D7 — registrations are untouched.** A promotion writes only the student's own fields; existing
+  `courseRegistrations` rows keep their `termNumber`, and nothing is carried forward or reset. (The
+  duplicate rule is per `(studentId, courseId, termNumber)` — D-4b-5 — so the next term's
+  registrations are new rows.)
+- **D8 — a NEW href for the college ladder.** `/dashboard/college-promotion`, `requires:"COLLEGE"`
+  for `SCHOOL_ADMIN`, `BRANCH_ADMIN` and `REGISTRAR`, grouped `academics` (5c). The school
+  `/dashboard/promotion` item is left exactly as it is.
+- **D9 — the ladder is independent of the academic session.** A term advance has no `sessionId`
+  dimension and no target session; terms are positions on a programme, not calendar rows.
+- **D10 — the write path mirrors the school ladder.** The 5b route uses `audit(…)`,
+  `invalidateStats`, `invalidateReferenceCache` and ≤400-operation `prisma.$transaction` slices,
+  exactly as `students/promote` does.
+- **D11 — the ladder's isolation checks live in its OWN new verifier.** The new branch/tenant
+  isolation checks are added to the ladder's API verifier, **not** to
+  `verify-tenant-isolation.mjs` / `verify-branch-isolation.mjs`, so the established counts (75 / 52)
+  stay identical.
+
+**Consequence of the permission ruling:** Phase 5 reuses the **`registration`** permission module (no
+new module, so `MATRIX`'s frozen inventory is unchanged). `MATRIX.registration` is `full` for
+`SCHOOL_ADMIN`, `BRANCH_ADMIN` **and** `REGISTRAR`, so **a REGISTRAR may apply** a promotion — unlike
+the school ladder, which gates on `studentTeacherInfo`.
+
+### 5a — what was built, and what it deliberately does not touch
+
+`src/lib/college-promotion.ts` is the pure ladder: it takes a programme's `termCount` (derived by
+`college-terms.ts` and **passed in** — never re-implemented here, which is the drift that module's
+header warns against) and a cohort of students, and decides each student's action (D5) and
+non-action. It is **dependency-free** like `college-terms.ts`, `registration-status.ts` and
+`institution.ts` — no `import`, no prisma, no `node:`, no React — so the verifier, a client component
+and Edge code can all import it.
+
+It does **not** touch `src/app/api` (no route yet), `src/components/nav.ts`, `src/lib/permissions.ts`,
+`src/lib/db.ts` (no collection, no `COLS`/`RELS` entry), `src/lib/college-routes.ts`, `classes`, or
+`src/app/api/students/promote`.
+
+`scripts/verify-college-promotion-logic.mjs` is **offline** (no `requireEmulator()` guard) and pins the
+module in exactly **12 checks**: the no-import property, the two-action inventory (no `retain`), the
+absence of any marker/session surface, the term tables, the strict cohort, the `classId` warning, the
+info-only pending count, the preview tallies and the `graduating` rule, and purity (no mutation, no
+registration/session surface).
