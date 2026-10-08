@@ -137,6 +137,10 @@ export async function requireCollege(
  * always with a `schoolId`-scoped query, never unscoped, so another tenant's
  * rows can never make this tenant look like it holds college data.
  *
+ * Phase 5-pre: a `courseRegistrations` count joins them, so a tenant that holds
+ * no department and no program but does hold a registration still counts as
+ * holding college data — the default named by docs/COLLEGE-PLAN-DELTA.md §8 Q7.
+ *
  * **Fails SAFE.** If the store cannot be read, this reports `true` ("has college
  * data"), which makes a COLLEGE/BOTH → SCHOOL downgrade *refused* rather than
  * allowed. A false refusal is recoverable; a wrong downgrade would strand the
@@ -148,11 +152,12 @@ export async function schoolHasCollegeData(schoolId: string): Promise<boolean> {
   if (!schoolId) return true;
   try {
     const { prisma } = await import("./db");
-    const [departments, programs] = await Promise.all([
+    const [departments, programs, registrations] = await Promise.all([
       prisma.department.count({ where: { schoolId } }),
       prisma.program.count({ where: { schoolId } }),
+      prisma.courseRegistration.count({ where: { schoolId } }),
     ]);
-    return departments > 0 || programs > 0;
+    return departments > 0 || programs > 0 || registrations > 0;
   } catch {
     return true;
   }

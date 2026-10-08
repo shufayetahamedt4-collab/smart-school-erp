@@ -426,6 +426,41 @@ async function create() {
   });
   mark("schools", bothEmptySchoolId);
 
+  // ---- COLLEGE tenant holding ONLY a registration (Phase 5-pre) -------------
+  //      No department and no program ON PURPOSE: this tenant's whole college
+  //      footprint is one courseRegistrations row, so its downgrade may only be
+  //      refused by the new registrations count. Give it a department or a
+  //      program and the refusal would come from the old (2g) check, making the
+  //      5-pre case pass vacuously.
+  const regOnlySchoolId = `${P}reg-only`;
+  await db.collection("schools").doc(regOnlySchoolId).set({
+    id: regOnlySchoolId, name: "ZZ Iso Registrations Only", status: "ACTIVE", plan: "PRO",
+    institutionType: "COLLEGE", createdAt: now,
+  });
+  mark("schools", regOnlySchoolId);
+  // The minimum it needs is nothing: the guard counts by schoolId alone and the
+  // route never dereferences studentId/courseId/programId, so these refs stay
+  // uncreated on purpose.
+  const regOnlyId = `${P}reg-only-1`;
+  await db.collection("courseRegistrations").doc(regOnlyId).set({
+    id: regOnlyId, schoolId: regOnlySchoolId, branchId: null,
+    studentId: `${P}reg-only-stu`, courseId: `${P}reg-only-course`,
+    programId: `${P}reg-only-prog`, termNumber: 1, status: "PENDING",
+    requestedById: null, decidedById: null, decidedAt: null, createdAt: now,
+  });
+  mark("courseRegistrations", regOnlyId);
+
+  // ---- COLLEGE tenant with NO college data at all (the paired control) ------
+  //      Same shape as the tenant above, minus its one registration: its
+  //      downgrade must still be ALLOWED, which is what isolates the
+  //      registration as the only thing gating the refusal.
+  const regOnlyEmptySchoolId = `${P}reg-only-empty`;
+  await db.collection("schools").doc(regOnlyEmptySchoolId).set({
+    id: regOnlyEmptySchoolId, name: "ZZ Iso Registrations Only Empty", status: "ACTIVE", plan: "PRO",
+    institutionType: "COLLEGE", createdAt: now,
+  });
+  mark("schools", regOnlyEmptySchoolId);
+
   // ---- STUDENT fixture user in the DEMO school (for parity harness) ----
   const demoSchool = process.env.DEMO_SCHOOL_ID;
   if (demoSchool) {
@@ -464,6 +499,7 @@ async function create() {
     classId, sectionId, subjectId, studentId, teacherId, examId, feeId, hwId, convId,
     colCourseA, colCourseB, colCourseNone, colMapA, colMapB, bothCourse, bothProg, bothMap,
     colStuA, colStuB, colRegA, colRegB, bothStu, bothReg,
+    regOnlySchoolId, regOnlyEmptySchoolId, regOnlyId,
   }, null, 2));
 }
 

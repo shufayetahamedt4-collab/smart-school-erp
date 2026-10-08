@@ -579,5 +579,25 @@ console.log("\n### BOTH → SCHOOL downgrade (blocked with data, allowed without
   );
 }
 
+/* ---------- COLLEGE registrations-only → SCHOOL downgrade (5-pre) ---------- */
+// A tenant whose ONLY college data is a courseRegistrations row must be refused
+// a downgrade: the 2g check (departments + programs) alone would allow it, so a
+// 409 here can only come from the new registrations count. The paired control
+// is the same tenant shape with no registration at all, which must still pass.
+console.log("\n### COLLEGE registrations-only → SCHOOL downgrade (5-pre)");
+{
+  const superCookie = await login("admin@smartschool.com", "Admin@123");
+  const regOnly = await patchJSON(superCookie, `/api/schools/${P}reg-only`, { institutionType: "SCHOOL" });
+  check(
+    regOnly.status === 409 && /college data/i.test(regOnly.body?.error || ""),
+    `a COLLEGE tenant whose only college data is a registration cannot be downgraded — 409 (${regOnly.status})`
+  );
+  const regOnlyEmpty = await patchJSON(superCookie, `/api/schools/${P}reg-only-empty`, { institutionType: "SCHOOL" });
+  check(
+    regOnlyEmpty.status === 200,
+    `the same tenant with no registration can still be downgraded — 200 (${regOnlyEmpty.status})`
+  );
+}
+
 console.log(failures === 0 ? "\n✅ ISOLATION CONFIRMED — no cross-school data in any of the 13 swept routes" : `\n❌ ${failures} isolation failure(s)`);
 process.exit(failures === 0 ? 0 : 1);
