@@ -116,10 +116,11 @@ check("two academic sessions were created", !!sessA?.id && !!sessB?.id, `${sessA
 
 // Students in Class A (the cohort) + a retained candidate + a transferred candidate.
 let admSeq = 0;
-async function makeStudent(name, classId, sectionId, guardianEmail, sessionId) {
+async function makeStudent(name, classId, sectionId, guardianEmail, sessionId, branchId) {
   const res = await post(HOSTS.school, "/api/students", {
     name, admissionNo: `PR${stamp}${++admSeq}`.slice(0, 40), classId, sectionId,
     guardianName: `Guardian ${name}`, guardianEmail, createGuardian: !!guardianEmail, createFees: false, sessionId,
+    ...(branchId ? { branchId } : {}),
   }, admin);
   return res.data;
 }
@@ -313,7 +314,7 @@ console.log("\n### branch isolation with a real BRANCH_ADMIN");
   // A class + student in branch B (school admin).
   const bCls = (await post(HOSTS.school, "/api/classes", { name: `Promo BranchB Cls ${stamp}`, order: 700, sections: ["B"], branchId: bB?.id }, admin)).data;
   if (bCls?.id) classIds.push(bCls.id);
-  const sB = await makeStudent(`Promo BranchB Student ${stamp}`, bCls?.id, null, null, sessA?.id);
+  const sB = await makeStudent(`Promo BranchB Student ${stamp}`, bCls?.id, null, null, sessA?.id, bB?.id);
   if (sB?.id) studentIds.push(sB.id);
 
   const pvOther = await req(HOSTS.school, `/api/students/promote?fromClassId=${bCls?.id}`, { cookie: branchAdmin });
