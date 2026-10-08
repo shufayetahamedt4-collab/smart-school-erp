@@ -612,4 +612,58 @@ written, and a refused apply writing nothing at all; the advance (a branch admin
 branch, then the school-scope admin moves the remaining row); the structural no-op re-run;
 registrations untouched; and the last-term graduation to ALUMNI applied by a REGISTRAR, with a re-run
 graduating nobody. It creates and removes every row it writes (a `zzcp-` prefix) — including the audit
-rows its own programme creates produced — and leaves nothing behind.
+rows its own programme creates produced — and leaves nothing behind. (The count has since grown: 5b-2
+added two document-count checks, 47 → 49, and 5b-3 added the shrink-guard checks — see §17.)
+
+## 17. Phase 5b-2 / 5b-3 decisions (refusal proofs + the programme shrink guard)
+
+Phase 5b-2 and 5b-3 close the four items the Phase 5b audit left open (Q1–Q3). The rulings are
+recorded here as the decisions; **5c is not started**.
+
+**Q1 — the pending-registration figure stays ROW-BASED (option a).** `pendingRegistrationCount`
+counts PENDING `courseRegistrations` **rows** at the position — a count of course requests, not of
+students — and it is INFO ONLY (D6): it never blocks a promotion and it does not follow the student.
+No route or module changes. **For 5c, label it "pending course requests"** (not a student count) in
+the UI, so a student holding two PENDING rows reads as two.
+
+**Q2 — the "writes nothing" proofs also count documents (5b-2).** The two refusal checks ("a
+REFUSED apply writes nothing" and "a SCHOOL tenant's apply writes zero rows") now also bracket the
+refused request with a **tenant document count** — `students`, `programs`, `courseRegistrations` and
+`auditLogs` (excluding `action: "LOGIN"`, which the verifier's own five sign-ins write) — so a stray
+create or destroy shows up even when no tracked field changed. This is a **verifier-only** change
+(`scripts/verify-college-promotion-api.mjs`); no `route.ts` and no `college-promotion.ts` file moved.
+47 → 49 checks.
+
+**Q3 — issue 1 is fixed: a programme shrink may not strand an on-roll student (5b-3).** In
+`PATCH /api/programs/[id]`, a change that **LOWERS** the programme's derived term count is now
+refused with **409** while any ON-ROLL student of that programme still sits beyond the new last term.
+
+- **The derivation is cited, not re-implemented.** The term count is
+  `termCount(durationYears, termSystem) = durationYears × termsPerYear(termSystem)`
+  (`src/lib/college-terms.ts`) — one term per year YEARLY, two SEMESTER. The guard compares the
+  **current** count with the **effective** count (the request's `durationYears`/`termSystem` merged
+  over the stored row) and fires only when `next < current`.
+- **The student set.** One `prisma.student.findMany` scoped to the programme's `schoolId` **and**
+  `programId`, with `ON_ROLL_STUDENT` reused verbatim (`src/lib/db.ts`: `status` notIn
+  `ALUMNI`/`TRANSFERRED`) — so ALUMNI and TRANSFERRED never block. Any `termNumber > nextTermCount`
+  refuses; branch confinement is unchanged (enforced earlier on the programme by `canAccessBranch`).
+- **The message names the new last term and the count:** e.g. `This would end the programme at Year 2
+  (2 term(s)), but 1 on-roll student(s) are already beyond it. Move them within the programme first.`
+- **Order and blast radius.** The guard runs **after** the Phase 3c mapping-aware guard (kept exactly
+  as it was, order included) and before the write, so a bad body is still a 400 and a mapped programme
+  still answers the mapping 409 first. No other behaviour of the route changed (create, delete, other
+  fields, permission order, response shapes).
+- **Q3 issues 2, 3 and 4 are deliberately NOT changed.** The SUPER_ADMIN 400 vs sibling `?schoolId=`
+  inconsistency stays as is; the cosmetic "1 to 0" 400 message stays as is; the read-cost note needs no
+  change now.
+
+**Its verifier additions (5b-3).** `scripts/verify-college-promotion-api.mjs` gains the shrink-guard
+section: 409 + nothing written when an on-roll student sits beyond the new end; 200 when nobody is
+beyond; 200 when only ALUMNI/TRANSFERRED are beyond; 200 when growing; the FOREIGN programme still
+404 on PATCH and a branch-A admin still 403 on a branch-B programme. The verifier now runs exactly
+**61 checks** (47 → 49 in 5b-2, → 61 in 5b-3) and still leaves zero `zzcp-` rows behind.
+
+**What 5b-3 does not touch.** `students/promote`, `classes`, `college-routes.ts`, `permissions.ts`,
+`nav.ts`, `db.ts` (no collection/`COLS`/`RELS` entry), `college-promotion.ts`, the two isolation
+harnesses (75 / 52 unchanged) and every other verifier — the existing programs/college verifiers keep
+their counts exactly.

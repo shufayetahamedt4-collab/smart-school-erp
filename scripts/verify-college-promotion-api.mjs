@@ -23,6 +23,10 @@
  *     written; a REFUSED apply writes nothing at all — proved twice, by a
  *     per-student term/status snapshot AND by a tenant document count
  *     (`auditLogs` excluding LOGIN), so a stray create or destroy shows up;
+ *   • the programme shrink guard (Phase 5b-3): a PATCH that LOWERS a programme's
+ *     derived term count answers 409 while any ON-ROLL student sits beyond the new
+ *     last term (and writes nothing), and 200 otherwise; ALUMNI/TRANSFERRED never
+ *     block, growing is unaffected, and the foreign/branch rules are unchanged;
  *   • apply: an advance moves exactly the cohort one term; a RE-RUN is a no-op
  *     (structural idempotency — no marker, D2); registrations are untouched (D7);
  *     the last term graduates to ALUMNI (D5), applied by a REGISTRAR (the Phase 5
@@ -114,6 +118,7 @@ const post = (path, body, cookie) => req(path, { cookie, method: "POST", body: J
 const preview = (programId, fromTermNumber, cookie) =>
   req(`/api/college-promotion?programId=${encodeURIComponent(programId)}&fromTermNumber=${fromTermNumber}`, { cookie });
 const apply = (programId, fromTermNumber, cookie) => post("/api/college-promotion", { programId, fromTermNumber }, cookie);
+const patch = (path, body, cookie) => req(path, { cookie, method: "PATCH", body: JSON.stringify(body) });
 
 const collegeAdmin = await login("zz-iso-college-admin@test.local", CRED.collegeAdmin);
 const collegeBranchAdmin = await login("zz-iso-college-br-admin@test.local", CRED.collegeBranchAdmin);
@@ -166,6 +171,8 @@ async function makeRegistration(tag, { studentId, programId, termNumber, status 
 
 /** Read back the fields a promotion may change. */
 const readStudent = async (id) => (await db.collection("students").doc(id).get()).data() || {};
+/** Read back a programme row (the shrink guard's PATCH changes `durationYears`). */
+const readProgram = async (id) => (await db.collection("programs").doc(id).get()).data() || {};
 /** A term+status snapshot of our students, for the "writes nothing" checks. */
 async function snapshot() {
   const out = {};
@@ -474,6 +481,54 @@ console.log("\n### the last term graduates to ALUMNI, applied by a REGISTRAR (D5
   check("…and a re-apply graduates nobody", reApply.status === 200 && reApply.data?.graduated === 0, `HTTP ${reApply.status} ${JSON.stringify(reApply.data)}`);
 }
 
+/* ------------------------------------------- programme shrink guard (Phase 5b-3) */
+console.log("\n### the programme shrink guard — an on-roll student may not be stranded");
+{
+  // Four YEARLY programmes: three of 3 terms (to shrink) and one of 2 terms (to grow).
+  const SH = await makeProgram("sh", 3, BRANCH_A);
+  const NONE = await makeProgram("none", 3, BRANCH_A);
+  const ALUM = await makeProgram("alum", 3, BRANCH_A);
+  const GROW = await makeProgram("grow", 2, BRANCH_A);
+  check("the four shrink-guard programmes were created (201)", !!SH && !!NONE && !!ALUM && !!GROW, `${SH} / ${NONE} / ${ALUM} / ${GROW}`);
+
+  // SH: an ON-ROLL student at term 3 (past a 3→2 shrink). ALUM: an ALUMNI and a
+  // TRANSFERRED student also at term 3 — only the ON-ROLL one may block.
+  await makeStudent("sh3", { programId: SH, termNumber: 3, branchId: BRANCH_A });
+  await makeStudent("none1", { programId: NONE, termNumber: 1, branchId: BRANCH_A });
+  await makeStudent("alum3", { programId: ALUM, termNumber: 3, branchId: BRANCH_A, status: "ALUMNI" });
+  await makeStudent("tr3", { programId: ALUM, termNumber: 3, branchId: BRANCH_A, status: "TRANSFERRED" });
+  await makeStudent("grow2", { programId: GROW, termNumber: 2, branchId: BRANCH_A });
+
+  // A 3 → 2 shrink with an on-roll student at term 3 is refused, and writes nothing.
+  const docsBefore = await tenantDocCounts();
+  const refused = await patch(`/api/programs/${SH}`, { durationYears: 2 }, collegeAdmin);
+  const docsAfter = await tenantDocCounts();
+  check("a shrink that would strand an on-roll student is refused with 409", refused.status === 409, `HTTP ${refused.status} ${refused.error || ""}`);
+  check("…the error names the new last term and how many students are beyond it", /Year 2/.test(refused.error || "") && /1 on-roll/.test(refused.error || ""), `${refused.error}`);
+  check("…and the programme is unchanged (still 3 years)", (await readProgram(SH)).durationYears === 3, `duration=${(await readProgram(SH)).durationYears}`);
+  check("…and nothing at all was written (no document, no audit row)", sameCounts(docsBefore, docsAfter), `before=${JSON.stringify(docsBefore)} after=${JSON.stringify(docsAfter)}`);
+
+  // Nobody beyond the new end → the shrink is allowed and persists.
+  const noneRes = await patch(`/api/programs/${NONE}`, { durationYears: 2 }, collegeAdmin);
+  check("a shrink with nobody beyond the new end is allowed (200, term count 2)", noneRes.status === 200 && noneRes.data?.termCount === 2, `HTTP ${noneRes.status} ${JSON.stringify(noneRes.data)}`);
+  check("…and it persisted (the programme is now 2 years)", (await readProgram(NONE)).durationYears === 2, `duration=${(await readProgram(NONE)).durationYears}`);
+
+  // Only ALUMNI/TRANSFERRED sit beyond → they never block (ON_ROLL_STUDENT).
+  const alumRes = await patch(`/api/programs/${ALUM}`, { durationYears: 2 }, collegeAdmin);
+  check("a shrink is allowed when only ALUMNI/TRANSFERRED students sit beyond", alumRes.status === 200 && alumRes.data?.termCount === 2, `HTTP ${alumRes.status} ${JSON.stringify(alumRes.data)}`);
+  check("…and it persisted", (await readProgram(ALUM)).durationYears === 2, `duration=${(await readProgram(ALUM)).durationYears}`);
+
+  // Growing can never strand anybody → unaffected.
+  const growRes = await patch(`/api/programs/${GROW}`, { durationYears: 4 }, collegeAdmin);
+  check("growing the programme is unaffected (200, term count 4)", growRes.status === 200 && growRes.data?.termCount === 4, `HTTP ${growRes.status} ${JSON.stringify(growRes.data)}`);
+
+  // The guard changes nothing about the existing confinement rules.
+  const foreignPatch = await patch(`/api/programs/${FOREIGN_PROG}`, { durationYears: 1 }, collegeAdmin);
+  check("a FOREIGN tenant programme is still not-found on PATCH (no oracle)", foreignPatch.status === 404, `HTTP ${foreignPatch.status} ${foreignPatch.error || ""}`);
+  const branchPatch = await patch(`/api/programs/${PROG_B}`, { durationYears: 1 }, collegeBranchAdmin);
+  check("a branch-A admin still cannot PATCH a branch-B programme (403)", branchPatch.status === 403, `HTTP ${branchPatch.status} ${branchPatch.error || ""}`);
+}
+
 /* -------------------------------------------------------------------- cleanup */
 console.log("\n### cleanup");
 {
@@ -507,6 +562,6 @@ console.log("\n### cleanup");
 console.log(
   failures
     ? `\n❌ ${failures} college-promotion API failure(s) (of ${checks} checks)`
-    : `\n✅ COLLEGE PROMOTION API OK — preview/apply, strict cohort, branch + tenant confinement, SCHOOL 403 with no write, idempotent re-run, ALUMNI graduation (${checks} checks)`
+    : `\n✅ COLLEGE PROMOTION API OK — preview/apply, strict cohort, branch + tenant confinement, SCHOOL 403 with no write, idempotent re-run, ALUMNI graduation, programme shrink guard (${checks} checks)`
 );
 process.exit(failures ? 1 : 0);

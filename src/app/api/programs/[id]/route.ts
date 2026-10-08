@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, invalidateReferenceCache } from "@/lib/db";
+import { prisma, invalidateReferenceCache, ON_ROLL_STUDENT } from "@/lib/db";
 import { getSession, requireCollege, audit } from "@/lib/auth";
 import { can, canAccessBranch } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
-import { TERM_SYSTEMS, isTermSystem, normalizeTermSystem, termCount } from "@/lib/college-terms";
+import { TERM_SYSTEMS, isTermSystem, normalizeTermSystem, termCount, termLabel } from "@/lib/college-terms";
 
 /**
  * College support (Phase 2) — update/delete one program.
@@ -21,6 +21,10 @@ import { TERM_SYSTEMS, isTermSystem, normalizeTermSystem, termCount } from "@/li
  *      `durationYears` decrease below the highest mapped term, answers 409
  *      while any `programCourse` row references this program; both are allowed
  *      once nothing is mapped.
+ *  10. on-roll shrink guard (Phase 5b-3): a change that LOWERS the programme's
+ *      derived term count answers 409 while any ON-ROLL student of the programme
+ *      still sits beyond the new last term; ALUMNI and TRANSFERRED never block.
+ *      It runs after the mapping guard and before the write.
  */
 
 const DEGREE_LEVELS = ["HSC", "DEGREE_PASS", "HONOURS", "MASTERS", "DIPLOMA"] as const;
@@ -151,6 +155,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const effectiveSystem = data.termSystem ?? currentSystem;
   const effectiveDuration =
     data.durationYears ?? (Number.isInteger(storedDuration) ? storedDuration : 0);
+  const currentTermCount = termCount(storedDuration, currentSystem);
+  const nextTermCount = termCount(effectiveDuration, effectiveSystem);
   const mappings = await prisma.programCourse.findMany({ where: { programId: id } });
   if (mappings.length) {
     if (data.termSystem !== undefined && data.termSystem !== currentSystem) {
@@ -163,13 +169,43 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       (max, row) => Math.max(max, Number((row as any).termNumber) || 0),
       0
     );
-    const nextTermCount = termCount(effectiveDuration, effectiveSystem);
     if (highestMappedTerm > nextTermCount) {
       return NextResponse.json(
         {
           error:
             `This would leave ${nextTermCount} term(s), below the highest mapped term ` +
             `(${highestMappedTerm}). Remove the later mappings first.`,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
+  // Phase 5b-3 — refuse a shrink that would strand on-roll students. Lowering the
+  // derived term count (a `durationYears` decrease, or a SEMESTER → YEARLY switch)
+  // leaves any student whose `termNumber` is past the new end holding a position
+  // the programme no longer has. ON_ROLL_STUDENT is reused verbatim, so ALUMNI and
+  // TRANSFERRED never block. Runs after the mapping guard (which owns the term
+  // rows) and before the write, and only when the count actually falls.
+  if (nextTermCount < currentTermCount) {
+    const onRoll = await prisma.student.findMany({
+      where: {
+        schoolId: (program as any).schoolId,
+        programId: id,
+        ...ON_ROLL_STUDENT,
+      },
+      select: { id: true, termNumber: true },
+    });
+    const beyond = (onRoll as any[]).filter(
+      (s) => typeof s.termNumber === "number" && s.termNumber > nextTermCount
+    );
+    if (beyond.length) {
+      return NextResponse.json(
+        {
+          error:
+            `This would end the programme at ${termLabel(nextTermCount, effectiveSystem)} ` +
+            `(${nextTermCount} term(s)), but ${beyond.length} on-roll student(s) are already beyond it. ` +
+            `Move them within the programme first.`,
         },
         { status: 409 }
       );
