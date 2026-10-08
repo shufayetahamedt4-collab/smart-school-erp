@@ -37,8 +37,25 @@ export function adminApp(): App {
   return _app;
 }
 
+/**
+ * Fail closed: with no emulator host set, refuse to open the LIVE Firestore
+ * unless ALLOW_LIVE_FIRESTORE=1 is set explicitly. This is what stops a local
+ * dev server whose `.env` holds live credentials from silently reaching
+ * production.
+ */
+function assertLiveFirestoreAllowed(): void {
+  if (process.env.FIRESTORE_EMULATOR_HOST) return;      // local emulator
+  if (process.env.ALLOW_LIVE_FIRESTORE === "1") return; // explicitly allowed
+  throw new Error(
+    "Refusing to open the LIVE Firestore: FIRESTORE_EMULATOR_HOST is not set and " +
+      'ALLOW_LIVE_FIRESTORE is not "1". Set ALLOW_LIVE_FIRESTORE=1 where the app ' +
+      "must reach production, or run against the emulator (npm run dev:emulator)."
+  );
+}
+
 export function getDb(): Firestore {
   if (!_db) {
+    assertLiveFirestoreAllowed();
     // Database selection is configuration-driven. Set FIRESTORE_DATABASE_ID to
     // target a named database; when unset it resolves to "(default)", which is
     // the rollback database (no code change is needed to roll back).

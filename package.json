@@ -8,6 +8,7 @@
   "description": "Smart School ERP & Parent Communication System (Multi-Tenant SaaS) — Firebase edition",
   "scripts": {
     "dev": "next dev",
+    "dev:emulator": "node scripts/dev-emulator.mjs",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",

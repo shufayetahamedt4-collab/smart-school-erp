@@ -34,6 +34,12 @@ env:
   - variable: APP_URL
     value: https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app
 
+  # Opt-in for the runtime guard in src/lib/firebase.ts: the app may reach the
+  # LIVE Firestore only when this is "1". With no emulator host and no flag,
+  # getDb() refuses to build a client (fails closed).
+  - variable: ALLOW_LIVE_FIRESTORE
+    value: "1"
+
 runConfig:
   # One instance always warm: measured on this project, a cold instance added
   # ~150-300ms on top of the Firestore round trip for the first click after an
