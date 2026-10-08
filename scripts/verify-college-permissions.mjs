@@ -63,7 +63,7 @@ const { MATRIX, can, requirePermission, PermissionError } = await import("../src
 const FROZEN_MODULES = [
   "studentTeacherInfo", "feePayment", "attendanceMarks", "teachingMaterial",
   "systemSettings", "admission", "library", "communication", "platformBilling",
-  "branches", "staff", "departments", "programs", "courses",
+  "branches", "staff", "departments", "programs", "courses", "registration",
 ];
 
 /** Every role in the `Role` union (src/lib/db.ts) — the exhaustive list to test. */
@@ -154,6 +154,36 @@ console.log("\n2. the courses entry — SCHOOL_ADMIN/BRANCH_ADMIN full, REGISTRA
     }
     if (failures === 0) ok(`MATRIX.${MODULE} = ${JSON.stringify(entry)} — identical to departments and programs, no SUPER_ADMIN entry`);
   }
+}
+
+/* ----------------------------------------------------------------------- 2b */
+
+console.log("\n2b. the registration entry — all three college roles hold full, no SUPER_ADMIN key");
+{
+  const entry = MATRIX.registration;
+  let problem = false;
+  if (!entry) {
+    bad("registration", "MATRIX.registration does not exist");
+    problem = true;
+  } else {
+    const wantRoles = ["BRANCH_ADMIN", "REGISTRAR", "SCHOOL_ADMIN"];
+    const gotRoles = Object.keys(entry);
+    if (!sameSet(gotRoles, wantRoles)) {
+      bad("registration", `MATRIX.registration lists ${JSON.stringify(gotRoles.sort())}, expected exactly ${JSON.stringify(wantRoles)}`);
+      problem = true;
+    }
+    for (const role of ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR"]) {
+      if (!sameDeep(entry[role], ["full"])) {
+        bad("registration", `${role} = ${JSON.stringify(entry[role])}, expected ["full"]`);
+        problem = true;
+      }
+    }
+    if ("SUPER_ADMIN" in entry) {
+      bad("registration", "MATRIX.registration lists SUPER_ADMIN — it must NOT, so the grant stays the can() short-circuit and not a matrix entry");
+      problem = true;
+    }
+  }
+  if (!problem) ok(`MATRIX.registration = ${JSON.stringify(entry)} — SCHOOL_ADMIN/BRANCH_ADMIN/REGISTRAR all full, no SUPER_ADMIN entry`);
 }
 
 /* ------------------------------------------------------------------------ 3 */

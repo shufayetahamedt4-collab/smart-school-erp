@@ -18,6 +18,9 @@
  *   2. the program exists in THIS tenant and is ACTIVE        → 400
  *   3. branch confinement follows the program                 → 403
  *   4. the term is one this program actually has              → 400
+ *   5. (Phase 4b) a programme CHANGE or an un-enrol leaves this student's
+ *      course registrations behind, so it is refused  → 409 while any row
+ *      still holds a place (PENDING/APPROVED). A REJECTED row does not block.
  *
  * Why this lives in `src/lib` and not under a college API segment: the
  * `students` routes are NOT a college segment, so `scripts/verify-college-routes.mjs`
@@ -31,6 +34,7 @@ import { prisma } from "./db";
 import { requireCollege, type SessionUser } from "./auth";
 import { canAccessBranch } from "./permissions";
 import { isValidTermNumber, termCount } from "./college-terms";
+import { isBlockingRegistration } from "./registration-status";
 
 export type CollegeEnrolmentResult =
   | { kind: "gate"; response: NextResponse }
@@ -50,6 +54,10 @@ const read = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 export async function resolveCollegeEnrolment(input: {
   session: SessionUser;
   schoolId: string;
+  /** the student being changed (omitted on create) — needed only for the 4b guard */
+  studentId?: string | null;
+  /** the student's CURRENT programme, null when none — the 4b guard's baseline */
+  currentProgramId?: string | null;
   programId: unknown;
   termNumber: unknown;
 }): Promise<CollegeEnrolmentResult> {
@@ -68,7 +76,8 @@ export async function resolveCollegeEnrolment(input: {
     if (termSent) {
       return { kind: "error", status: 400, message: "A program is required when a term is set." };
     }
-    return { kind: "ok", programId: null, termNumber: null };
+    // Phase 4b — an un-enrol: refused while a registration still holds a place.
+    return (await guardProgramChange(input, null)) ?? { kind: "ok", programId: null, termNumber: null };
   }
 
   // 2. The program must exist in THIS tenant and be ACTIVE. A missing or foreign
@@ -99,8 +108,36 @@ export async function resolveCollegeEnrolment(input: {
       const count = termCount(Number((program as any).durationYears), (program as any).termSystem);
       return { kind: "error", status: 400, message: `termNumber must be a whole number from 1 to ${count}.` };
     }
-    return { kind: "ok", programId, termNumber: Number(input.termNumber) };
+    const decided: CollegeEnrolmentResult = { kind: "ok", programId, termNumber: Number(input.termNumber) };
+    return (await guardProgramChange(input, programId)) ?? decided;
   }
 
-  return { kind: "ok", programId, termNumber: null };
+  return (await guardProgramChange(input, programId)) ?? { kind: "ok", programId, termNumber: null };
+}
+
+/**
+ * Phase 4b — refuse a programme change (or an un-enrol) that would leave this
+ * student's course registrations pointing at a programme they are no longer in.
+ *
+ * It runs AFTER the program/term are validated, so a bad body is still a 400 and
+ * only a well-formed change is refused 409. It fires only when the student HAS a
+ * programme and the request moves it (to another programme, or to none); a
+ * same-programme patch (e.g. only the term) is untouched. A REJECTED row does not
+ * block — only the rows that still hold a place (PENDING/APPROVED).
+ */
+async function guardProgramChange(
+  input: { studentId?: string | null; currentProgramId?: string | null },
+  nextProgramId: string | null
+): Promise<CollegeEnrolmentResult | null> {
+  const current = input.currentProgramId ?? null;
+  // Nothing to guard when there was no programme, or the programme is unchanged.
+  if (!input.studentId || !current || nextProgramId === current) return null;
+  const rows = await prisma.courseRegistration.findMany({ where: { studentId: input.studentId } });
+  if (!(rows as any[]).some((r) => isBlockingRegistration(r.status))) return null;
+  return {
+    kind: "error",
+    status: 409,
+    message:
+      "This student has course registrations. Withdraw them before changing the student's programme.",
+  };
 }

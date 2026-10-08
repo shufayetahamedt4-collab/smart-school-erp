@@ -27,7 +27,9 @@ export type ModuleKey =
   | "departments"
   | "programs"
   // ---- College support (Phase 3) ----
-  | "courses";
+  | "courses"
+  // ---- College support (Phase 4b) ----
+  | "registration";
 
 export type Action = "view" | "viewOwn" | "viewOwnChild" | "viewOwnClass" | "entry" | "full" | "pay" | "upload" | "billing";
 
@@ -155,6 +157,19 @@ export const MATRIX: Record<ModuleKey, Partial<Record<Role, Actions>>> = {
     SCHOOL_ADMIN: [R.full],
     BRANCH_ADMIN: [R.full],
     REGISTRAR: [R.view],
+  },
+  // ---- College support (Phase 4b) ----
+  // Course registration + approval. Unlike the catalogue modules, a REGISTRAR
+  // here holds `full`: the approved decision is that a registrar CREATES a
+  // registration AND APPROVES it, so all three college-facing roles manage the
+  // whole lifecycle (create → decide → withdraw). A BRANCH_ADMIN only ever
+  // reaches its own branch's rows via scopeWhere/canAccessBranch.
+  // SUPER_ADMIN is deliberately NOT listed — `can()` short-circuits it to true
+  // for every module by design, and listing it would hide that fact.
+  registration: {
+    SCHOOL_ADMIN: [R.full],
+    BRANCH_ADMIN: [R.full],
+    REGISTRAR: [R.full],
   },
 };
 

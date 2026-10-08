@@ -30,7 +30,14 @@
  * list and the tree in step. `programCourses` (3c) lives under the same segment.
  */
 
-export const COLLEGE_API_SEGMENTS = ["departments", "programs", "courses"] as const;
+// Phase 4b (§13) adds `course-registrations` here in the same change that creates
+// `src/app/api/course-registrations`, so the guard gates its handlers too.
+export const COLLEGE_API_SEGMENTS = [
+  "departments",
+  "programs",
+  "courses",
+  "course-registrations",
+] as const;
 
 export type CollegeApiSegment = (typeof COLLEGE_API_SEGMENTS)[number];
 

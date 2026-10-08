@@ -353,3 +353,64 @@ helper, and the guards around them.
   answers **400** while any `students.programId` equals the id, the same shape as the
   still-has-mappings guard of Phase 3c — replacing the `LATER PHASE` placeholder comment that stood
   in this exact spot.
+
+## 13. Phase 4b decisions (course registration + approval)
+
+Phase 4b delivers the second half of plan-Phase 4 (`docs/COLLEGE-DECISIONS.md` §10, reconciled
+table): the registration and approval of a student for a programme's mapped courses. It is **API
+only** — no page, no nav entry, no fixture or isolation change (those are 4c and 4d). It adds a new
+collection `courseRegistrations`, a dependency-free status machine, one permission module, and two
+route files.
+
+- **D-4b-1 — the status machine is one module.** `src/lib/registration-status.ts` is the ONE place
+  that defines PENDING/APPROVED/REJECTED, and `isBlockingRegistration(status)` (PENDING or APPROVED)
+  is the single rule behind every guard below — so "a REJECTED row never blocks anything" is stated
+  once. It is dependency-free, like `college-terms.ts`, and `scripts/verify-registration-status.mjs`
+  pins it offline.
+- **D-4b-2 — the `registration` permission module.** `MATRIX.registration` gives `SCHOOL_ADMIN`,
+  `BRANCH_ADMIN` and `REGISTRAR` **`full`** — a registrar creates a registration AND approves it, so
+  all three college-facing roles manage the whole lifecycle. No student self-service in this phase.
+- **D-4b-3 — the row.** `courseRegistrations`: `schoolId`, `branchId`, `studentId`, `courseId`,
+  `programId`, `termNumber`, `status`, `requestedById`, `decidedById`, `decidedAt`. `programId` is
+  repeated (not only reached through the student) and `branchId` is **stored**, inherited from the
+  student's programme exactly as a course inherits its department's branch — so branch scoping
+  (`scopeWhere`) and `canAccessBranch` filter the row directly. A branch-less programme yields a
+  branch-less row, reachable only by a school-scope session.
+- **D-4b-4 — the server derives programme and term.** The request names `studentId` + `courseId`
+  (and an optional `termNumber`). `programId` comes from the student's enrolment (4a) and
+  `termNumber` from the programme→course mapping (3c); an explicitly supplied `termNumber` that
+  disagrees is a **400**, never silently ignored. The student's OWN `termNumber` is not required to
+  match — any term the course is mapped to is allowed.
+- **D-4b-5 — one duplicate rule.** `(studentId, courseId, termNumber)` is unique among the rows that
+  still hold a place (PENDING/APPROVED) — a second one is **409**. A REJECTED row never blocks a
+  re-registration for the same triple.
+- **D-4b-6 — approval is a status transition, and decided is terminal.** `PATCH` decides a PENDING
+  row (`APPROVED`/`REJECTED`) and writes `decidedById`/`decidedAt`; a decided row answers **409**.
+  `DELETE` withdraws a PENDING row; deleting an APPROVED/REJECTED row is **409**. There is no re-open
+  of an APPROVED row in this phase.
+- **D-4b-7 — the guard order, `requireCollege` first.** Every handler: session (401) → target
+  `schoolId` (400) → `requireCollege` on the TARGET tenant (403) → `can(role, "registration", …)`
+  (403) → `writeGuard` on mutations (402) → load-by-id with `row.schoolId === schoolId` else **404**
+  → `canAccessBranch(row.branchId)` (403). A foreign/missing `studentId`/`courseId` in a BODY is the
+  **same 400** as a non-existent id — never a 404 oracle.
+- **D-4b-8 — an un-enrol or a programme change is refused while a registration holds a place.**
+  The rule lives in `src/lib/college-enrollment.ts` (`guardProgramChange`), so the `students` routes
+  call only the helper and never name a college model — `scripts/verify-college-routes.mjs` check 3
+  stays strict and unexempted. It changes Phase 4a-2 behaviour: `PATCH { programId: null }` is now
+  **409** (instead of 200) when a PENDING/APPROVED registration exists; REJECTED does not block, and
+  a student with no registrations is unchanged.
+- **D-4b-9 — a mapping or a course cannot be deleted under a registration.** The program→course
+  mapping `DELETE` answers **400** while a PENDING/APPROVED registration exists for that
+  (programme, course, term); `DELETE /api/courses/[id]` answers **400** while a PENDING/APPROVED
+  registration references the course (defence in depth). REJECTED does not block.
+- **D-4b-10 — a dangling course never crashes a read.** A course deleted after its mapping was
+  removed can still be referenced by a REJECTED row; the list and the one-row `GET` return the row
+  with the course shown as unavailable (`courseAvailable: false`).
+- **D-4b-11 — a known residual gap, deferred.** `DELETE /api/students/[id]` (Phase 4a-2) does not
+  cascade `courseRegistrations`, and D-4b-7 forbids the students route from naming a college model,
+  so a deleted student can leave orphaned registration rows. Handling it (a college-side cascade
+  helper) is deferred to a later commit; the dangling-read rule (D-4b-10) keeps those rows harmless.
+- **D-4b-12 — no SCHOOL path is altered.** `db.ts` (COLS/RELS/prisma), `permissions.ts`
+  (`ModuleKey`/`MATRIX`) and `college-routes.ts` (`COLLEGE_API_SEGMENTS`) change **additively** only;
+  `subjects`/`mode` and the school `attendance`/marks spine are untouched (D-3-6 stays locked). The
+  school-student POST/PATCH response is captured before the change and compared deep-equal after.

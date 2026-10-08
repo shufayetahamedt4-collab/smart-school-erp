@@ -3,6 +3,7 @@ import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, requireCollege, audit } from "@/lib/auth";
 import { can, canAccessBranch } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
+import { isBlockingRegistration } from "@/lib/registration-status";
 
 /**
  * College support (Phase 3b) — update/delete one course.
@@ -188,6 +189,17 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (mappingCount > 0) {
     return NextResponse.json(
       { error: "Cannot delete a course that is mapped to a program." },
+      { status: 400 }
+    );
+  }
+
+  // Phase 4b — also blocked while a student registration references this course.
+  // Defence in depth: the mapping guard protects the mapped path, but a course can
+  // be referenced by a REJECTED row that no longer needs its mapping.
+  const registered = await prisma.courseRegistration.findMany({ where: { courseId: id } });
+  if ((registered as any[]).some((r) => isBlockingRegistration(r.status))) {
+    return NextResponse.json(
+      { error: "Cannot delete a course that has student registrations." },
       { status: 400 }
     );
   }

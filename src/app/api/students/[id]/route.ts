@@ -117,6 +117,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const res = await resolveCollegeEnrolment({
       session,
       schoolId: session.schoolId!,
+      // Phase 4b — the guard needs the student and their CURRENT programme to
+      // refuse a move/un-enrol that would orphan course registrations.
+      studentId: id,
+      currentProgramId: (student as any).programId ?? null,
       programId: body.programId,
       termNumber: body.termNumber,
     });

@@ -84,6 +84,7 @@ const schoolAdmin = await login("zz-iso-admin@test.local", CRED.admin);
 
 const stamp = Date.now();
 const createdAdm = [];
+const createdRegs = [];
 let tempProgramId = null;
 let tempProgramId2 = null;
 
@@ -271,8 +272,61 @@ console.log("\n### DELETE is blocked while a student is enrolled");
   }
 }
 
+/* --------------------- 4b: a registration holds the place (un-enrol + move) */
+console.log("\n### a registration holds the place — un-enrol and programme change are refused");
+{
+  // col-course-a is mapped to programme A (col-map-a, term 1), so a student
+  // enrolled in programme A can register for it.
+  const adm1 = `CE-REG-UNENROL-${stamp}`; createdAdm.push(adm1);
+  const a = await post("/api/students", {
+    name: `CE Reg Unenrol ${stamp}`, admissionNo: adm1, createFees: false, createGuardian: false,
+    programId: `${P}col-prog-a`, termNumber: 1,
+  }, collegeAdmin);
+  check("a student is enrolled for the un-enrol guard (201)", a.status === 201 && !!a.data?.id, `HTTP ${a.status} ${a.error || ""}`);
+  if (a.data?.id) {
+    const reg = await post("/api/course-registrations", { studentId: a.data.id, courseId: `${P}col-course-a` }, collegeAdmin);
+    check("a PENDING registration is created (201)", reg.status === 201, `HTTP ${reg.status} ${reg.error || ""}`);
+    if (reg.data?.id) createdRegs.push(reg.data.id);
+
+    const blocked = await patch(`/api/students/${a.data.id}`, { programId: null }, collegeAdmin);
+    check("un-enrol is refused (409) while the registration holds a place", blocked.status === 409, `HTTP ${blocked.status} ${blocked.error || ""}`);
+
+    if (reg.data?.id) {
+      const del = await req(`/api/course-registrations/${reg.data.id}`, { cookie: collegeAdmin, method: "DELETE" });
+      check("the registration is withdrawn (200)", del.status === 200, `HTTP ${del.status} ${del.error || ""}`);
+      if (del.status === 200) createdRegs.splice(createdRegs.indexOf(reg.data.id), 1);
+    }
+    const ok = await patch(`/api/students/${a.data.id}`, { programId: null }, collegeAdmin);
+    check("after the withdrawal the un-enrol succeeds (200)", ok.status === 200, `HTTP ${ok.status} ${ok.error || ""}`);
+  }
+}
+{
+  const adm2 = `CE-REG-MOVE-${stamp}`; createdAdm.push(adm2);
+  const b = await post("/api/students", {
+    name: `CE Reg Move ${stamp}`, admissionNo: adm2, createFees: false, createGuardian: false,
+    programId: `${P}col-prog-a`, termNumber: 1,
+  }, collegeAdmin);
+  check("a student is enrolled for the programme-change guard (201)", b.status === 201 && !!b.data?.id, `HTTP ${b.status} ${b.error || ""}`);
+  if (b.data?.id) {
+    const reg = await post("/api/course-registrations", { studentId: b.data.id, courseId: `${P}col-course-a` }, collegeAdmin);
+    check("a PENDING registration is created (201)", reg.status === 201, `HTTP ${reg.status} ${reg.error || ""}`);
+    if (reg.data?.id) createdRegs.push(reg.data.id);
+
+    const blocked = await patch(`/api/students/${b.data.id}`, { programId: `${P}col-prog-b`, termNumber: 1 }, collegeAdmin);
+    check("moving to another programme is refused (409) while the registration holds a place", blocked.status === 409, `HTTP ${blocked.status} ${blocked.error || ""}`);
+
+    if (reg.data?.id) {
+      const del = await req(`/api/course-registrations/${reg.data.id}`, { cookie: collegeAdmin, method: "DELETE" });
+      if (del.status === 200) createdRegs.splice(createdRegs.indexOf(reg.data.id), 1);
+    }
+    const ok = await patch(`/api/students/${b.data.id}`, { programId: `${P}col-prog-b`, termNumber: 1 }, collegeAdmin);
+    check("after the withdrawal the programme change succeeds (200)", ok.status === 200, `HTTP ${ok.status} ${ok.error || ""}`);
+  }
+}
+
 /* --------------------------------------------------------------- cleanup */
 console.log("\n### cleanup");
+for (const rid of createdRegs) await db.collection("courseRegistrations").doc(rid).delete().catch(() => null);
 for (const adm of createdAdm) {
   const docs = (await db.collection("students").where("admissionNo", "==", adm).get()).docs;
   for (const d of docs) {

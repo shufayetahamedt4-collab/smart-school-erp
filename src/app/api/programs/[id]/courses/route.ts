@@ -4,6 +4,7 @@ import { getSession, requireCollege, audit } from "@/lib/auth";
 import { can, canAccessBranch } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
 import { isValidTermNumber, normalizeTermSystem, termCount, termLabel } from "@/lib/college-terms";
+import { isBlockingRegistration } from "@/lib/registration-status";
 
 /**
  * College support (Phase 3c) — the program→course MAPPING (collection
@@ -255,6 +256,24 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     (mapping as any).programId !== id
   ) {
     return NextResponse.json({ error: "Mapping not found" }, { status: 404 });
+  }
+
+  // Phase 4b — a mapping is the term a registration points at, so it cannot be
+  // removed while a registration still depends on this (programme, course, term).
+  // A REJECTED row does not block. Guarded AFTER the row is loaded and is known
+  // to belong to this tenant, so a foreign mapping is still 404, never 400.
+  const registrations = await prisma.courseRegistration.findMany({
+    where: {
+      programId: id,
+      courseId: (mapping as any).courseId,
+      termNumber: Number((mapping as any).termNumber),
+    },
+  });
+  if ((registrations as any[]).some((r) => isBlockingRegistration(r.status))) {
+    return NextResponse.json(
+      { error: "Cannot remove this mapping while a student registration depends on it." },
+      { status: 400 }
+    );
   }
 
   await prisma.programCourse.delete({ where: { id: mappingId } });

@@ -159,6 +159,13 @@ const COLS: Record<string, string> = {
   // id). Uniqueness is enforced in-code by the route, not by the store.
   course: "courses",
   programCourse: "programCourses",
+  // ---- College support (Phase 4b) ----
+  // A course registration is an ordinary row with a random id (`create` falls
+  // back to `rand()`), exactly like department/program/course — there is NO
+  // `idFor` entry, because no natural key exists (any enrolled student may
+  // register any mapped course). Uniqueness of (studentId, courseId,
+  // termNumber) among the non-REJECTED rows is enforced in-code by the route.
+  courseRegistration: "courseRegistrations",
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
@@ -342,6 +349,8 @@ const RELS: Record<string, Record<string, Rel>> = {
     // ---- College support (Phase 3) ----
     courses: { to: "course", via: "schoolId", kind: "many" },
     programCourses: { to: "programCourse", via: "schoolId", kind: "many" },
+    // ---- College support (Phase 4b) ----
+    courseRegistrations: { to: "courseRegistration", via: "schoolId", kind: "many" },
   },
   user: {
     school: { to: "school", fk: "schoolId", kind: "one" },
@@ -370,6 +379,9 @@ const RELS: Record<string, Record<string, Rel>> = {
     // The student's program (nullable). A student with no `programId` is simply
     // "not a college student" — the same missing-safe convention as §1/D-3-3.
     program: { to: "program", fk: "programId", kind: "one" },
+    // ---- College support (Phase 4b) ----
+    // The course registrations that hold this student's place in a term.
+    registrations: { to: "courseRegistration", via: "studentId", kind: "many" },
     attendance: { to: "attendance", via: "studentId", kind: "many" },
     remarks: { to: "dailyRemark", via: "studentId", kind: "many" },
     submissions: { to: "homeworkSubmission", via: "studentId", kind: "many" },
@@ -667,6 +679,8 @@ const RELS: Record<string, Record<string, Rel>> = {
     programCourses: { to: "programCourse", via: "programId", kind: "many" },
     // Phase 4a — the students enrolled in this program (via `students.programId`).
     students: { to: "student", via: "programId", kind: "many" },
+    // ---- College support (Phase 4b) ----
+    registrations: { to: "courseRegistration", via: "programId", kind: "many" },
   },
   // ---- College support (Phase 3) ----
   // A course is a catalogue row under ONE DEPARTMENT, and inherits that
@@ -682,6 +696,8 @@ const RELS: Record<string, Record<string, Rel>> = {
     branch: { to: "branch", fk: "branchId", kind: "one" },
     department: { to: "department", fk: "departmentId", kind: "one" },
     programCourses: { to: "programCourse", via: "courseId", kind: "many" },
+    // ---- College support (Phase 4b) ----
+    registrations: { to: "courseRegistration", via: "courseId", kind: "many" },
   },
   // The program→course mapping: which course sits in which term of a program,
   // and whether it is REQUIRED or ELECTIVE. `programId` is repeated here on
@@ -693,6 +709,22 @@ const RELS: Record<string, Record<string, Rel>> = {
     school: { to: "school", fk: "schoolId", kind: "one" },
     program: { to: "program", fk: "programId", kind: "one" },
     course: { to: "course", fk: "courseId", kind: "one" },
+  },
+  // ---- College support (Phase 4b) ----
+  // A student's registration for one course in one term of their programme.
+  // `programId` is repeated (not only reached through the student) and
+  // `branchId` is STORED (inherited from the programme, exactly as a course
+  // inherits its department's branch) so branch scoping (`scopeWhere`) and
+  // `canAccessBranch` filter the row directly — the store cannot join.
+  // `requestedById`/`decidedById` name users; `decidedAt` is set on decision.
+  courseRegistration: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+    course: { to: "course", fk: "courseId", kind: "one" },
+    program: { to: "program", fk: "programId", kind: "one" },
+    requestedBy: { to: "user", fk: "requestedById", kind: "one" },
+    decidedBy: { to: "user", fk: "decidedById", kind: "one" },
   },
   twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
@@ -2022,5 +2054,7 @@ export const prisma = {
   // ---- College support (Phase 3) ----
   course: model("course"),
   programCourse: model("programCourse"),
+  // ---- College support (Phase 4b) ----
+  courseRegistration: model("courseRegistration"),
   $transaction: transaction,
 };
