@@ -68,7 +68,8 @@ export interface NavItem {
    * Optional visibility marker: shown only to a tenant that can run this mode at
    * all, and only while that mode is the active one. Phase 2e is the first phase
    * to use it — the college destinations (`/dashboard/departments`,
-   * `/dashboard/programs`, `/dashboard/courses`) carry `COLLEGE` for the three
+   * `/dashboard/programs`, `/dashboard/courses`, `/dashboard/registration`)
+   * carry `COLLEGE` for the three
    * college-facing roles (SCHOOL_ADMIN, BRANCH_ADMIN, REGISTRAR). Nothing else
    * is marked, and an item without a marker is visible in every mode, so a
    * SCHOOL tenant's sidebar is still the registry's school items exactly.
@@ -115,6 +116,7 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/departments", label: "Departments", icon: Network, requires: "COLLEGE" },
     { href: "/dashboard/programs", label: "Programs", icon: Layers, requires: "COLLEGE" },
     { href: "/dashboard/courses", label: "Courses", icon: BookOpen, requires: "COLLEGE" },
+    { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
@@ -154,6 +156,7 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/departments", label: "Departments", icon: Network, requires: "COLLEGE" },
     { href: "/dashboard/programs", label: "Programs", icon: Layers, requires: "COLLEGE" },
     { href: "/dashboard/courses", label: "Courses", icon: BookOpen, requires: "COLLEGE" },
+    { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
@@ -186,6 +189,7 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/departments", label: "Departments", icon: Network, requires: "COLLEGE" },
     { href: "/dashboard/programs", label: "Programs", icon: Layers, requires: "COLLEGE" },
     { href: "/dashboard/courses", label: "Courses", icon: BookOpen, requires: "COLLEGE" },
+    { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
     { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
@@ -341,6 +345,7 @@ const SCHOOL_GROUP_OF: Record<string, string> = {
   "/dashboard/departments": "academics",
   "/dashboard/programs": "academics",
   "/dashboard/courses": "academics",
+  "/dashboard/registration": "academics",
   "/dashboard/routine": "academics",
   "/dashboard/live-classes": "academics",
   "/dashboard/exams": "academics",

@@ -418,3 +418,37 @@ route files.
   (`ModuleKey`/`MATRIX`) and `college-routes.ts` (`COLLEGE_API_SEGMENTS`) change **additively** only;
   `subjects`/`mode` and the school `attendance`/marks spine are untouched (D-3-6 stays locked). The
   school-student POST/PATCH response is captured before the change and compared deep-equal after.
+
+## 14. Phase 4c decisions (the registration page + nav)
+
+Phase 4c is the UI half of plan-Phase 4 (`docs/COLLEGE-DECISIONS.md` §10): the `/dashboard/registration`
+page and its nav entry. It changes **no API, no `db.ts`, no `permissions.ts` and no fixture** — the 4b
+API already exposes everything the screen needs (`GET`/`POST /api/course-registrations`,
+`PATCH`/`DELETE /api/course-registrations/[id]`), alongside the existing `GET /api/students` and
+`GET /api/programs/[id]/courses`.
+
+- **D-4c-1 — one page, one href.** `src/app/dashboard/registration/page.tsx` is reachable at
+  `/dashboard/registration`; its nav item carries `requires:"COLLEGE"` for exactly `SCHOOL_ADMIN`,
+  `BRANCH_ADMIN` and `REGISTRAR`, grouped under `academics` in `SCHOOL_GROUP_OF` — the same shape
+  `/dashboard/courses` took in 3d (D-2e-2).
+- **D-4c-2 — the page gates before it reads.** Session loading → non-college refusal → role refusal
+  (`can(role, "registration", "view")`), each BEFORE any request, so a SCHOOL tenant (including on a
+  cold `ss_me_v1` cache) and a role without the permission reach the network for nothing. The API
+  remains the real gate (`requireCollege` + `can`).
+- **D-4c-3 — create derives programme and term.** The picker reuses `GET /api/students` (tenant +
+  branch scoped via `scopeWhere`) and renders only name, admission number and programme; the page then
+  loads only that programme's mapped courses (`GET /api/programs/[id]/courses`) and POSTs
+  `{ studentId, courseId }`. The term shown is the mapping's term and is never sent — the server
+  derives it (D-4b-5).
+- **D-4c-4 — filters are client-side.** Programme, term, status and student-name filtering all run in
+  memory over the single tenant/branch-scoped list; the list API is used unchanged.
+- **D-4c-5 — PENDING acts, terminal rows do not.** Approve/Reject/Withdraw are offered only on a
+  PENDING row; APPROVED and REJECTED are terminal (the server answers 409) and no re-open is built —
+  a rejected attempt is a NEW registration, which the duplicate rule already allows (D-4b-6).
+- **D-4c-6 — a dangling row is readable, not actionable.** `studentName: null` renders as
+  "— (student deleted)" and `courseAvailable: false` marks the course unavailable with the row's
+  actions disabled — D-4b-10 and D-4b-11 carried through to the screen, never a crash.
+- **D-4c-7 — the school nav is unchanged, proven.** `navForRole` for every role under a SCHOOL tenant
+  and a BOTH tenant in SCHOOL mode is snapshotted before the nav edit and compared deep-equal after;
+  the two nav verifiers gain the new href in `COLLEGE_HREFS` and nothing else, and the frozen
+  `nav-scope-snapshot.json` is untouched.

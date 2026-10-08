@@ -85,7 +85,7 @@ const FROZEN_MOBILE_TABS = { TEACHER: 4 };
  * so a stray marker (or a missing one) fails loudly; checks 3, 4 and 6 use the
  * same list as the definition of "a college item".
  */
-const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses"];
+const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses", "/dashboard/registration"];
 const COLLEGE_ROLES = ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR"];
 
 /** Can this tenant run a college at all? Absent/unknown values normalize to SCHOOL. */
