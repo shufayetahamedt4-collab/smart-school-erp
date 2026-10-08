@@ -545,3 +545,71 @@ module in exactly **12 checks**: the no-import property, the two-action inventor
 absence of any marker/session surface, the term tables, the strict cohort, the `classId` warning, the
 info-only pending count, the preview tallies and the `graduating` rule, and purity (no mutation, no
 registration/session surface).
+
+## 16. Phase 5b decisions (the promotion API — preview and apply)
+
+Stage 5b implements the API half of the ladder decided in §15. **D1–D11 stand unchanged**; what
+follows records how each decided rule is kept, and the contract 5c builds on.
+
+**The surface.** `src/app/api/college-promotion/route.ts` — a new college API segment,
+`college-promotion`, added to `COLLEGE_API_SEGMENTS` in the same change that creates it (D1). Two
+handlers:
+
+- `GET /api/college-promotion?programId=<id>&fromTermNumber=<n>` → the preview: the programme, the
+  position, `termCount`, `graduating`, the cohort `rows` (each with `action`, `toTermNumber`,
+  `graduating`, `classIdWarning`, `pendingRegistrationCount`), `count` and the `counts` tallies. All of
+  it comes from `buildCollegePromotionPreview` in `src/lib/college-promotion.ts`; the route supplies
+  only the derived term count and the rows.
+- `POST /api/college-promotion` with `{ programId, fromTermNumber }` → apply. The body names a
+  **position**, never rows: the cohort is recomputed server-side from `(programId, termNumber)`, so
+  client-supplied ids and preview output are ignored by construction.
+
+**Guard order** (mirrors `programs`/`courses`, and is what the offline guard
+`scripts/verify-college-routes.mjs` checks statically): `getSession()` → target `schoolId` →
+`requireCollege({ schoolId })` (403 for a SCHOOL tenant) → `can(role, "registration", "full")` (403) →
+`writeGuard(schoolId)` on POST (PRD §12.1). A **REGISTRAR may therefore apply** (the permission
+consequence recorded in §15). Reads are scoped by `scopeWhere` (tenant, plus the session's branch when
+it is branch-scoped), and a branch admin cannot reach a programme outside its branch
+(`canAccessBranch`).
+
+**How each decision shows up in the code.**
+
+- **D2/D3 — strict cohort, no marker.** The cohort is one `prisma.student.findMany` with `programId`
+  **and** `termNumber` equality (plus `ON_ROLL_STUDENT`); after an advance nobody remains at
+  `fromTermNumber`, so a re-run selects nobody. There is no marker field, no `retain`, and no
+  `excludeIds`/`graduateIds` in the contract.
+- **D4 — the school ladder is untouched.** The route never selects on `classId`; it carries
+  `classIdWarning` through the preview so an operator sees that a student in both ladders may be moved
+  by `/api/students/promote` as well.
+- **D5 — the last term graduates.** When `fromTermNumber === termCount` the write is
+  `{ status: "ALUMNI" }` (the school ladder's existing terminal value) and the response reports
+  `graduating: true` with `toTermNumber: null`.
+- **D6 — course progress is info only.** `pendingRegistrationCount` is per student, **term-filtered**,
+  and counted from the programme's PENDING registrations at that position; it never removes anybody
+  from the cohort and never blocks the run.
+- **D7 — registrations are untouched.** A promotion writes only `termNumber` (or `status`); every
+  `courseRegistration` keeps its own programme, term and status.
+- **D9 — no session coupling.** No `sessionId` is read or written, and there is no target session.
+- **D10 — the write path mirrors the school ladder.** Queued `prisma.student.update` operations are
+  flushed with `prisma.$transaction` in ≤400-operation slices, then `audit("COLLEGE_PROMOTION", …)`,
+  `invalidateStats(schoolId, "students")` and `invalidateReferenceCache(schoolId)`.
+
+**What 5b deliberately does not touch.** `src/lib/college-promotion.ts` (unchanged — no bug was
+found), `src/app/api/students/promote` and therefore the school ladder's behaviour, `classes`,
+`src/lib/permissions.ts` (no new module), `src/lib/db.ts` (no collection, no `COLS`/`RELS` entry),
+`src/components/nav.ts`, and the two isolation harnesses. Because the ladder's own branch/tenant
+checks live in its own verifier (D11), `verify-tenant-isolation.mjs` and `verify-branch-isolation.mjs`
+were **not** edited and keep their 75 / 52 counts exactly.
+
+**Its verifier.** `scripts/verify-college-promotion-api.mjs` is emulator-backed (HTTP against the
+COLLEGE fixture tenant) and pins the API in exactly **47 checks**: the preview shape; the strict
+cohort (another term, ALUMNI/TRANSFERRED and another tenant's rows all excluded); the `classId`
+warning and the info-only, term-filtered pending count; branch confinement (a branch-A admin's cohort
+excludes a branch-B student of the same programme, and it cannot reach a branch-B programme); the 400s
+(missing programme/term, `0`, past the end, non-numeric, and a FOREIGN programme id byte-identical to
+a ghost — never a 404 oracle); anonymous 401 / wrong-role 403; a SCHOOL tenant 403 with zero rows
+written, and a refused apply writing nothing at all; the advance (a branch admin moves only its own
+branch, then the school-scope admin moves the remaining row); the structural no-op re-run;
+registrations untouched; and the last-term graduation to ALUMNI applied by a REGISTRAR, with a re-run
+graduating nobody. It creates and removes every row it writes (a `zzcp-` prefix) — including the audit
+rows its own programme creates produced — and leaves nothing behind.

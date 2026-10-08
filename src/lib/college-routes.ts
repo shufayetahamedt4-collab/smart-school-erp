@@ -32,11 +32,14 @@
 
 // Phase 4b (§13) adds `course-registrations` here in the same change that creates
 // `src/app/api/course-registrations`, so the guard gates its handlers too.
+// Phase 5b (§16) adds `college-promotion` the same way, in the change that creates
+// `src/app/api/college-promotion` — the per-program promotion ladder's own segment.
 export const COLLEGE_API_SEGMENTS = [
   "departments",
   "programs",
   "courses",
   "course-registrations",
+  "college-promotion",
 ] as const;
 
 export type CollegeApiSegment = (typeof COLLEGE_API_SEGMENTS)[number];
