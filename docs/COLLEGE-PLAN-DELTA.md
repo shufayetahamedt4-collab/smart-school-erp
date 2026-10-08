@@ -11,7 +11,8 @@ Base: branch `college-support` @ `79e06b0` (backup commit), working tree read-on
 labels, settings, reports) runs in the selected mode, and **no screen ever mixes both modes' rows**.
 Mode is **UI context, not authorization** — `can()`, tenant isolation and `requirePermission()` stay
 the only enforcement. Super Admin sets the type at creation and may change it later (→ `BOTH`
-always; `BOTH`/`COLLEGE` → `SCHOOL` only when no college data exists).
+always; `BOTH`/`COLLEGE` → `SCHOOL` only when no college data exists — **no departments, no
+programs, no `courseRegistrations`**; **Q7 ANSWERED 2026-10-08**, §8).
 
 Anything not verifiable from the repository is marked **unverified**.
 
@@ -193,7 +194,7 @@ item 6 in §3 and it is the acceptance test for "UI identical for school tenants
 | **Phase M** — *mode foundation* (**NEW**) | **NEW** | Every later phase assumes mode works; it must exist before nav/labels are made mode-aware | **New** `src/app/api/mode/route.ts`; `src/lib/institution.ts` (mode helpers); `src/components/Shell.tsx` (switcher + `ME_CACHE_KEY` rewrite); `src/components/nav.ts` (`navForRole`); `src/lib/client.ts` (append mode to mode-scoped GETs; reuse `clearApiCache`); `src/lib/stats-cache.ts`/`src/app/api/stats/route.ts` (mode in key); `src/lib/exams-cache.ts`/`src/app/api/exams/route.ts` (mode in key); `src/lib/grading-store.ts`, `src/lib/routine-config.ts`, `src/lib/academic.ts` (mode-suffixed keys) |
 | **Phase 1** — tenant-aware nav + terminology | **MODIFIED** | Consumes mode as well as institution type | `src/components/nav.ts`, `src/components/Shell.tsx`, `src/components/AppShell.tsx`, `src/lib/institution.ts` |
 | **Phase 2** — departments & programs | **UNCHANGED** | College-only screens already gated by institution type; nothing mode-sensitive | — |
-| **Phase 3** — semester = extended class, per-program ladder | **MODIFIED** | Classes need `mode`, and the ladder must be per (mode, program) | `src/app/api/classes/route.ts`, `src/app/api/students/promote/route.ts` (group key), `src/app/dashboard/classes/page.tsx`, `src/app/dashboard/promotion/page.tsx` |
+| **Phase 3** — semester = extended class, per-program ladder | **MODIFIED** | **Superseded 2026-10-08 (ruling):** the ladder is **per program**, over `students.programId`/`termNumber`, reusing the registration permission module — **no term rows, no new collection, `classes` untouched**. Original reason: ~~Classes need `mode`, and the ladder must be per (mode, program)~~ | **Superseded 2026-10-08:** the `classes` files drop out of this phase; the exact file list is settled in the Phase 5 preflight. Original: ~~`src/app/api/classes/route.ts`, `src/app/api/students/promote/route.ts` (group key), `src/app/dashboard/classes/page.tsx`, `src/app/dashboard/promotion/page.tsx`~~ |
 | **Phase 4** — courses + registration + approval | **MODIFIED** | `subjects.mode`; registration inherits the student's mode | `src/app/api/subjects/route.ts`, new `src/app/api/course-registrations/route.ts` |
 | **Phase 5** — credit-weighted GPA / CGPA + transcript | **MODIFIED** | The grading scheme becomes mode-scoped in Phase M, so `loadScheme` must take a mode | `src/lib/grading.ts`, `src/lib/grading-store.ts` callers, `src/app/print/{report-card,marksheet}/**` |
 | **Phase 6** — college fee basis | **MODIFIED** | Fee config is mode-scoped; `feeSetting` stays school-only by design | `src/app/api/fee-categories/route.ts`, `src/app/api/fees/generate/route.ts`, `src/app/api/fees/route.ts` |
@@ -214,7 +215,7 @@ Phase M sits between 0 and 1 because Phase 1's whole job is to make nav/labels m
 | **Unclassifiable rows leak into both modes** | `students.classId` is nullable; a derived mode cannot classify a class-less pupil | Store `mode` on `classes`/`subjects`/`students`; absent ⇒ `"SCHOOL"` (§3) |
 | **Mode drift between cookie and query** | Two places can disagree | Server rule: query wins for filtering, but both must pass the `institutionType` check; a mismatch is a 400, never a silent fallback |
 | **Switcher on the wrong shell / wrong tenant** | `Shell` serves admin+super (`src/app/{dashboard,admin}/layout.tsx`), `AppShell` serves teacher+guardian | Switch on `institutionType === "BOTH"` **and** role, not on tenant alone |
-| **Downgrade with college data** | `BOTH → SCHOOL` would orphan programs/semesters/registrations | Guard in `PATCH /api/schools/[id]`: refuse unless the tenant has zero college rows (definition: **open question 7**) |
+| **Downgrade with college data** | `BOTH → SCHOOL` would orphan programs/semesters/registrations | Guard in `PATCH /api/schools/[id]`: refuse unless the tenant has zero college rows (definition: **Q7 — ANSWERED 2026-10-08**, §8) |
 | **Perf regression risk** | Performance work is frozen; mode keys touch the hottest caches | Append a dimension only; do not restructure. Assert SCHOOL-tenant payloads and cache hit paths are unchanged |
 | **Mode-aware layouts** | Reading `cookies()` in a layout opts the tree into dynamic rendering (**unverified for these layouts**) | Do not read the cookie in layouts (§1) |
 
@@ -235,7 +236,7 @@ proceeding:** the §3 checklist, plus a SCHOOL-tenant before/after payload diff.
 
 ## 8. Open questions this decision creates
 
-Recommended defaults are **not approved**.
+Recommended defaults are **not approved** — **except Q7, which is ANSWERED (2026-10-08)**.
 
 | # | Question | Recommended default |
 |---|---|---|
@@ -245,7 +246,7 @@ Recommended defaults are **not approved**.
 | 4 | Does a guardian with children in both modes get a mode control? | No — the selected child implies the mode; add a read-only badge if needed |
 | 5 | Is the selected mode reflected in the URL (shareable)? | No permanent URL segment; `?mode=` on mode-scoped API reads only |
 | 6 | Can a school admin in a BOTH tenant change the type? | No — Super Admin only (`PATCH /api/schools/[id]` platform-only branch) |
-| 7 | What exactly counts as "no college data" for a downgrade? | No `departments`, no `programs`, no `classes.mode === "COLLEGE"`, no `courseRegistrations`, no college `mode` rows in fees/exams |
+| 7 | What exactly counts as "no college data" for a downgrade? | **ANSWERED 2026-10-08:** no **departments**, no **programs**, no **`courseRegistrations`** — nothing else is counted. `courses`/`programCourses` are **not** counted, and `classes.mode` / college `mode` rows in fees/exams **do not exist** in this codebase (commit `3ba4600` is the implementation). Superseded recommended default: ~~No `departments`, no `programs`, no `classes.mode === "COLLEGE"`, no `courseRegistrations`, no college `mode` rows in fees/exams~~ |
 | 8 | What happens to users' `ss_mode` when a tenant is downgraded to SCHOOL? | Coerce to `SCHOOL` on next read; ignore an invalid cookie value |
 | 9 | Should `mode` be stored on day one, or derived from `programId`? | Stored on `classes`/`subjects`/`students`; derived one hop for the rest (§3) |
 | 10 | Does the college side of a BOTH tenant get its own branding (tagline/logo)? | No — branding stays tenant-wide; the dead `school.<id>.branding` write stays untouched |

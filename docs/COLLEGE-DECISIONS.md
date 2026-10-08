@@ -90,9 +90,17 @@ no-op.
 
 The point of the restriction is honesty: a tenant that already holds college rows must not be
 silently turned into a school-only tenant, or those rows would become unreachable. Phase 2g made
-"has college data" real: `schoolHasCollegeData(schoolId)` counts this tenant's **own** departments and
-programs with a `schoolId`-scoped query, and fails safe (a store read error reads as "has data"), so
-the downgrade is now **blocked** whenever college rows exist and allowed only when there are none.
+"has college data" real: `schoolHasCollegeData(schoolId)` counts this tenant's **own** departments,
+programs and **`courseRegistrations`** with a `schoolId`-scoped query, and fails safe (a store read
+error reads as "has data"), so the downgrade is now **blocked** whenever college rows exist and
+allowed only when there are none. **Q7 is ANSWERED (2026-10-08)** — see `docs/COLLEGE-PLAN-DELTA.md`
+§8 Q7: "no college data" means exactly no **departments**, no **programs** and no
+**`courseRegistrations`**, which is what commit `3ba4600` implements. **`courses` and
+`programCourses` are *not* counted**, and neither `classes.mode` nor college `mode` rows in
+fees/exams are counted, because those fields **do not exist** in this codebase (§10 corrections
+below). Superseded wording:
+~~`schoolHasCollegeData(schoolId)` counts this tenant's **own** departments and programs with a
+`schoolId`-scoped query~~.
 The pure rule `canChangeInstitutionType` stays in `src/lib/institution.ts`; the DB half lives in
 `src/lib/auth.ts` beside `requireCollege`. Setting the type at tenant **creation** accepts all three
 values; the
@@ -211,12 +219,20 @@ next step were "semester = extended class".
   *registration* and *approval* halves stay in Phase 4. The delta's requirement to add `mode` to
   `subjects` is **dropped**: courses are a separate, program-owned collection and inherit the college
   context from their program, so no school subject file is touched.
+  **SUPERSEDED 2026-10-08 (ruling):** "deferred to Phase 5" is no longer accurate. Phase 5 is
+  **redefined** — it carries the per-program promotion ladder for **college students**, advancing
+  `students.programId`/`termNumber` and reusing the registration permission module — and the delta's
+  "semester = extended class" premise is **dropped outright, not deferred**: there are **no term
+  rows, no new collection, and `classes` are untouched** (Phase 5 row below).
 - **D-3-2 — a term is an INTEGER in Phase 3.** `programCourses.termNumber` and (later)
   `students.termNumber` are plain integers validated against the program's derived term count. There
-  is **no `programTerms` collection** in Phase 3. Term **rows** arrive in Phase 5 together with the
-  promotion ladder, when a term needs its own dates, registration window and cap. Deriving the term
+  is **no `programTerms` collection** in Phase 3. Deriving the term
   list from `termSystem` + `durationYears` is sufficient — and only sufficient — while a term has no
-  identity of its own.
+  identity of its own. **SUPERSEDED 2026-10-08 (ruling):** term **rows** never arrive — Phase 5 is
+  redefined and introduces **no `programTerms` collection** either. `termNumber` therefore stays an
+  integer derived from `termSystem` + `durationYears`, advanced on `students.termNumber` by the
+  Phase 5 promotion ladder. Superseded sentence: ~~Term **rows** arrive in Phase 5 together with the
+  promotion ladder, when a term needs its own dates, registration window and cap.~~
 - **D-3-3 — Phase 3 touches no school file.** `classes`, `sections`, `subjects`, `students`,
   `attendance`, `students/promote`, `grading`/`grading-store`, `routine`/`timetableSlots` and the
   `exam`/`marks` routes are **not modified** by Phase 3. `students.programId` and
@@ -251,7 +267,7 @@ next step were "semester = extended class".
 | **3d** | The college course/department/program pages, the nav item behind `requires:"COLLEGE"`, the school-nav deep-equal snapshot, a production-less `next build`, and screenshots. |
 | **3e** | Isolation proof: fixture and tenant/branch harness additions, **baseline first**, the same shape as Phase 2h. |
 | **4** | Course registration + approval (the delta's Phase 4 remainder), and `students.programId`/`termNumber` at enrolment. |
-| **5** | Terms as rows: `classes` gain their program/term identity and the per-program promotion ladder (the deferred delta Phase 3). |
+| **5** | **Redefined 2026-10-08 (ruling):** the per-program promotion ladder for **college students** — advancing `students.programId`/`termNumber` — reusing the registration permission module. **No term rows, no `programTerms` collection, and `classes` untouched.** ~~Terms as rows: `classes` gain their program/term identity and the per-program promotion ladder (the deferred delta Phase 3).~~ |
 | **6** | Credit-weighted GPA/CGPA + transcript (the delta's Phase 5). |
 | **7** | College fee basis (the delta's Phase 6). |
 | **8a/8b/8c** | College dashboard / reports / import (the delta's Phase 7a/7b/7c). |
