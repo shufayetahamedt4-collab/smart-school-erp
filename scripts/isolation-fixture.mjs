@@ -264,6 +264,52 @@ async function create() {
   });
   mark("programs", colProgB);
 
+  // ---- College courses (Phase 3e) -------------------------------------------
+  //      Three courses in the COLLEGE tenant: one under each branch-bound
+  //      department (A and B) and one under the BRANCH-LESS department, so a
+  //      BRANCH-scoped session must not reach the third. A fourth course is added
+  //      to the BOTH tenant below to serve as a genuine FOREIGN course id — a row
+  //      that exists, in another tenant, and must behave as NOT FOUND (never as a
+  //      403 that would confirm it).
+  const colCourseA = `${P}col-course-a`;
+  await db.collection("courses").doc(colCourseA).set({
+    id: colCourseA, schoolId: collegeSchoolId, departmentId: colDeptA, branchId: colBranchA,
+    code: "ZZCA-101", title: "ZZ Iso College Course A", creditHours: 3, type: "THEORY",
+    status: "ACTIVE", createdAt: now,
+  });
+  mark("courses", colCourseA);
+  const colCourseB = `${P}col-course-b`;
+  await db.collection("courses").doc(colCourseB).set({
+    id: colCourseB, schoolId: collegeSchoolId, departmentId: colDeptB, branchId: colBranchB,
+    code: "ZZCB-101", title: "ZZ Iso College Course B", creditHours: 4, type: "THEORY",
+    status: "ACTIVE", createdAt: now,
+  });
+  mark("courses", colCourseB);
+  // The branch-less course (the deptNone analogue): no branchId, so only a
+  // SCHOOL-scoped session may reach it.
+  const colCourseNone = `${P}col-course-none`;
+  await db.collection("courses").doc(colCourseNone).set({
+    id: colCourseNone, schoolId: collegeSchoolId, departmentId: colDeptNone, branchId: null,
+    code: "ZZCN-101", title: "ZZ Iso College Course None", creditHours: null, type: "THEORY",
+    status: "ACTIVE", createdAt: now,
+  });
+  mark("courses", colCourseNone);
+
+  // ---- Program→course mappings (Phase 3e): one per branch — on program A and on
+  //      program B — so a branch admin can be proven confined to its own.
+  const colMapA = `${P}col-map-a`;
+  await db.collection("programCourses").doc(colMapA).set({
+    id: colMapA, schoolId: collegeSchoolId, programId: colProgA, courseId: colCourseA,
+    termNumber: 1, requirement: "REQUIRED", createdAt: now,
+  });
+  mark("programCourses", colMapA);
+  const colMapB = `${P}col-map-b`;
+  await db.collection("programCourses").doc(colMapB).set({
+    id: colMapB, schoolId: collegeSchoolId, programId: colProgB, courseId: colCourseB,
+    termNumber: 1, requirement: "REQUIRED", createdAt: now,
+  });
+  mark("programCourses", colMapB);
+
   // ---- BOTH tenant WITH college data (one department) + a SCHOOL_ADMIN -------
   const bothSchoolId = `${P}both`;
   await db.collection("schools").doc(bothSchoolId).set({
@@ -277,6 +323,29 @@ async function create() {
     branchId: null, headStaffId: null, description: null, status: "ACTIVE", createdAt: now,
   });
   mark("departments", bothDeptId);
+  // A course in the BOTH tenant — the FOREIGN course id the 3e probes use.
+  const bothCourse = `${P}both-course`;
+  await db.collection("courses").doc(bothCourse).set({
+    id: bothCourse, schoolId: bothSchoolId, departmentId: bothDeptId, branchId: null,
+    code: "ZZBD-101", title: "ZZ Iso Both Course", creditHours: 3, type: "THEORY",
+    status: "ACTIVE", createdAt: now,
+  });
+  mark("courses", bothCourse);
+  // A program + mapping in the BOTH tenant too, so the 3e probes have a genuine
+  // FOREIGN mapping id (another tenant's row) to prove is NOT FOUND.
+  const bothProg = `${P}both-prog`;
+  await db.collection("programs").doc(bothProg).set({
+    id: bothProg, schoolId: bothSchoolId, departmentId: bothDeptId, name: "ZZ Iso Both Program",
+    code: "ZZBP", degreeLevel: "HSC", durationYears: 2, termSystem: "YEARLY",
+    branchId: null, status: "ACTIVE", createdAt: now,
+  });
+  mark("programs", bothProg);
+  const bothMap = `${P}both-map`;
+  await db.collection("programCourses").doc(bothMap).set({
+    id: bothMap, schoolId: bothSchoolId, programId: bothProg, courseId: bothCourse,
+    termNumber: 1, requirement: "REQUIRED", createdAt: now,
+  });
+  mark("programCourses", bothMap);
   track.creds.bothAdmin = newPw();
   const bothAdminUserId = `${P}user-both-admin`;
   await db.collection("users").doc(bothAdminUserId).set({
@@ -330,6 +399,7 @@ async function create() {
     student: { email: "zz-iso-student@test.local", password: track.creds.student },
     demoStudent: { email: "zz-iso-demo-student@test.local", password: track.creds.demoStudent },
     classId, sectionId, subjectId, studentId, teacherId, examId, feeId, hwId, convId,
+    colCourseA, colCourseB, colCourseNone, colMapA, colMapB, bothCourse, bothProg, bothMap,
   }, null, 2));
 }
 
@@ -362,7 +432,7 @@ async function clean() {
   // cannot be attributed to (or safely deleted by) the fixture.
   const owned = ["users", "students", "classes", "sections", "subjects", "teachers",
     "attendance", "homeworks", "fees", "exams", "routines", "meetingSlots", "conversations", "schools",
-    "branches", "departments", "programs"];
+    "branches", "departments", "programs", "courses", "programCourses"];
   for (const col of owned) {
     const snap = await db.collection(col).where("__name__", ">=", P).where("__name__", "<=", P + "\uf8ff").get();
     for (const d of snap.docs) {

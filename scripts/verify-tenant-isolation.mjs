@@ -54,6 +54,7 @@ for (const s of schools.docs) {
     ["subjects", "name"], ["teachers", "name"], ["homeworks", "title"],
     ["fees", "title"], ["exams", "name"], ["users", "name"],
     ["departments", "name"], ["programs", "name"],
+    ["courses", "title"], ["programCourses"],
   ]) {
     const snap = await db.collection(col).where("schoolId", "==", s.id).get();
     for (const d of snap.docs) {
@@ -192,6 +193,7 @@ for (const acc of SESSIONS) {
     "/api/stats",
     "/api/departments",
     "/api/programs",
+    "/api/courses",
   ];
   let inspected = 0;
   for (const route of routes) {
@@ -255,10 +257,18 @@ check(![...names].some((n) => /^s_[0-9a-f]{40}$/.test(n)), "no foreign school id
 console.log("\n### college routes are refused for a SCHOOL tenant");
 {
   const sCookie = await login("zz-iso-admin@test.local", CRED.admin);
-  for (const route of ["/api/departments", "/api/programs"]) {
+  for (const route of ["/api/departments", "/api/programs", "/api/courses"]) {
     const r = await getJSON(sCookie, route);
     check(r.status === 403, `${route} → 403 for a SCHOOL tenant (got ${r.status})`);
   }
+  // /api/courses, asserted EXPLICITLY and not left to the sweep's "403 = no
+  // access for this role" counter: a SCHOOL tenant gets 403 AND zero data. An
+  // empty 200 would be a leak; a 403 carrying rows would be worse.
+  const c = await getJSON(sCookie, "/api/courses");
+  check(
+    c.status === 403 && c.body?.data === undefined,
+    `/api/courses → 403 with ZERO data for a SCHOOL tenant (status=${c.status}, data=${JSON.stringify(c.body?.data)})`
+  );
 }
 
 /* ---------- a COLLEGE tenant: own rows visible, zero foreign row ---------- */
@@ -323,6 +333,44 @@ const collectStrings = (body) => {
     ownRows.length === 1 && ownRows[0].id === `${P}col-prog-a`,
     `?departmentId=<own dept A> returns exactly its own program (${JSON.stringify(ownRows.map((r) => r.id))})`
   );
+
+  // The courses catalogue (3e): own rows visible, zero foreign row anywhere.
+  const courses = await getJSON(collegeCookie, "/api/courses");
+  const courseTitles = (courses.body.data || []).map((c) => c.title);
+  check(courses.status === 200, `/api/courses → 200 for a COLLEGE tenant (got ${courses.status})`);
+  check(
+    courseTitles.includes("ZZ Iso College Course A") && courseTitles.includes("ZZ Iso College Course B") &&
+      courseTitles.includes("ZZ Iso College Course None"),
+    `all three own courses are visible (${JSON.stringify(courseTitles)})`
+  );
+  const cStr = collectStrings(courses.body);
+  const cLeakNames = [...foreign.names].filter((n) => cStr.has(n));
+  const cLeakIds = [...foreign.ids].filter((id) => cStr.has(id));
+  check(
+    cLeakNames.length === 0 && cLeakIds.length === 0,
+    `/api/courses — no foreign id or name${cLeakNames.length ? ` (NAMES: ${cLeakNames.slice(0, 3).join(", ")})` : ""}${cLeakIds.length ? ` (IDS: ${cLeakIds.slice(0, 3).join(", ")})` : ""}`
+  );
+  // A foreign departmentId can only ever narrow the course list to ZERO rows.
+  if (foreignDept) {
+    const probe = await getJSON(collegeCookie, `/api/courses?departmentId=${encodeURIComponent(foreignDept.id)}`);
+    check(
+      (probe.body?.data || []).length === 0,
+      `?departmentId=<foreign ${foreignDept.id}> returns zero courses — status=${probe.status} rows=${(probe.body?.data || []).length}`
+    );
+  }
+  // The program→course mapping (`programCourses`) under own program A is exactly
+  // its own single mapping; the foreign tenant's mapping id never appears.
+  const mapList = await getJSON(collegeCookie, `/api/programs/${P}col-prog-a/courses`);
+  const mapRows = mapList.body?.data || [];
+  check(
+    mapList.status === 200 && mapRows.length === 1 && mapRows[0].id === `${P}col-map-a`,
+    `program A's term list is exactly its own mapping (${JSON.stringify(mapRows.map((m) => m.id))})`
+  );
+  const mStr = collectStrings(mapList.body);
+  check(
+    !mStr.has(`${P}both-map`) && !mStr.has(`${P}both-course`),
+    "the mapping list carries no foreign (BOTH-tenant) mapping or course id"
+  );
 }
 
 /* ---------- BOTH tenant, mode=SCHOOL: the API still follows institutionType ---------- */
@@ -381,5 +429,5 @@ console.log("\n### BOTH → SCHOOL downgrade (blocked with data, allowed without
   );
 }
 
-console.log(failures === 0 ? "\n✅ ISOLATION CONFIRMED — no cross-school data in any of the 12 swept routes" : `\n❌ ${failures} isolation failure(s)`);
+console.log(failures === 0 ? "\n✅ ISOLATION CONFIRMED — no cross-school data in any of the 13 swept routes" : `\n❌ ${failures} isolation failure(s)`);
 process.exit(failures === 0 ? 0 : 1);

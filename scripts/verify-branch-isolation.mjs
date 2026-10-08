@@ -278,6 +278,74 @@ console.log("\n### college departments/programs — branch admin confinement");
       restored.status === 200 && restored.data?.branchId === `${P}col-br-a`,
       `HTTP ${restored.status}`
     );
+
+    // 5. Courses (Phase 3e) — the same confinement as departments/programs, and
+    //    the branch-less row only a SCHOOL-scoped session may reach.
+    const courseA = `${P}col-course-a`;
+    const courseB = `${P}col-course-b`;
+    const courseNone = `${P}col-course-none`;
+    const mapB = `${P}col-map-b`;
+    const foreignCourse = `${P}both-course`; // BOTH tenant — a real foreign course id
+    const foreignMap = `${P}both-map`; // BOTH tenant — a real foreign mapping id
+
+    const bCourses = (await req(HOSTS.school, "/api/courses", { cookie: collegeBranchAdmin })).data || [];
+    check(
+      "branch admin sees ONLY its own branch's courses",
+      bCourses.length === 1 && bCourses[0].id === courseA,
+      JSON.stringify(bCourses.map((c) => c.id))
+    );
+
+    const patchCourseB = await patch(HOSTS.school, `/api/courses/${courseB}`, { title: "nope" }, collegeBranchAdmin);
+    check("branch admin CANNOT PATCH another branch's course (403)", patchCourseB.status === 403, `HTTP ${patchCourseB.status}`);
+    const delCourseB = await req(HOSTS.school, `/api/courses/${courseB}`, { cookie: collegeBranchAdmin, method: "DELETE" });
+    check("branch admin CANNOT DELETE another branch's course (403)", delCourseB.status === 403, `HTTP ${delCourseB.status}`);
+
+    // The branch-less course: a BRANCH scope must not reach it; a SCHOOL scope may.
+    const patchNoneByBranch = await patch(HOSTS.school, `/api/courses/${courseNone}`, { title: "nope" }, collegeBranchAdmin);
+    check("a BRANCH-scoped admin CANNOT touch the branch-less course (403)", patchNoneByBranch.status === 403, `HTTP ${patchNoneByBranch.status}`);
+    const patchNoneBySchool = await patch(HOSTS.school, `/api/courses/${courseNone}`, { creditHours: 3 }, collegeAdmin);
+    check("a SCHOOL_ADMIN CAN touch the branch-less course (200)", patchNoneBySchool.status === 200, `HTTP ${patchNoneBySchool.status}`);
+    // Restore it exactly as created (creditHours was null) so the run is repeatable.
+    const restoreNone = await patch(HOSTS.school, `/api/courses/${courseNone}`, { creditHours: null }, collegeAdmin);
+    check(
+      "the branch-less course is restored (creditHours null)",
+      restoreNone.status === 200 && restoreNone.data?.creditHours === null,
+      `HTTP ${restoreNone.status} creditHours=${restoreNone.data?.creditHours}`
+    );
+
+    // A mapping follows the PROGRAM's branch: a branch admin cannot map into, or
+    // remove a mapping from, another branch's program.
+    const mapByBranch = await post(HOSTS.school, `/api/programs/${progB}/courses`, { courseId: courseB, termNumber: 2 }, collegeBranchAdmin);
+    check("a BRANCH-scoped admin CANNOT map into another branch's program (403)", mapByBranch.status === 403, `HTTP ${mapByBranch.status}`);
+    const unmapByBranch = await req(HOSTS.school, `/api/programs/${progB}/courses?mappingId=${mapB}`, { cookie: collegeBranchAdmin, method: "DELETE" });
+    check("a BRANCH-scoped admin CANNOT remove another branch's mapping (403)", unmapByBranch.status === 403, `HTTP ${unmapByBranch.status}`);
+
+    // 6. A foreign-tenant id is NOT FOUND — never a 403 oracle that confirms it.
+    const foreignCoursePatch = await patch(HOSTS.school, `/api/courses/${foreignCourse}`, { title: "nope" }, collegeAdmin);
+    check("a foreign tenant's course id is NOT FOUND (404)", foreignCoursePatch.status === 404, `HTTP ${foreignCoursePatch.status}`);
+    const foreignCourseRow = (await db.collection("courses").doc(foreignCourse).get()).data();
+    check(
+      "the foreign course row is unchanged",
+      foreignCourseRow?.schoolId === `${P}both` && foreignCourseRow?.title === "ZZ Iso Both Course",
+      `${foreignCourseRow?.schoolId} / ${foreignCourseRow?.title}`
+    );
+    const foreignMapDelete = await req(HOSTS.school, `/api/programs/${progA}/courses?mappingId=${foreignMap}`, { cookie: collegeAdmin, method: "DELETE" });
+    check("a foreign tenant's mapping id is NOT FOUND (404)", foreignMapDelete.status === 404, `HTTP ${foreignMapDelete.status}`);
+    const foreignMapRow = (await db.collection("programCourses").doc(foreignMap).get()).data();
+    check("the foreign mapping row is unchanged", foreignMapRow?.schoolId === `${P}both`, String(foreignMapRow?.schoolId));
+
+    // 7. A FOREIGN courseId in a mapping POST is the SAME 400 as a NON-EXISTENT
+    //    one (never a 404 that would confirm the row exists in another tenant).
+    const foreignCourseMap = await post(HOSTS.school, `/api/programs/${progA}/courses`, { courseId: foreignCourse, termNumber: 2 }, collegeAdmin);
+    const ghostCourseMap = await post(HOSTS.school, `/api/programs/${progA}/courses`, { courseId: `${P}no-such-course`, termNumber: 2 }, collegeAdmin);
+    check("a foreign courseId in a mapping POST is refused with 400", foreignCourseMap.status === 400, `HTTP ${foreignCourseMap.status}`);
+    check(
+      "…byte-identical to a NON-EXISTENT courseId (no oracle)",
+      foreignCourseMap.status === ghostCourseMap.status && JSON.stringify(foreignCourseMap) === JSON.stringify(ghostCourseMap),
+      `foreign=${JSON.stringify(foreignCourseMap)} ghost=${JSON.stringify(ghostCourseMap)}`
+    );
+    const missingCourseMap = await post(HOSTS.school, `/api/programs/${progA}/courses`, { termNumber: 2 }, collegeAdmin);
+    check("a MISSING courseId is also refused with 400 (same status)", missingCourseMap.status === 400, `HTTP ${missingCourseMap.status}`);
   }
 }
 

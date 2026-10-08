@@ -280,3 +280,40 @@ are corrected here so a later reader does not inherit them:
    as chat prose and never written to disk (see this document's preamble), so the delta's §6 table is
    the **only** in-repo evidence for phases 4–8. Anything in a phase-4+ preflight that depends on
    A–I detail must **re-supply** it rather than recall it.
+
+## 11. Phase 3e decisions (the isolation proof)
+
+Phase 3e delivers **no product surface**. It is the isolation proof the §10 phase table promises:
+fixture and tenant/branch harness **additions**, run **baseline first**, in the same shape as Phase 2h —
+the college branch confinement already asserted for `departments`/`programs`, now extended to the
+catalogue delivered by 3b/3c/3d (`courses` and the `programCourses` mapping). It changes **no**
+application source: only `scripts/isolation-fixture.mjs`, `scripts/verify-branch-isolation.mjs`,
+`scripts/verify-tenant-isolation.mjs` and this document.
+
+- **D-3e-1 — the baseline is part of the phase, not a formality.** The two isolation harnesses are run
+  **unchanged** on a wiped-and-reseeded emulator *before* any edit, and their result is recorded
+  (52 pass / 0 fail for `verify-tenant-isolation`, 29 pass / 0 fail for `verify-branch-isolation`).
+  A post-edit run is only meaningful against that recorded baseline, and every added assertion must
+  show up as an **addition** — no existing 2h or Phase 2 assertion is removed, reworded or weakened.
+- **D-3e-2 — the COLLEGE fixture gains three courses and two mappings.** Three `courses` under the
+  COLLEGE tenant — one per branch-bound department (A, B) and one under the **branch-less**
+  department (the `deptNone` analogue, so a `BRANCH` scope must not reach it) — plus **one mapping per
+  branch** (`programCourses` on program A and on program B). The BOTH tenant gains one `courses` row,
+  one `programs` row and one `programCourses` row, so the probes have a genuine **foreign** course id
+  *and* a genuine **foreign** mapping id to prove as NOT FOUND.
+- **D-3e-3 — the branch proof mirrors 2h exactly.** A `BRANCH_ADMIN` sees only its own branch's
+  courses; it cannot `PATCH`/`DELETE` another branch's course (403), cannot map into another branch's
+  program or remove its mapping (403), and cannot touch the branch-less course (403) — which a
+  `SCHOOL_ADMIN` can (200). Mappings follow the **program's** branch, so the mapping guards and the
+  program guards agree by construction.
+- **D-3e-4 — no 403 oracle.** A foreign-tenant course id or mapping id answers **404** and the foreign
+  row is asserted **unchanged**; a foreign `courseId` in a mapping `POST` answers the **same 400** as a
+  non-existent id. A caller can never learn, from the status, whether a row exists in another tenant.
+- **D-3e-5 — the SCHOOL gate is asserted explicitly.** `verify-tenant-isolation` already sweeps
+  `/api/courses` across the fixture school's admin/teacher/student (where a 403 is counted as "no
+  access for this role", not as a pass) and now also carries its own explicit assertion that a SCHOOL
+  tenant receives **403 with zero data** from `/api/courses` — so a wall of 403s cannot be mistaken
+  for a clean pass, and an empty 200 would fail.
+- **D-3e-6 — cleanup is proven, not assumed.** `isolation-fixture.mjs clean` gains `courses` and
+  `programCourses` in its prefix-sweep `owned` list, and the fixture stays `requireEmulator()`-guarded
+  and `zziso-`-prefixed, so a 3e run cannot touch production and leaves no catalogue row behind.
