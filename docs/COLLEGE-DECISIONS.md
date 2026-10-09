@@ -1144,3 +1144,109 @@ run LAST, with dev stopped first. Every run individually:
 long-run heartbeat, the mid-run takeover plus the stale finalise, the fail-closed read, and the
 first-step work list — create and clean up their own programmes, students and lease rows, and the
 cleanup checks still pass: no `zzls-` row left, no `promotionRuns` row left, and no seam file left.
+
+### 6-pre 5 — the permanent-block wedges are removed
+
+- **D-6pre5-1 — an OUTSTANDING term whose on-roll cohort is EMPTY can be marked finished, and
+  nobody is promoted.** The wedge: a failed run's `finishTerms` is the only thing that can lift the
+  block, and a term with no students has no apply that can strike it off — the single-position route
+  would apply to nobody. The page now offers an explicit **"Mark term N finished"** press, shown only
+  for a term that is in the outstanding list AND whose previewed cohort is empty; it sends the same
+  position the apply would (`POST /api/college-promotion`), which the SERVER recomputes, writes
+  nothing for, audits, and strikes off the work list (`markProgrammeTermFinished`). The predicates are
+  the stage-1 module's (`markFinishedEligible`, `markFinishedTitle`, `markFinishedNote`,
+  `markFinishedButtonLabel`, `markFinishedMessage`), and every sentence says plainly that the press
+  promotes no one. The ORDINARY apply is NOT relaxed: `applyDisabled` still disables it for an empty
+  cohort whatever the work list says — the strike-off is its own button, never a loosening of that
+  rule. This also covers the case where the best-effort strike-off of a term that DID have students
+  was lost. **PROVEN** offline (7 eligibility states + the wording) and over HTTP: an apply on an
+  empty outstanding term is 200 with `promoted`/`graduated` both 0, and the term leaves the list.
+- **D-6pre5-2 — the escape hatch is an AUDITED ABANDON on the existing ladder route.** No new route
+  file: a POST of `{ programId, abandonRun: true, reason }` is handled by the same handler, AFTER the
+  same guards (`getSession` → `requireCollege` → `can(role, "registration", "full")` → `writeGuard`),
+  so a 403 learns nothing about the programme's state — and BEFORE the block read, because an
+  abandoned programme IS a blocked one and this path must not be refused by the very rule it exists
+  to escape. The reason is REQUIRED and at least **10 characters** (`ABANDON_REASON_MIN`; the page
+  uses the same number only to disable the button early — the server enforces). Only a row whose
+  status is `PARTIAL`/`FAILED` can be abandoned; anything else — a clean `OK` run, or a LIVE
+  `IN_PROGRESS` lease that belongs to a run still working — is a **409**, never a race. It writes
+  `status: "ABANDONED"` with `resolvedAt`, `resolvedBy: "ABANDONED"` and the reason, KEEPS
+  `finishTerms` as the record of what was owed, and preserves the previous failure text on
+  `failureReason` (the abandon must not erase the history it replaces). It moves **NO student**, and
+  it writes exactly **ONE** `COLLEGE_PROMOTION` audit row carrying the reason, the outstanding terms
+  and the actor. An `ABANDONED` row is **NOT a block** (`readProgrammeRunBlock` refuses only on
+  `PARTIAL`/`FAILED`), so the ladder is usable again immediately and a later run will advance the
+  terms that never ran — which is exactly what the page's confirmation says, bluntly. **PROVEN**:
+  403 for an ACCOUNTANT, 400 with no reason and with a 9-character one, 409 on an `OK` row and on a
+  live one, 200 on `PARTIAL` with no student moved and a single audit row added, then a ladder run
+  is 200; and a foreign programme id is the run's own 400, never a 404.
+- **D-6pre5-3 — WHO may abandon: exactly the roles that may RUN the ladder.** The hatch takes no new
+  permission decision — it follows the run's own ruling, `can(role, "registration", "full")`, which
+  this project's matrix (`src/lib/permissions.ts`) grants to **SCHOOL_ADMIN, BRANCH_ADMIN and
+  REGISTRAR** (and `SUPER_ADMIN` by the `can()` short-circuit). Every other role — ACCOUNTANT,
+  TEACHER, GUARDIAN, STUDENT, and a `BRANCH_ADMIN` outside the programme's branch (the resolver
+  confines the programme by branch) — is refused, and the refusal happens after the same gate, so it
+  reveals nothing. Stated plainly because "who can give up on a run" is a decision, not an
+  implementation detail: **a REGISTRAR may abandon**, the same way a REGISTRAR may run and finish the
+  ladder.
+- **D-6pre5-4 — the run row is reconciled when the PROGRAMME it describes shrinks or is deleted.**
+  The row is addressed by a hash of `(schoolId, programId)`, so no prefix scan can find it, and a
+  work list naming a term the programme no longer has would block it FOR EVER (the single-position
+  route would refuse that term). Two best-effort helpers in the shared server module —
+  `reconcileProgrammeRunAfterShrink` and `deleteProgrammeRunRow` — are called from
+  `src/app/api/programs/[id]/route.ts` AFTER its own write has succeeded, and only for a shrink
+  (`nextTermCount < currentTermCount`) or after a delete. They never change that route's response,
+  status or audit, and a failure to write the row is swallowed. **PROVEN**: shrinking a 3-term
+  programme to 2 filters term 3 out of `(3,2,1)` → `(2,1)` while the run stays `FAILED`, the block
+  then stands on the remaining two, the two EMPTY terms finish it (D-6pre5-1) and the ladder runs
+  again; deleting a programme removes its row. **NOT PROVEN, and stated rather than implied**: the
+  branch that EMPTIES the list and sets `OK`/`resolvedBy: "RECONCILE"` is defensive — it can only
+  fire when the new term count falls below the LOWEST outstanding term, and every work list contains
+  term 1 while `parseDuration` allows 1..6 years, so it is unreachable over the shipped routes. It
+  exists so a hand-written or future row cannot wedge a programme.
+- **D-6pre5-5 — what did NOT change.** `students/promote`, `classes`, `permissions.ts`, `nav.ts`,
+  `college-routes.ts` (still no new route file), `college-promotion.ts`, `college-promotion/route.ts`
+  (the single-position route), the structured-500 contract, the lease semantics of 6-pre 4, and
+  every other programs route and school code path. The only programs-route edit is the two reconcile
+  calls above, after its own successful write.
+
+**Verification (6-pre 5).** Measured BOTH ways in the same session, the parent being this
+section's own commit 1 (`8b9948c`, restored through `git stash` for the baseline) and the working
+tree for the after-run. The environment is the one 6-pre 4 used: emulator only
+(`FIRESTORE_EMULATOR_HOST=127.0.0.1:8080`, `FIREBASE_PROJECT_ID=demo-ss-test`), the seed and the
+isolation fixture in place, the app RESTARTED after the edit and again between the two halves, the
+`zzcp-/zzls-` leftover scan run before the baseline (**0 stray rows**), and `next build` run LAST
+with dev stopped first (restarted afterwards). Every run individually:
+
+| suite | parent `8b9948c` | after 6-pre 5 | expected |
+|---|---|---|---|
+| `verify-college-enrollment` | 40 | 40 | 40 |
+| `verify-course-registrations` | 50 | 50 | 50 |
+| `verify-registration-status` | 9 | 9 | 9 |
+| `verify-tenant-isolation` | 75 | 75 | 75 |
+| `verify-branch-isolation` | 52 | 52 | 52 |
+| `verify-college-gate` | 3 | 3 | 3 |
+| `verify-college-permissions` | 7 | 7 | 7 |
+| `verify-college-routes` | 3 | 3 | 3 |
+| `verify-nav-scope` | 7 | 7 | 7 |
+| `verify-college-terms` | 8 | 8 | 8 |
+| `verify-college-promotion-logic` | 12 | 12 | 12 |
+| `verify-college-promotion-api` | 100 | 100 | 100 |
+| `verify-college-promotion-page` | 14 | **16** | grows (the new offline checks) |
+| `verify-college-promotion-lease` | 79 | **106** | grows (the new HTTP checks) |
+| `verify-promotion-rollover` ×10 | 50/0 ×10 | 50/0 ×10 | 50 pass, 0 fail each |
+| `npm run typecheck` | 0 errors | 0 errors | 0 |
+| `npm run build` | 164 pages | 164 pages | 164 |
+
+`verify-college-promotion-lease.mjs` grows **79 → 106 checks** (27 new) and
+`verify-college-promotion-page.mjs` **14 → 16** (2 new). The abandon checks cover all four
+dimensions: authorization (403), the reason (400 twice), the row's status (409 on `OK` and on a live
+lease), success (200, no student moved, one audit row, then a ladder run), TENANT (a foreign id is the
+run's own 400) and BRANCH — a branch-A admin against a branch-B programme gets **403, not the 409 its
+finished run would give**, which is what proves the branch check runs first. The new lease sections — the empty
+outstanding term, the audited abandon, and the shrink/delete reconciliation — create and clean up
+their own programmes, students and run rows, and the cleanup checks still pass: no `zzls-` row left,
+no `zzcp-` row left (the scan now covers both prefixes), no `promotionRuns` row for any programme it
+leased, and no seam file left. As in 6-pre 4, the page's own limits stand: a real browser test of the
+two new controls is still **NOT DONE** — the offline checks pin their decisions (eligibility, the
+reason minimum, the wording), not their rendering.

@@ -18,8 +18,11 @@ import {
   Modal,
   PageHeader,
   Select,
+  Textarea,
 } from "@/components/ui";
 import {
+  ABANDON_REASON_MIN,
+  ABANDON_WARNING,
   LADDER_FAILURE_REFRESH,
   LADDER_FAILURE_REFRESH_IS_SILENT,
   LADDER_RUN_WARNING,
@@ -28,17 +31,26 @@ import {
   UNNAMED_PROGRAM,
   applyBlocked,
   applyButtonLabel,
+  abandonDisabled,
+  abandonMessage,
+  abandonSummary,
   applyDisabled,
   applyResultMessage,
   classIdBannerText,
   confirmSummary,
   emptyCohortTitle,
   ladderBlockNote,
+  ladderBlockTerms,
   ladderBlocked,
   ladderGraduateText,
   ladderRunButtonLabel,
   ladderRunDisabled,
   ladderRunMessage,
+  markFinishedButtonLabel,
+  markFinishedEligible,
+  markFinishedMessage,
+  markFinishedNote,
+  markFinishedTitle,
   messageOf,
   pendingRequests,
   previewLadderDisabled,
@@ -95,6 +107,16 @@ import {
  * answer 409, because re-running the ladder would advance the steps that already
  * landed a second time. The way out (finish the outstanding terms with the
  * single-position apply, descending) is named in that same sentence.
+ *
+ * Phase 6-pre 5 adds the two ways OUT of that state, and both are the module's
+ * decisions, not this file's:
+ *   - an OUTSTANDING term whose cohort is EMPTY can be marked finished with an explicit
+ *     `Mark term N finished` press. It sends the same position the apply would, so the
+ *     server strikes the term off its work list and moves nobody; the screen says
+ *     plainly that the press promotes no one.
+ *   - the whole run can be ABANDONED — only while a block stands, behind a
+ *     confirmation that states the blunt truth (the press promotes no one, leaves the
+ *     terms that already ran alone, and a later run will move those steps again).
  */
 
 /** The programme fields the picker needs (from `GET /api/programs`). */
@@ -229,6 +251,8 @@ export default function CollegePromotionPage() {
   const [ladderOpen, setLadderOpen] = useState(false);
   const [ladderPlan, setLadderPlan] = useState<LadderPlan | null>(null);
   const [ladderLoading, setLadderLoading] = useState(false);
+  const [abandonOpen, setAbandonOpen] = useState(false);
+  const [abandonReason, setAbandonReason] = useState("");
 
   // Programmes, once. NO read before the gate resolves.
   useEffect(() => {
@@ -351,6 +375,16 @@ export default function CollegePromotionPage() {
     await loadLadderPlan(programId);
   };
 
+  // Phase 6-pre 5 — an EMPTY position may be an OUTSTANDING term of an unfinished run,
+  // and the operator must be able to mark it finished without opening the ladder modal
+  // first. So the plan (which carries the work list) is read once, SILENTLY, for an empty
+  // position. It is read-only, and the modal's own load is unaffected.
+  useEffect(() => {
+    if (!ready || !programId) return;
+    if (!preview || preview.count !== 0) return;
+    void loadLadderPlan(programId, { silent: true });
+  }, [ready, programId, preview, loadLadderPlan]);
+
   /**
    * Run the whole ladder (`POST /api/college-promotion/ladder`). As with the
    * single-position apply, only the programme is sent: the SERVER decides which
@@ -403,6 +437,96 @@ export default function CollegePromotionPage() {
   // Phase 6-pre 3 — why the ladder is refused, if it is. The module owns the sentence
   // (the server's own when it is there), so the modal and the 409 cannot disagree.
   const ladderBlockNoteText = ladderBlockNote(ladderPlan);
+  // Phase 6-pre 5 — the terms the unfinished run still owes, read ONLY while a block
+  // actually stands (an ABANDONED row keeps its `finishTerms` as the record, and those
+  // must not offer a strike-off: there is nothing left to finish).
+  const outstandingTerms = ladderBlocked(ladderPlan) ? ladderBlockTerms(ladderPlan) : [];
+  const abandonReady = abandonDisabled({
+    blocked: ladderBlocked(ladderPlan),
+    busy,
+    reasonLength: abandonReason.trim().length,
+  });
+
+  /**
+   * Phase 6-pre 5 — mark the previewed OUTSTANDING term finished when its cohort is
+   * empty, so a work list nobody can apply stops wedging the programme.
+   *
+   * It is the ordinary single-position POST, for the position already on screen: the
+   * server recomputes the (empty) cohort, writes nothing, audits, and strikes the term
+   * off the run's work list. Nothing is promoted, and the screen says so.
+   */
+  const markFinished = async () => {
+    if (!preview) return;
+    if (
+      !markFinishedEligible({
+        hasPreview: true,
+        count: preview.count,
+        busy,
+        previewLoading,
+        fromTermNumber: preview.fromTermNumber,
+        outstandingTerms,
+      })
+    ) {
+      return;
+    }
+    const term = preview.fromTermNumber;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await api<ApplyResult>("/api/college-promotion", {
+        method: "POST",
+        body: JSON.stringify({ programId, fromTermNumber: term }),
+      });
+      setResult(res);
+      setMessage(markFinishedMessage(term, selected?.name ?? UNNAMED_PROGRAM));
+      // Both the position (still empty) and the work list may have changed.
+      await Promise.all([
+        loadPreview(programId, term, { silent: true }),
+        loadLadderPlan(programId, { silent: true }),
+      ]);
+    } catch (e: any) {
+      setError(messageOf(e, PAGE_ERRORS.markFinished));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Phase 6-pre 5 — abandon the unfinished run. The server owns every rule (only a
+   * PARTIAL/FAILED row may be abandoned, the reason is required and long enough), and
+   * this only sends what the operator typed.
+   */
+  const abandon = async () => {
+    if (!ladderPlan) return;
+    if (abandonReady) return;
+    const name = ladderPlan.program.name;
+    setBusy(true);
+    setError("");
+    try {
+      await api<{ programId: string; abandoned: boolean; status: string; finishTerms: number[] }>(
+        "/api/college-promotion/ladder",
+        {
+          method: "POST",
+          body: JSON.stringify({ programId, abandonRun: true, reason: abandonReason.trim() }),
+        }
+      );
+      setAbandonOpen(false);
+      setAbandonReason("");
+      setLadderOpen(false);
+      setLadderPlan(null);
+      setResult(null);
+      setMessage(abandonMessage(name));
+      // The block is gone, so both the plan and the position are re-fetched.
+      await Promise.all([
+        loadLadderPlan(programId, { silent: true }),
+        loadPreview(programId, fromTermNumber, { silent: true }),
+      ]);
+    } catch (e: any) {
+      setError(messageOf(e, PAGE_ERRORS.abandon));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   /* -------------------------------------------------------------- gating UI */
 
@@ -565,11 +689,35 @@ export default function CollegePromotionPage() {
             description="Choose a programme and a term to see who sits there."
           />
         ) : preview.count === 0 ? (
-          <EmptyState
-            icon={GraduationCap}
-            title={emptyCohortTitle(preview)}
-            description="The cohort for this position is empty — after a promotion has run, it stays empty."
-          />
+          <div className="px-6 py-8 text-center">
+            <div className="flex justify-center">
+              <GraduationCap size={26} className="text-slate-300" />
+            </div>
+            <p className="mt-2 text-sm font-bold text-slate-700">{emptyCohortTitle(preview)}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              The cohort for this position is empty — after a promotion has run, it stays empty.
+            </p>
+            {/* Phase 6-pre 5 — the term is still OUTSTANDING, so somebody must be able
+                to say it is done. Nobody is promoted: the press only strikes it off. */}
+            {markFinishedEligible({
+              hasPreview: true,
+              count: preview.count,
+              busy,
+              previewLoading,
+              fromTermNumber: preview.fromTermNumber,
+              outstandingTerms,
+            }) && (
+              <div className="mx-auto mt-4 max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+                <p className="text-xs font-bold text-amber-800">
+                  {markFinishedTitle(preview.fromTermNumber, preview.termCount)}
+                </p>
+                <p className="mt-1 text-[11px] text-amber-700">{markFinishedNote()}</p>
+                <button className="btn btn-secondary mt-3" onClick={markFinished} disabled={busy}>
+                  {busy ? "Working…" : markFinishedButtonLabel(preview.fromTermNumber)}
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
           <>
             {showGraduatingBanner(preview) && (
@@ -792,7 +940,17 @@ export default function CollegePromotionPage() {
                 server will refuse a re-run. Say so BEFORE the operator presses Run. */}
             {ladderBlockNoteText && <ErrorNote message={ladderBlockNoteText} />}
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
+              {/* Phase 6-pre 5 — the way out, offered ONLY while the block stands. */}
+              {ladderBlocked(ladderPlan) && (
+                <button
+                  className="btn btn-secondary text-rose-600"
+                  onClick={() => setAbandonOpen(true)}
+                  disabled={busy}
+                >
+                  Abandon this run…
+                </button>
+              )}
               <button className="btn btn-secondary" onClick={() => setLadderOpen(false)} disabled={busy}>
                 Cancel
               </button>
@@ -802,6 +960,36 @@ export default function CollegePromotionPage() {
                 disabled={ladderRunDisabled({ count: ladderPlan.count, busy, blocked: ladderBlocked(ladderPlan) })}
               >
                 {ladderRunButtonLabel(ladderPlan.count, busy)}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Phase 6-pre 5 — the abandon confirmation. Blunt on purpose: it states what the
+          hatch does NOT do, and prefers finishing the outstanding terms. */}
+      <Modal open={abandonOpen} onClose={() => setAbandonOpen(false)} title="Abandon the unfinished run">
+        {ladderPlan && (
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-slate-700">
+              {abandonSummary(ladderPlan.program.name, outstandingTerms)}
+            </p>
+            <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+              {ABANDON_WARNING}
+            </p>
+            <Field label={`Reason (at least ${ABANDON_REASON_MIN} characters)`}>
+              <Textarea
+                value={abandonReason}
+                onChange={(e) => setAbandonReason(e.target.value)}
+                placeholder="Why this run cannot be finished…"
+              />
+            </Field>
+            <div className="flex justify-end gap-2">
+              <button className="btn btn-secondary" onClick={() => setAbandonOpen(false)} disabled={busy}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={abandon} disabled={abandonReady}>
+                {busy ? "Abandoning…" : "Abandon this run"}
               </button>
             </div>
           </div>

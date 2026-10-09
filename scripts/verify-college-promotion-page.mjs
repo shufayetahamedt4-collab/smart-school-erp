@@ -89,6 +89,16 @@ const {
   ladderGraduateText,
   LADDER_FAILURE_REFRESH,
   LADDER_FAILURE_REFRESH_IS_SILENT,
+  markFinishedEligible,
+  markFinishedButtonLabel,
+  markFinishedTitle,
+  markFinishedNote,
+  markFinishedMessage,
+  abandonDisabled,
+  abandonSummary,
+  abandonMessage,
+  ABANDON_WARNING,
+  ABANDON_REASON_MIN,
 } = await import(MODULE_URL.href);
 
 /**
@@ -193,6 +203,18 @@ console.log("\n2. the page CONSUMES the module — and the moved literals are go
     "LADDER_RUN_WARNING",
     "LADDER_FAILURE_REFRESH",
     "PENDING_TOOLTIP",
+    // Phase 6-pre 5 — the empty-outstanding-term press and the abandon hatch.
+    "markFinishedEligible",
+    "markFinishedButtonLabel",
+    "markFinishedTitle",
+    "markFinishedNote",
+    "markFinishedMessage",
+    "abandonDisabled",
+    "abandonSummary",
+    "abandonMessage",
+    "ABANDON_WARNING",
+    "ABANDON_REASON_MIN",
+    "ladderBlockTerms",
   ];
   const missing = mustCall.filter((n) => !pageSource.includes(n));
   // The literals the module now owns. If any of these is back in the page, the
@@ -210,6 +232,12 @@ console.log("\n2. the page CONSUMES the module — and the moved literals are go
     // sentence itself, which is why the exact opening clause is pinned.)
     "Finish it with the single-position apply",
     "The last ladder run for this programme did not finish",
+    // Phase 6-pre 5 — the abandon warning and the empty-term sentences are the
+    // module's, so the page must not carry copies of them.
+    "does NOT undo the terms that already ran",
+    "nobody is promoted",
+    "nobody was promoted",
+    "strikes it off that list and advances nobody",
   ];
   const leaked = forbidden.filter((f) => pageSource.includes(f));
   if (grouped.some(([token]) => !pageSource.includes(token))) {
@@ -280,6 +308,10 @@ console.log("\n5. PAGE_ERRORS and messageOf — the failure phrasing, exactly");
     ladderPlan: "Could not build the ladder plan",
     apply: "The promotion could not be applied",
     ladderRun: "The ladder could not be run",
+    // Phase 6-pre 5 — neither of the two new failures is a promotion, so neither may
+    // borrow the apply's wording: an empty-term strike-off and an abandon each say so.
+    markFinished: "The term could not be marked finished",
+    abandon: "The run could not be abandoned",
   };
   const keys = Object.keys(PAGE_ERRORS);
   let problem = null;
@@ -559,6 +591,104 @@ console.log("\n14. the BLOCKED ladder — the refusal the page states before it 
   }
   if (problem) bad("blocked", problem);
   else ok(`${cases.length} plans: the server's sentence wins, the module's fallback names the terms descending, and only blocked === true blocks`);
+}
+
+/* ------------------------------------------------------------------------ 15 */
+
+console.log("\n15. the OUTSTANDING term with an EMPTY cohort — mark it finished, promote nobody (6-pre 5)");
+{
+  const base = { hasPreview: true, count: 0, busy: false, previewLoading: false, fromTermNumber: 2, outstandingTerms: [2, 1] };
+  const cases = [
+    // Outstanding + empty + idle: the ONLY state that offers the press.
+    [base, true],
+    // A term that is NOT outstanding keeps the ordinary rule — no press at all.
+    [{ ...base, outstandingTerms: [3, 1] }, false],
+    [{ ...base, outstandingTerms: [] }, false],
+    // Somebody is there: the ordinary apply owns this case, never the strike-off.
+    [{ ...base, count: 2 }, false],
+    // Nothing loaded, a run in flight, a loading preview: never pressable.
+    [{ ...base, hasPreview: false }, false],
+    [{ ...base, busy: true }, false],
+    [{ ...base, previewLoading: true }, false],
+  ];
+  let problem = null;
+  for (const [input, want] of cases) {
+    const got = markFinishedEligible(input);
+    if (got !== want) {
+      problem = `markFinishedEligible(${JSON.stringify(input)}) = ${got}, expected ${want}`;
+      break;
+    }
+  }
+  // The ordinary apply must NOT be relaxed for this case: an empty cohort still
+  // disables it, whether or not the term is outstanding.
+  if (!problem) {
+    const stillDisabled = applyDisabled({ hasPreview: true, count: 0, busy: false, previewLoading: false });
+    if (stillDisabled !== true) problem = "applyDisabled stopped disabling an empty cohort";
+  }
+  if (!problem) {
+    const title = markFinishedTitle(2, 3);
+    const note = markFinishedNote();
+    const message = markFinishedMessage(2, "BSc");
+    if (!/nobody is promoted/i.test(title)) problem = `the title does not say nobody is promoted: ${JSON.stringify(title)}`;
+    else if (!/advances nobody/i.test(note)) problem = `the note does not say it advances nobody: ${JSON.stringify(note)}`;
+    else if (!/nobody was promoted/i.test(message)) problem = `the message does not say nobody was promoted: ${JSON.stringify(message)}`;
+    else if (markFinishedButtonLabel(2) !== "Mark term 2 finished") problem = `the label lost its term: ${JSON.stringify(markFinishedButtonLabel(2))}`;
+  }
+  if (problem) bad("mark-finished", problem);
+  else ok(`${cases.length} states: only an OUTSTANDING term with an empty cohort is pressable, the ordinary apply stays disabled, and every sentence says nobody is promoted`);
+}
+
+/* ------------------------------------------------------------------------ 16 */
+
+console.log("\n16. the ABANDON hatch — only while blocked, only with a real reason (6-pre 5)");
+{
+  let problem = null;
+  const cases = [
+    [{ blocked: true, busy: false, reasonLength: 10 }, false],
+    [{ blocked: true, busy: false, reasonLength: 40 }, false],
+    // Below the server's minimum, or no reason at all: disabled HERE so the operator
+    // is not sent into a 400 (the server remains the enforcement).
+    [{ blocked: true, busy: false, reasonLength: 9 }, true],
+    [{ blocked: true, busy: false, reasonLength: 0 }, true],
+    // Not blocked (a clean or ABANDONED row): the hatch is never offered.
+    [{ blocked: false, busy: false, reasonLength: 40 }, true],
+    [{ blocked: true, busy: true, reasonLength: 40 }, true],
+  ];
+  for (const [input, want] of cases) {
+    const got = abandonDisabled(input);
+    if (got !== want) {
+      problem = `abandonDisabled(${JSON.stringify(input)}) = ${got}, expected ${want}`;
+      break;
+    }
+  }
+  if (!problem && ABANDON_REASON_MIN !== 10) problem = `ABANDON_REASON_MIN = ${ABANDON_REASON_MIN}, expected 10`;
+  if (!problem) {
+    // The BLUNT wording: the hatch advances nobody, does not undo what ran, and a later
+    // run WILL advance those steps again — every clause is a fact of the server's rule.
+    if (!/advances nobody/i.test(ABANDON_WARNING)) problem = "the warning does not say it advances nobody";
+    else if (!/does NOT undo the terms that already ran/i.test(ABANDON_WARNING))
+      problem = "the warning does not say it leaves the applied terms alone";
+    else if (!/will advance those steps again/i.test(ABANDON_WARNING))
+      problem = "the warning does not say a later run re-advances those steps";
+    else if (!/Prefer finishing the outstanding terms/i.test(ABANDON_WARNING))
+      problem = "the warning no longer prefers finishing the outstanding terms";
+  }
+  if (!problem) {
+    const summary = abandonSummary("BSc", [2, 1]);
+    if (!summary.includes("BSc") || !summary.includes("term 2, then term 1"))
+      problem = `abandonSummary lost the programme or the terms: ${JSON.stringify(summary)}`;
+    else if (!/Nobody was moved/i.test(abandonMessage("BSc")))
+      problem = `abandonMessage does not say nobody was moved: ${JSON.stringify(abandonMessage("BSc"))}`;
+  }
+  if (!problem) {
+    // The page's DISABLE rule and the SERVER's ENFORCEMENT are two copies of one
+    // number. Pin the server's literal so they cannot drift apart silently.
+    const serverSource = readFileSync(new URL("../src/lib/college-promotion-server.ts", import.meta.url), "utf8");
+    if (!/export const ABANDON_REASON_MIN = 10;/.test(serverSource))
+      problem = "the server no longer declares ABANDON_REASON_MIN = 10 — the page's rule and the server's are out of step";
+  }
+  if (problem) bad("abandon", problem);
+  else ok(`${cases.length} states: the hatch is offered only while a block stands and never without a long-enough reason, and its wording is blunt and true`);
 }
 
 /* ---------------------------------------------------------------------- end */

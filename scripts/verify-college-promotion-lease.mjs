@@ -49,6 +49,16 @@
  *   • a failure on the FIRST step records EVERY term as outstanding (and names the
  *     term it really stopped at), so the work list can never silently drop the top
  *     term (Phase 6-pre 4);
+ *   • an OUTSTANDING term whose cohort is EMPTY can still be finished: the
+ *     single-position apply strikes it off and moves nobody, so the wedge is closed
+ *     (Phase 6-pre 5);
+ *   • the audited ABANDON hatch: 403 for an unauthorized caller, 400 without a long
+ *     enough reason, 409 on an OK or LIVE run, 200 on PARTIAL — moving nobody, writing
+ *     exactly one audit row, and leaving a row that does NOT block the ladder
+ *     (Phase 6-pre 5);
+ *   • a programme SHRINK reconciles the work list to the new term count (and the
+ *     remaining empty terms then finish it), and a programme DELETE removes the run row
+ *     (Phase 6-pre 5);
  *   • cleanup leaves no `zzls-` row and no `promotionRuns` row for its programmes.
  *
  * Phase 6-pre 4 uses the SAME temp-file seam as the §20 fault injection, extended with
@@ -124,6 +134,8 @@ const clearFault = () => rmSync(FAULT_FILE, { force: true });
 const COLLEGE = `${P}college`;
 const DEPT_A = `${P}col-dept-a`;
 const BRANCH_A = `${P}col-br-a`;
+/** The OTHER branch — the one the fixture's BRANCH_ADMIN is NOT scoped to (6-pre 5). */
+const BRANCH_B = `${P}col-br-b`;
 
 let failures = 0;
 let checks = 0;
@@ -160,16 +172,18 @@ const post = (path, body, cookie) => req(path, { cookie, method: "POST", body: J
 const ladderPost = (programId, cookie) => post("/api/college-promotion/ladder", { programId }, cookie);
 
 const collegeAdmin = await login("zz-iso-college-admin@test.local", CRED.collegeAdmin);
+/** The fixture's BRANCH_ADMIN, scoped to BRANCH_A — used to prove BRANCH confinement. */
+const collegeBranchAdmin = await login("zz-iso-college-br-admin@test.local", CRED.collegeBranchAdmin);
 
 const stamp = Date.now();
 
 /* ------------------------------------------------- tracked rows + helpers */
 const created = { programs: [], students: [], users: [], programIdsForAudit: [] };
 
-async function makeProgram(tag, durationYears) {
+async function makeProgram(tag, durationYears, branchId = BRANCH_A) {
   const r = await post("/api/programs", {
     name: `${M}Program ${tag} ${stamp}`, code: `${M}P-${tag}-${stamp}`,
-    departmentId: DEPT_A, degreeLevel: "HSC", durationYears, termSystem: "YEARLY", branchId: BRANCH_A,
+    departmentId: DEPT_A, degreeLevel: "HSC", durationYears, termSystem: "YEARLY", branchId,
   }, collegeAdmin);
   if (r.data?.id) {
     created.programs.push(r.data.id);
@@ -214,6 +228,23 @@ async function tenantDocCounts() {
   return counts;
 }
 const sameCounts = (a, b) => Object.keys(a).every((k) => a[k] === b[k]);
+
+/** FINISH one position with the single-position route (idempotent, D2/D3). */
+const applyTerm = (programId, termNumber, cookie = collegeAdmin) =>
+  post("/api/college-promotion", { programId, fromTermNumber: termNumber }, cookie);
+
+/** The ladder's own audit rows for a programme (for the ABANDON proof). */
+async function auditsFor(programId) {
+  const snap = await db.collection("auditLogs").where("entityId", "==", programId).get();
+  return snap.docs.map((d) => d.data()).filter((r) => r.action === "COLLEGE_PROMOTION");
+}
+
+/**
+ * ABANDON a programme's unfinished run (Phase 6-pre 5) — the same route as the run,
+ * with `abandonRun: true`. Kept as a helper so every case reads identically.
+ */
+const abandonRun = (programId, body, cookie = collegeAdmin) =>
+  post("/api/college-promotion/ladder", { programId, abandonRun: true, ...body }, cookie);
 
 /** The programme's ONE lease row, or null when it has never run. */
 async function runRow(programId) {
@@ -804,6 +835,210 @@ console.log("\n### a failure on the FIRST step still records EVERY term as outst
   );
 }
 
+/* ----------------------------------------------------------------- section 12 */
+console.log("\n### an OUTSTANDING term with an EMPTY cohort can be finished by the single-position apply (6-pre 5)");
+{
+  const PROG_EMPTY = await makeProgram("empty", 3);
+  check("a programme was created for the empty-term proof", !!PROG_EMPTY, PROG_EMPTY || "none");
+
+  // No students at all: the descending walk fails at its FIRST step, so the whole
+  // ladder is owed (3,2,1) — including terms whose cohort is empty. That is the wedge:
+  // nobody can be moved, and until now nothing could strike those terms off.
+  injectFault(PROG_EMPTY, 3);
+  const failed = await ladderPost(PROG_EMPTY, collegeAdmin);
+  clearFault();
+  const row0 = await runRow(PROG_EMPTY);
+  check(
+    "an empty programme's failed run owes the WHOLE ladder (3,2,1) and the ladder is refused (409)",
+    failed.status === 500 &&
+      (row0?.finishTerms || []).join(",") === "3,2,1" &&
+      (await ladderPost(PROG_EMPTY, collegeAdmin)).status === 409,
+    `HTTP ${failed.status} finish=${JSON.stringify(row0?.finishTerms || null)}`
+  );
+
+  const t3 = await applyTerm(PROG_EMPTY, 3);
+  const row1 = await runRow(PROG_EMPTY);
+  check(
+    "applying an EMPTY outstanding term is 200, promotes NOBODY, and strikes that term off (3,2,1 → 2,1)",
+    t3.status === 200 &&
+      t3.data?.promoted === 0 &&
+      t3.data?.graduated === 0 &&
+      (row1?.finishTerms || []).join(",") === "2,1",
+    `HTTP ${t3.status} promoted=${t3.data?.promoted} graduated=${t3.data?.graduated} finish=${JSON.stringify(row1?.finishTerms || null)}`
+  );
+
+  await applyTerm(PROG_EMPTY, 2);
+  await applyTerm(PROG_EMPTY, 1);
+  const row2 = await runRow(PROG_EMPTY);
+  check(
+    "…and finishing the rest empties the work list and lifts the block (OK), so the ladder is usable again",
+    (row2?.finishTerms || []).length === 0 && row2?.status === "OK" && (await ladderPost(PROG_EMPTY, collegeAdmin)).status === 200,
+    `status=${row2?.status} finish=${JSON.stringify(row2?.finishTerms || null)}`
+  );
+}
+
+/* ----------------------------------------------------------------- section 13 */
+console.log("\n### the audited ABANDON hatch — same guards, one audit row, no student moved (6-pre 5)");
+{
+  const PROG_ABANDON = await makeProgram("abandon", 3);
+  check("a programme was created for the abandon proof", !!PROG_ABANDON, PROG_ABANDON || "none");
+  const A1 = await makeStudent("abandon-1", { programId: PROG_ABANDON, termNumber: 1 });
+  const A2 = await makeStudent("abandon-2", { programId: PROG_ABANDON, termNumber: 2 });
+  const A3 = await makeStudent("abandon-3", { programId: PROG_ABANDON, termNumber: 3 });
+
+  injectFault(PROG_ABANDON, 2); // term 3 graduates, term 2 fails, term 1 is never attempted
+  const partial = await ladderPost(PROG_ABANDON, collegeAdmin);
+  clearFault();
+  check(
+    "a PARTIAL run to abandon was produced (work list 2,1)",
+    partial.status === 500 && partial.data?.status === "PARTIAL" && (partial.data?.finishTerms || []).join(",") === "2,1",
+    `HTTP ${partial.status} status=${partial.data?.status} finish=${JSON.stringify(partial.data?.finishTerms || null)}`
+  );
+
+  const REASON = "QA: this work list can never be finished by the routes";
+  check(
+    "an ACCOUNTANT is refused 403 — the same guard order as the run, so a 403 learns nothing",
+    (await abandonRun(PROG_ABANDON, { reason: REASON }, acctCookie)).status === 403
+  );
+  const noReason = await abandonRun(PROG_ABANDON, {});
+  check("a MISSING reason is 400", noReason.status === 400, `HTTP ${noReason.status} ${noReason.error || ""}`);
+  const shortReason = await abandonRun(PROG_ABANDON, { reason: "too short" });
+  check(
+    "a TOO-SHORT reason is 400 (the reason is required to be a real record)",
+    shortReason.status === 400,
+    `HTTP ${shortReason.status} ${shortReason.error || ""}`
+  );
+  const okRow = await abandonRun(PROG_OK, { reason: REASON });
+  check("a COMPLETED (OK) run cannot be abandoned → 409", okRow.status === 409, `HTTP ${okRow.status} ${okRow.error || ""}`);
+
+  // A LIVE lease belongs to a run that is still working: refused, never raced.
+  const heldRow = await runRow(PROG_HELD);
+  await RUNS.doc(heldRow.id).update({ status: "IN_PROGRESS", expiresAtMs: Date.now() + 60_000 });
+  const liveRow = await abandonRun(PROG_HELD, { reason: REASON });
+  check("a LIVE (IN_PROGRESS) run cannot be abandoned → 409", liveRow.status === 409, `HTTP ${liveRow.status} ${liveRow.error || ""}`);
+
+  const beforeStudents = await snapshot([A1, A2, A3]);
+  const beforeAudits = (await auditsFor(PROG_ABANDON)).length;
+  const beforeCounts = await tenantDocCounts();
+  const done = await abandonRun(PROG_ABANDON, { reason: REASON });
+  const row = await runRow(PROG_ABANDON);
+  const audits = await auditsFor(PROG_ABANDON);
+  check(
+    "abandoning the PARTIAL run → 200, reporting ABANDONED and the work list it kept",
+    done.status === 200 && done.data?.abandoned === true && done.data?.status === "ABANDONED" && (done.data?.finishTerms || []).join(",") === "2,1",
+    `HTTP ${done.status} ${JSON.stringify(done.data || null)}`
+  );
+  check(
+    "…and the row records who/when/why and KEEPS the work list as the record",
+    row?.status === "ABANDONED" &&
+      !!row?.resolvedAt &&
+      row?.resolvedBy === "ABANDONED" &&
+      row?.reason === REASON &&
+      (row?.finishTerms || []).join(",") === "2,1" &&
+      !!row?.failureReason,
+    `status=${row?.status} by=${row?.resolvedBy} reason=${JSON.stringify(row?.reason || null)} finish=${JSON.stringify(row?.finishTerms || null)} failureReason=${!!row?.failureReason}`
+  );
+  const afterCounts = await tenantDocCounts();
+  check(
+    "…and NO student moved (every term/status is byte-identical), and the run row is the ONLY document written besides its ONE audit",
+    sameSnapshot(beforeStudents, await snapshot([A1, A2, A3]), [A1, A2, A3]) &&
+      afterCounts.students === beforeCounts.students &&
+      afterCounts.programs === beforeCounts.programs &&
+      afterCounts.promotionRuns === beforeCounts.promotionRuns &&
+      afterCounts["auditLogs(not LOGIN)"] === beforeCounts["auditLogs(not LOGIN)"] + 1,
+    JSON.stringify(afterCounts)
+  );
+  // `audit()` stores the caller's object under `details` (src/lib/auth.ts).
+  const abandoned = audits.filter((a) => a.details?.reason === REASON);
+  check(
+    "…and exactly ONE audit row was added, carrying the reason and the outstanding terms",
+    audits.length === beforeAudits + 1 &&
+      abandoned.length === 1 &&
+      (abandoned[0]?.details?.outstandingTerms || []).join(",") === "2,1" &&
+      abandoned[0]?.details?.action === "ABANDONED",
+    `${beforeAudits} → ${audits.length}, reason matches=${abandoned.length}, terms=${JSON.stringify(abandoned[0]?.details?.outstandingTerms || null)}`
+  );
+  const plan = await req(`/api/college-promotion/ladder?programId=${encodeURIComponent(PROG_ABANDON)}`, { cookie: collegeAdmin });
+  check(
+    "…and an ABANDONED row is NOT a block: the plan says not blocked and the ladder runs again (200)",
+    plan.data?.runBlock?.blocked === false && (await ladderPost(PROG_ABANDON, collegeAdmin)).status === 200,
+    `blocked=${plan.data?.runBlock?.blocked} HTTP ${(await ladderPost(PROG_ABANDON, collegeAdmin)).status}`
+  );
+  const foreign = await abandonRun("zzls-no-such-programme", { reason: REASON });
+  check(
+    "…and the hatch is TENANT-scoped: an unknown/foreign programme id is the run's own 400, never a 404",
+    foreign.status === 400,
+    `HTTP ${foreign.status} ${foreign.error || ""}`
+  );
+
+  // BRANCH scoping, and the sharpest form of it: a branch-A admin against a branch-B
+  // programme whose run is COMPLETED. A missing branch check would answer 409 ("only an
+  // unfinished run"), so a 403 proves the BRANCH check ran first, like the run's own.
+  const PROG_B_BRANCH = await makeProgram("branchb", 2, BRANCH_B);
+  const B1 = await makeStudent("branchb-1", { programId: PROG_B_BRANCH, termNumber: 1, branchId: BRANCH_B });
+  const ranBranchB = await ladderPost(PROG_B_BRANCH, collegeAdmin);
+  const branchRefusal = await abandonRun(PROG_B_BRANCH, { reason: REASON }, collegeBranchAdmin);
+  const branchRowAfter = await runRow(PROG_B_BRANCH);
+  check(
+    "…and the hatch is BRANCH-scoped: a branch-A admin cannot abandon a branch-B programme (403, NOT the 409 its finished run would give)",
+    ranBranchB.status === 200 && branchRefusal.status === 403,
+    `run HTTP ${ranBranchB.status} abandon HTTP ${branchRefusal.status} ${branchRefusal.error || ""}`
+  );
+  check(
+    "…and that refusal left the branch-B row exactly as the completed run wrote it",
+    branchRowAfter?.status === "OK" && branchRowAfter?.resolvedBy === undefined,
+    `status=${branchRowAfter?.status} by=${branchRowAfter?.resolvedBy} b1=${(await readStudent(B1)).termNumber}`
+  );
+}
+
+/* ----------------------------------------------------------------- section 14 */
+console.log("\n### a programme SHRINK reconciles the work list, and a DELETE removes the run row (6-pre 5)");
+{
+  const PROG_SHRINK = await makeProgram("shrink", 3); // no students, so the shrink guard cannot fire
+  check("a programme was created for the shrink proof", !!PROG_SHRINK, PROG_SHRINK || "none");
+  injectFault(PROG_SHRINK, 3);
+  const failed = await ladderPost(PROG_SHRINK, collegeAdmin);
+  clearFault();
+  const owed = (await runRow(PROG_SHRINK))?.finishTerms || [];
+  check("a failed run on the empty programme owes the whole ladder (3,2,1)", owed.join(",") === "3,2,1", JSON.stringify(owed));
+
+  const patched = await req(`/api/programs/${PROG_SHRINK}`, {
+    cookie: collegeAdmin,
+    method: "PATCH",
+    body: JSON.stringify({ durationYears: 2 }),
+  });
+  const row1 = await runRow(PROG_SHRINK);
+  check(
+    "shrinking the programme to 2 terms is 200 and FILTERS term 3 out of the work list (3,2,1 → 2,1)",
+    patched.status === 200 && (row1?.finishTerms || []).join(",") === "2,1" && row1?.status === "FAILED",
+    `HTTP ${patched.status} finish=${JSON.stringify(row1?.finishTerms || null)} status=${row1?.status}`
+  );
+  check(
+    "…and the reconciled block still refuses the ladder (2,1 outstanding)",
+    (await ladderPost(PROG_SHRINK, collegeAdmin)).status === 409
+  );
+
+  await applyTerm(PROG_SHRINK, 2);
+  await applyTerm(PROG_SHRINK, 1);
+  const row2 = await runRow(PROG_SHRINK);
+  check(
+    "…and the remaining EMPTY terms finish it (empty list, OK), so the ladder runs again (200)",
+    (row2?.finishTerms || []).length === 0 && row2?.status === "OK" && (await ladderPost(PROG_SHRINK, collegeAdmin)).status === 200,
+    `status=${row2?.status} finish=${JSON.stringify(row2?.finishTerms || null)}`
+  );
+
+  const PROG_DEL = await makeProgram("del", 2);
+  check("a second programme was created for the delete proof", !!PROG_DEL, PROG_DEL || "none");
+  const ran = await ladderPost(PROG_DEL, collegeAdmin);
+  check("it ran once, so a lease row exists (and is not reachable by any prefix scan)", ran.status === 200 && !!(await runRow(PROG_DEL)), `HTTP ${ran.status}`);
+  const deleted = await req(`/api/programs/${PROG_DEL}`, { cookie: collegeAdmin, method: "DELETE" });
+  check(
+    "deleting the programme is 200 and REMOVES its run row (no orphan by hash)",
+    deleted.status === 200 && !(await runRow(PROG_DEL)),
+    `HTTP ${deleted.status} row=${(await runRow(PROG_DEL)) ? "present" : "gone"}`
+  );
+}
+
 /* -------------------------------------------------------------------- cleanup */
 console.log("\n### cleanup");
 {
@@ -822,10 +1057,18 @@ console.log("\n### cleanup");
     for (const d of snaps.docs) await d.ref.delete().catch(() => null);
   }
 
+  // BOTH prefixes: this verifier's own (`zzls-`) and the block/lease probes' (`zzcp-`),
+  // so a leftover from any run of this script is caught, not just the latest prefix.
   const leftovers = [];
   for (const col of ["students", "programs", "users"]) {
-    const snap = await db.collection(col).where("__name__", ">=", M).where("__name__", "<=", M + "\uf8ff").get();
-    if (snap.size) leftovers.push(`${col}:${snap.size}`);
+    for (const prefix of [M, "zzcp-"]) {
+      const snap = await db
+        .collection(col)
+        .where("__name__", ">=", prefix)
+        .where("__name__", "<=", prefix + "\uf8ff")
+        .get();
+      if (snap.size) leftovers.push(`${col}(${prefix}):${snap.size}`);
+    }
   }
   let rowsLeft = 0;
   for (const pid of created.programs) if (await runRow(pid)) rowsLeft += 1;

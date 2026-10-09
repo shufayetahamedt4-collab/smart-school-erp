@@ -80,6 +80,10 @@ export const PAGE_ERRORS = {
   ladderPlan: "Could not build the ladder plan",
   apply: "The promotion could not be applied",
   ladderRun: "The ladder could not be run",
+  // Phase 6-pre 5 — the two new failure phrasings (the empty-term strike-off and the
+  // abandon hatch). Neither is a promotion, so neither may borrow the apply's wording.
+  markFinished: "The term could not be marked finished",
+  abandon: "The run could not be abandoned",
 } as const;
 
 /** The name a message falls back to when the programme row is not selected. */
@@ -364,4 +368,93 @@ export function ladderBlockNote(plan: { runBlock?: PlanRunBlock } | null | undef
     .map((t) => `term ${t}`)
     .join(", then ");
   return `The last ladder run for this programme did not finish (${status}). Finish it with the single-position apply, descending: ${terms || "the remaining terms"}.`;
+}
+
+/* ----------------------------------------------------------------------------
+ * Phase 6-pre 5 — an OUTSTANDING term with an EMPTY cohort, and the abandon hatch.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * May the operator mark the previewed term finished WITHOUT promoting anybody?
+ *
+ * Only when a work list still names this term (it is OUTSTANDING) and the cohort here
+ * is EMPTY: there is nobody to move, so the only way the term can ever leave the list
+ * is this explicit press. The single-position route does the actual strike-off — the
+ * page sends the same position it would otherwise apply, so nothing new is invented on
+ * the client and no student can be moved by a path the server does not already police.
+ *
+ * A term that is NOT outstanding keeps the ordinary rule: an empty cohort disables the
+ * apply button and there is simply nothing to do (`applyDisabled` is NOT relaxed here —
+ * this predicate gates a different button).
+ */
+export function markFinishedEligible(input: {
+  hasPreview: boolean;
+  count: number;
+  busy: boolean;
+  previewLoading: boolean;
+  fromTermNumber: number;
+  outstandingTerms: number[];
+}): boolean {
+  return (
+    input.hasPreview &&
+    input.count === 0 &&
+    !input.busy &&
+    !input.previewLoading &&
+    input.outstandingTerms.includes(input.fromTermNumber)
+  );
+}
+
+/** The button's label — the term is named, so it cannot be pressed by accident. */
+export function markFinishedButtonLabel(term: number): string {
+  return `Mark term ${term} finished`;
+}
+
+/**
+ * What that button says it does. It must be plainly true: nobody is promoted, because
+ * the term has no students, and the press only records that the term is DONE.
+ */
+export function markFinishedTitle(term: number, termCount: number): string {
+  return `Nobody is at term ${term} of ${termCount}, so nobody is promoted`;
+}
+
+/** The explanation under that title, with the honest consequence. */
+export function markFinishedNote(): string {
+  return "This term is still outstanding on the ladder's work list, and there is nobody here to move. Marking it finished strikes it off that list and advances nobody.";
+}
+
+/** The confirmation line after the press, naming the programme and the term. */
+export function markFinishedMessage(term: number, programName: string): string {
+  return `Marked term ${term} finished for ${programName} — nobody was promoted, because that term has no students.`;
+}
+
+/**
+ * The abandon confirmation. It is DELIBERATELY blunt, and every sentence is a fact of
+ * the server's behaviour (§22): the hatch advances nobody, does not undo the terms that
+ * already ran, and a later ladder run WILL advance those steps again — which is why
+ * finishing the outstanding terms is named first as the better option.
+ */
+export const ABANDON_WARNING =
+  "Abandoning this run advances nobody and does NOT undo the terms that already ran. A later ladder run will advance those steps again. Prefer finishing the outstanding terms.";
+
+/** The reason length the SERVER enforces; the page only uses it to disable early. */
+export const ABANDON_REASON_MIN = 10;
+
+/** The abandon button: only while a run is BLOCKED, and never while a request is out. */
+export function abandonDisabled(input: {
+  blocked: boolean;
+  busy: boolean;
+  reasonLength: number;
+}): boolean {
+  return !input.blocked || input.busy || input.reasonLength < ABANDON_REASON_MIN;
+}
+
+/** The abandon headline: what the operator is about to do, in one sentence. */
+export function abandonSummary(programName: string, terms: number[]): string {
+  const list = terms.length ? terms.map((t) => `term ${t}`).join(", then ") : "the remaining terms";
+  return `Abandon this programme's unfinished run for ${programName}? It still owes ${list}.`;
+}
+
+/** The line shown after a successful abandon. */
+export function abandonMessage(programName: string): string {
+  return `Abandoned the unfinished run for ${programName}. Nobody was moved, and the ladder is usable again — a later run will advance the terms that never ran.`;
 }

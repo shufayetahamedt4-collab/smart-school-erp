@@ -4,6 +4,7 @@ import { getSession, requireCollege, audit } from "@/lib/auth";
 import { can, canAccessBranch } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
 import { TERM_SYSTEMS, isTermSystem, normalizeTermSystem, termCount, termLabel } from "@/lib/college-terms";
+import { deleteProgrammeRunRow, reconcileProgrammeRunAfterShrink } from "@/lib/college-promotion-server";
 
 /**
  * College support (Phase 2) — update/delete one program.
@@ -215,6 +216,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const updated = await prisma.program.update({ where: { id }, data });
   await audit("PROGRAM_UPDATE", "program", id, { schoolId, data });
   invalidateReferenceCache(schoolId);
+  // Phase 6-pre 5 — the ladder's run row must not outlive the ladder it described. If
+  // this update LOWERED the derived term count, a work list naming a term the programme
+  // no longer has could block the ladder for ever (the single-position route would
+  // refuse that term). So the run row's `finishTerms` is filtered to the new end.
+  // Best effort, AFTER the write and the audit: this route's response, status and audit
+  // are unchanged whether or not the row could be reconciled.
+  if (nextTermCount < currentTermCount) {
+    await reconcileProgrammeRunAfterShrink({ schoolId, programId: id, termCount: nextTermCount });
+  }
   return NextResponse.json({
     data: {
       ...updated,
@@ -271,5 +281,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   await prisma.program.delete({ where: { id } });
   await audit("PROGRAM_DELETE", "program", id, { schoolId });
   invalidateReferenceCache(schoolId);
+  // Phase 6-pre 5 — the run row is addressed by a hash of (schoolId, programId), so no
+  // prefix scan can find it: a deleted programme would leave an orphan nobody can reach.
+  // Best effort, AFTER the delete has succeeded, and it never changes this response.
+  await deleteProgrammeRunRow({ schoolId, programId: id });
   return NextResponse.json({ data: { ok: true } });
 }

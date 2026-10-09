@@ -569,3 +569,162 @@ export async function readPendingCounts(
   }
   return counts;
 }
+
+/* ---------------------------------------------------------------------------
+ * Phase 6-pre 5 — the audited ABANDON hatch, and the run row after the PROGRAMME
+ * changed (docs/COLLEGE-DECISIONS.md §22)
+ * ------------------------------------------------------------------------- */
+
+/** A term list off a row, DESCENDING, numbers only (the block's own reading). */
+function termsDesc(v: unknown): number[] {
+  return (Array.isArray(v) ? v : [])
+    .filter((t): t is number => typeof t === "number")
+    .sort((a, b) => b - a);
+}
+
+/**
+ * The shortest reason that may abandon a run. A one-word reason is not a record of
+ * WHY a whole ladder was given up, and the reason is the only thing a later reader
+ * has; the number is stated here, enforced by `abandonReasonProblem`, and mirrored
+ * (as a DISABLE rule, never as the enforcement) by the page.
+ */
+export const ABANDON_REASON_MIN = 10;
+
+/** The status an abandoned run's row carries. NOT a block: only PARTIAL/FAILED are. */
+export const ABANDON_STATUS = "ABANDONED";
+
+/** The reason problem, or null when the reason is acceptable (trimmed, >= min). */
+export function abandonReasonProblem(reason: unknown): string | null {
+  const text = typeof reason === "string" ? reason.trim() : "";
+  if (!text) return "A reason is required to abandon a run.";
+  if (text.length < ABANDON_REASON_MIN) {
+    return `The reason must be at least ${ABANDON_REASON_MIN} characters, so the record says WHY the run was given up.`;
+  }
+  return null;
+}
+
+/**
+ * Abandon a programme's UNFINISHED run (Phase 6-pre 5) — the escape hatch for a work
+ * list that can never be finished.
+ *
+ * It moves NO student and it does NOT undo the terms that already ran: it only marks
+ * the row `ABANDONED`, keeps `finishTerms` as the record of what was owed, and stores
+ * the reason (`resolvedAt`/`resolvedBy` say who and when). An `ABANDONED` row is NOT a
+ * block — `readProgrammeRunBlock` only refuses on `PARTIAL`/`FAILED` — so the ladder is
+ * usable again immediately, and a later run will advance the terms that were never
+ * applied (which is exactly what the page's confirmation says, bluntly).
+ *
+ * Only a `PARTIAL`/`FAILED` row can be abandoned: an `OK` run has nothing to abandon,
+ * and a LIVE lease (`IN_PROGRESS`) belongs to a run that is still working, so both are
+ * refused (409) rather than raced. The previous failure reason is PRESERVED on
+ * `failureReason` so the abandon does not erase the history it replaces.
+ */
+export async function abandonProgrammeRun(input: {
+  schoolId: string;
+  programId: string;
+  actorId?: string | null;
+  reason: string;
+}): Promise<
+  { ok: true; status: string; finishTerms: number[] } | { ok: false; status: number; message: string }
+> {
+  const id = promotionRunId(input.schoolId, input.programId);
+  const row: any = await prisma.promotionRun.findFirst({ where: { id } });
+  if (!row) {
+    return { ok: false, status: 409, message: "This programme has no unfinished run to abandon." };
+  }
+  const status = typeof row.status === "string" ? row.status : "";
+  if (status !== "PARTIAL" && status !== "FAILED") {
+    return {
+      ok: false,
+      status: 409,
+      message: `Only an unfinished run (PARTIAL or FAILED) can be abandoned; this programme's run is ${status || "unknown"}.`,
+    };
+  }
+  const finishTerms = termsDesc(row.finishTerms);
+  await prisma.promotionRun.update({
+    where: { id },
+    data: {
+      status: ABANDON_STATUS,
+      resolvedAt: new Date().toISOString(),
+      resolvedBy: ABANDON_STATUS,
+      reason: input.reason,
+      // The failure that made the run unfinished is KEPT, not overwritten by the
+      // abandon reason: the row is the only record of either.
+      failureReason: row.reason ?? null,
+      abandonedBy: input.actorId ?? null,
+      // `finishTerms` is deliberately left as it is: it is the record of what was owed.
+    },
+  });
+  return { ok: true, status: ABANDON_STATUS, finishTerms };
+}
+
+/**
+ * Reconcile a programme's run row after the programme was SHRUNK (Phase 6-pre 5).
+ *
+ * A run's work list names terms of the ladder it walked. If the programme's derived
+ * term count falls, a listed term ABOVE the new end can never be applied again — the
+ * single-position route would refuse it — so it would block the ladder for ever. So
+ * the list is filtered to terms `<= termCount`; when that leaves nothing and the run
+ * was unfinished, the row becomes `OK` with `resolvedBy: "RECONCILE"` (the block lifts
+ * because there is provably nothing left to apply).
+ *
+ * Best effort by design, and CALLED FROM THE PROGRAMMES ROUTE ONLY AFTER its own write
+ * has succeeded: the programmes route's response, status and audit are unchanged by
+ * anything that happens here, and a failure to write the row is swallowed.
+ *
+ * **Defensive, and recorded as such**: the filter can only empty the list when a
+ * programme's terms fall below the LOWEST outstanding term. `parseDuration` requires
+ * 1..6 years and every work list always contains term 1, so on the shipped routes that
+ * branch is unreachable — it exists so a hand-written or future row cannot wedge a
+ * programme, and it is NOT PROVEN over HTTP (§22).
+ */
+export async function reconcileProgrammeRunAfterShrink(input: {
+  schoolId: string;
+  programId: string;
+  termCount: number;
+}): Promise<void> {
+  try {
+    const id = promotionRunId(input.schoolId, input.programId);
+    const row: any = await prisma.promotionRun.findFirst({ where: { id } });
+    if (!row) return;
+    const terms = termsDesc(row.finishTerms);
+    const kept = terms.filter((t) => t <= input.termCount);
+    if (kept.length === terms.length) return; // nothing referenced the dropped terms
+    const unfinished = row.status === "PARTIAL" || row.status === "FAILED";
+    if (kept.length) {
+      await prisma.promotionRun.update({ where: { id }, data: { finishTerms: kept } });
+      return;
+    }
+    if (!unfinished) return;
+    await prisma.promotionRun.update({
+      where: { id },
+      data: {
+        finishTerms: [],
+        status: "OK",
+        resolvedAt: new Date().toISOString(),
+        resolvedBy: "RECONCILE",
+      },
+    });
+  } catch {
+    /* best effort: the programmes route's own answer must never change */
+  }
+}
+
+/**
+ * Delete a programme's run row after the programme itself was deleted
+ * (Phase 6-pre 5).
+ *
+ * The row is addressed by a hash of `(schoolId, programId)`, so it is NOT reachable by
+ * any prefix scan — a deleted programme would otherwise leave an orphan nobody can
+ * find. Best effort, called only after the programmes route's delete has succeeded, and
+ * it never changes that route's response.
+ */
+export async function deleteProgrammeRunRow(input: { schoolId: string; programId: string }): Promise<void> {
+  try {
+    const id = promotionRunId(input.schoolId, input.programId);
+    const row = await prisma.promotionRun.findFirst({ where: { id } });
+    if (row) await prisma.promotionRun.delete({ where: { id } });
+  } catch {
+    /* best effort: the programmes route's own answer must never change */
+  }
+}

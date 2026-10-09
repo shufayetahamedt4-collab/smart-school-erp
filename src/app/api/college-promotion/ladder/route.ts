@@ -10,6 +10,8 @@ import { invalidateStats } from "@/lib/stats-cache";
 import { buildCollegePromotionPreview } from "@/lib/college-promotion";
 import {
   PROMOTION_BATCH,
+  abandonProgrammeRun,
+  abandonReasonProblem,
   readCohort,
   readPendingCounts,
   resolveProgramme,
@@ -105,6 +107,20 @@ import {
  * it is decided by the route's own writes and never inferred from a student's term
  * number, which the finishing walk re-fills. A clean `OK` run records an empty list
  * and never blocks, and the GET plan exposes the state additively (`data.runBlock`).
+ *
+ * Phase 6-pre 4 — THE LEASE IS RENEWED, OWNED AND FAIL-CLOSED (docs/COLLEGE-DECISIONS.md §22).
+ * The lease is renewed before every step and every ≤400-op slice, so `LADDER_LEASE_MS`
+ * only has to cover ONE slice and a long run can no longer be taken over mid-flight; a
+ * run that discovers it no longer owns the row ABORTS with the structured 500 and
+ * writes nothing further; the release is OWNED (a stale run cannot clear a successor's
+ * lease); and the block read FAILS CLOSED (503, no lease, no cohort read, no writes).
+ *
+ * Phase 6-pre 5 — THE AUDITED ABANDON HATCH (docs §22). A POST may carry
+ * `{ abandonRun: true, reason }` instead of running: it marks the programme's
+ * UNFINISHED run `ABANDONED` (only PARTIAL/FAILED; anything else is 409), keeps
+ * `finishTerms` as the record, moves NO student, and writes ONE `COLLEGE_PROMOTION`
+ * audit row naming the reason and the outstanding terms. Same guards as the run, so a
+ * 403 still learns nothing. An ABANDONED row is NOT a block.
  *
  * Guard order (identical to the 5b route):
  *   `getSession()` → target `schoolId` → `requireCollege({ schoolId })` →
@@ -305,6 +321,47 @@ export async function POST(req: NextRequest) {
   // TEST-ONLY seam switches (empty in production). See `qaLeaseSeam`.
   const seam = qaLeaseSeam();
   const leaseTtl = seam.ttlMs ?? LADDER_LEASE_MS;
+
+  // ---- Phase 6-pre 5: the audited ABANDON hatch (docs §22) ------------------
+  // A run that recorded a work list the routes can never apply (an outstanding term
+  // whose cohort is empty AND whose strike-off was lost, or a work list that can no
+  // longer be walked) would block the ladder for ever. This is the operator's way out,
+  // and it is DELIBERATELY not a student move: the row becomes ABANDONED, `finishTerms`
+  // stays as the record, and a later run will advance the terms that never ran.
+  //
+  // Placed AFTER every authorization step (so a 403 learns nothing, exactly as for the
+  // run) and BEFORE the block read — an abandoned programme is a BLOCKED programme, so
+  // this path must not itself be refused. An ABANDONED row is not a block (only
+  // PARTIAL/FAILED are), so the ladder is usable again the moment it lands.
+  if (body?.abandonRun === true) {
+    const problem = abandonReasonProblem(body?.reason);
+    if (problem) return NextResponse.json({ error: problem }, { status: 400 });
+    const reason = String(body.reason).trim();
+    const abandoned = await abandonProgrammeRun({
+      schoolId,
+      programId,
+      actorId: (session as any).id ?? null,
+      reason,
+    });
+    if (!abandoned.ok) return NextResponse.json({ error: abandoned.message }, { status: abandoned.status });
+    // ONE audit row for the abandon, with what the operator wrote and what was owed.
+    await audit("COLLEGE_PROMOTION", "program", programId, {
+      scope: "PROGRAMME_LADDER",
+      action: "ABANDONED",
+      reason,
+      outstandingTerms: abandoned.finishTerms,
+      actor: (session as any).id ?? null,
+      actorRole: session.role,
+    });
+    return NextResponse.json({
+      data: {
+        programId,
+        abandoned: true,
+        status: abandoned.status,
+        finishTerms: abandoned.finishTerms,
+      },
+    });
+  }
 
   // ---- Phase 6-pre 3: no re-run while the LAST run is unfinished (docs §21) ---
   // A run that failed midway left a work list on its row (`finishTerms`). Re-running
