@@ -726,3 +726,63 @@ and a re-fetched (now empty) preview with the button disabled, and the final ter
 **graduating run** banner with `Graduate → ALUMNI` rows — no console or network errors. That check was
 **manual and is not part of the suite**, so no automated test guards against a future regression in the
 page's markup; that is the honest limit of 5c's verification.
+
+## 19. Phase 5d decisions (the whole-programme ladder)
+
+Phase 5d adds a **whole-programme** run on top of the single-position ladder: ONE request
+advances every term's cohort by exactly one step, and the programme's final term graduates. It is a
+`GET` plan plus a `POST` run under the SAME `college-promotion` segment, and the 5c page grows one
+card that opens the plan for review before anything is written.
+
+- **D-5d-1 — the ordering rule lives on the SERVER, descending.** "Advance every term" must move
+  each cohort exactly ONE step. Applying the positions ASCENDING would re-sweep the students it had
+  just moved — a student advanced 1 → 2 would be picked up again by the step for term 2 and pushed
+  onward, cascading the whole programme to graduation in one run. The run therefore walks the
+  positions **descending** (`termCount` first, graduating it, then `termCount-1`, … down to 1).
+  Cohorts are disjoint (a student holds exactly one `termNumber`), so walking downward guarantees
+  every position sees its ORIGINAL cohort and every student moves exactly once. The rule is **not**
+  in the browser: the page sends only `{ programId }`, so a client cannot reorder the ladder.
+  **PROVEN** by the API verifier — after a run each cohort has moved exactly one step
+  (1→2, 1→2, 2→3, 3→ALUMNI), and a second run moves each ACTIVE student one step more.
+- **D-5d-2 — a new route in the SAME college segment.**
+  `src/app/api/college-promotion/ladder/route.ts` (`GET` plan + `POST` run). The single-position
+  contract of `/api/college-promotion` is untouched, so the 5b verifier's checks are unaffected. The
+  new file sits inside the already-listed `college-promotion` segment, so
+  `scripts/verify-college-routes.mjs` check 2 (that walk is recursive) gates it: 10 → **11 route
+  files**, 22 → **24 gated handlers**, the guard's own check count still 3. No edit to
+  `college-routes.ts` was needed.
+- **D-5d-3 — the shared DB half is extracted so the cohort rule exists ONCE.**
+  `src/lib/college-promotion-server.ts` now holds `resolveProgramme`, `resolveLadder`, `readCohort`,
+  `readPendingCounts` and `PROMOTION_BATCH`; both routes import them. A `route.ts` may not export a
+  helper for a sibling route (Next.js validates a route module's exports), so the shared code has to
+  live outside `src/app/api`. This is a **pure move** of code that lived in
+  `college-promotion/route.ts`; that route's behaviour is unchanged, which its checks continue to
+  prove. `src/lib/college-promotion.ts` stays import-free (its verifier still fails on an `import`).
+- **D-5d-4 — the plan is a preview of EVERY step.** `GET …/ladder?programId=` returns the terms
+  ASCENDING, one entry per term with its cohort rows, its destination (the next term, or `null` for
+  the graduating step) and the per-step plus aggregate tallies (`advance`/`graduate`/`classIdWarnings`/
+  `pendingRegistrations`, the last two carried from D4/D6). A programme with **0** resolvable terms is
+  a 400 ("no ladder to run") — the same "cannot decide" reading `college-promotion.ts` gives a 0
+  count, never a silent no-op.
+- **D-5d-5 — one audit row for the whole run.** The run writes with the 5b path
+  (`prisma.$transaction` in ≤400-operation slices) but audits ONCE per run (`COLLEGE_PROMOTION` with
+  `scope: "PROGRAMME_LADDER"`, `termCount` and the totals), then `invalidateStats` +
+  `invalidateReferenceCache`. The per-step report is the response's `steps`, returned ASCENDING for
+  the reader; the writes happened descending.
+- **D-5d-6 — a ladder re-run is NOT a per-position no-op.** Unlike a single position (whose re-run
+  selects nobody, D2), re-running the ladder is a legitimate SECOND advance: it moves every ACTIVE
+  student one more step. The verifier pins that — and that ALUMNI/TRANSFERRED stay untouched across
+  two runs — instead of asserting an idempotency the operation does not have.
+- **D-5d-7 — unchanged surface.** No `db.ts`, `permissions.ts`, `college-routes.ts`,
+  `college-promotion.ts`, programs route, school promote route or class model change; the isolation
+  harnesses keep 75 / 52 and every other verifier keeps its count (nav-scope still 7,
+  college-permissions 7, college-terms 8, promotion-logic 12). The API verifier grows **61 → 84**
+  checks (23 new, all in the ladder section).
+
+**Verification (5d).** All of it is HTTP in `scripts/verify-college-promotion-api.mjs`: the plan's
+shape and per-step cohorts, the strict/ON_ROLL exclusions, the aggregate tallies, the per-step guards
+(anonymous 401, ACCOUNTANT 403, SCHOOL 403, missing/foreign 400, branch confinement), the descending
+ordering proved by "moved exactly one step", the untouched ALUMNI/TRANSFERRED students and
+registrations, the shifted plan after a run, a second run, and both refusals writing nothing. The new
+route is statically gated by `verify-college-routes.mjs`. The page's ladder UI is covered by `tsc`,
+`next build` and an interactive browser pass — **not** by the suite.

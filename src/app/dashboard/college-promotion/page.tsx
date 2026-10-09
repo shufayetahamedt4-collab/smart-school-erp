@@ -111,6 +111,43 @@ interface ApplyResult {
   failed: number;
 }
 
+/** One step of the whole-programme plan (`GET /api/college-promotion/ladder`). */
+interface LadderStep {
+  fromTermNumber: number;
+  toTermNumber: number | null;
+  graduating: boolean;
+  rows: PreviewRow[];
+  count: number;
+  counts: { advance: number; graduate: number; classIdWarnings: number; pendingRegistrations: number };
+}
+
+/** The whole-programme plan: every term's cohort and its one move, ASCENDING. */
+interface LadderPlan {
+  program: { id: string; name: string };
+  termCount: number;
+  steps: LadderStep[];
+  count: number;
+  counts: { advance: number; graduate: number; classIdWarnings: number; pendingRegistrations: number };
+}
+
+/** `POST /api/college-promotion/ladder` — the run's report, one entry per step. */
+interface LadderRunResult {
+  programId: string;
+  termCount: number;
+  promoted: number;
+  graduated: number;
+  failed: number;
+  steps: {
+    fromTermNumber: number;
+    toTermNumber: number | null;
+    graduating: boolean;
+    count: number;
+    promoted: number;
+    graduated: number;
+    failed: number;
+  }[];
+}
+
 /** The exact wording D6 requires for the pending figure (never "pending students"). */
 const PENDING_TOOLTIP =
   "Course-registration requests still PENDING at this term. One request = one course; one student may have several. This is not a student count, and it does not block or follow a promotion.";
@@ -139,6 +176,9 @@ export default function CollegePromotionPage() {
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [result, setResult] = useState<ApplyResult | null>(null);
+  const [ladderOpen, setLadderOpen] = useState(false);
+  const [ladderPlan, setLadderPlan] = useState<LadderPlan | null>(null);
+  const [ladderLoading, setLadderLoading] = useState(false);
 
   // Programmes, once. NO read before the gate resolves.
   useEffect(() => {
@@ -232,6 +272,56 @@ export default function CollegePromotionPage() {
     } catch (e: any) {
       setConfirmOpen(false);
       setError(e?.message || "The promotion could not be applied");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Build the whole-programme plan (`GET /api/college-promotion/ladder`). It is
+   * read-only: it lists every term's original cohort and its single move, so an
+   * operator can review all steps before anything is written.
+   */
+  const openLadder = async () => {
+    if (!programId) return;
+    setLadderOpen(true);
+    setLadderLoading(true);
+    setError("");
+    try {
+      setLadderPlan(await api<LadderPlan>(`/api/college-promotion/ladder${qs({ programId })}`));
+    } catch (e: any) {
+      setLadderPlan(null);
+      setError(e?.message || "Could not build the ladder plan");
+    } finally {
+      setLadderLoading(false);
+    }
+  };
+
+  /**
+   * Run the whole ladder (`POST /api/college-promotion/ladder`). As with the
+   * single-position apply, only the programme is sent: the SERVER decides which
+   * positions exist and in what order they are applied (descending), so nothing
+   * here can reorder the ladder — the rule cannot drift into the UI.
+   */
+  const runLadder = async () => {
+    if (!ladderPlan || busy || ladderPlan.count === 0) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await api<LadderRunResult>("/api/college-promotion/ladder", {
+        method: "POST",
+        body: JSON.stringify({ programId }),
+      });
+      setLadderOpen(false);
+      setResult(null);
+      const name = ladderPlan.program.name;
+      setLadderPlan(null);
+      setMessage(`Ran the whole ladder for ${name}: ${res.promoted} advanced, ${res.graduated} graduated.`);
+      // Re-fetch the position preview: every cohort has moved off its term.
+      await loadPreview(programId, fromTermNumber);
+    } catch (e: any) {
+      setLadderOpen(false);
+      setError(e?.message || "The ladder could not be run");
     } finally {
       setBusy(false);
     }
@@ -341,6 +431,7 @@ export default function CollegePromotionPage() {
                 setProgramId(e.target.value);
                 setFromTermNumber(1);
                 setResult(null);
+                setLadderPlan(null);
                 setMessage("");
               }}
             >
@@ -357,6 +448,7 @@ export default function CollegePromotionPage() {
               onChange={(e) => {
                 setFromTermNumber(Number(e.target.value));
                 setResult(null);
+                setLadderPlan(null);
                 setMessage("");
               }}
             >
@@ -501,6 +593,22 @@ export default function CollegePromotionPage() {
         )}
       </Card>
 
+      <Card className="mt-4">
+        <CardHeader
+          title="Whole-programme ladder"
+          subtitle="Advance every term's cohort by exactly one step in a single run; the final term graduates as ALUMNI."
+        />
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <p className="max-w-xl text-xs text-slate-500">
+            The server walks the programme from its final term downwards, so each student moves exactly once. Open the
+            plan to review every step before anything is written.
+          </p>
+          <button className="btn btn-secondary" onClick={openLadder} disabled={!programId || busy}>
+            <Layers size={15} /> Preview full ladder
+          </button>
+        </div>
+      </Card>
+
       {/* Explicit two-step apply: restate everything, then confirm. */}
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Confirm this promotion">
         {preview && (
@@ -542,6 +650,76 @@ export default function CollegePromotionPage() {
               </button>
               <button className="btn btn-primary" onClick={apply} disabled={busy}>
                 {busy ? "Applying…" : preview.graduating ? "Graduate the cohort" : "Advance the cohort"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={ladderOpen} onClose={() => setLadderOpen(false)} wide title="Run the whole programme ladder">
+        {ladderLoading ? (
+          <div className="py-10 text-center text-sm text-slate-400">Building the plan…</div>
+        ) : !ladderPlan ? (
+          <div className="py-6 text-center text-sm text-slate-400">No plan to show.</div>
+        ) : (
+          <div className="space-y-4">
+            <ul className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <li>
+                Programme: <span className="font-semibold">{ladderPlan.program.name}</span>
+              </li>
+              <li>
+                Terms: <span className="font-semibold">{ladderPlan.termCount}</span>
+              </li>
+              <li>
+                Students across the ladder: <span className="font-semibold">{ladderPlan.count}</span> —{" "}
+                {ladderPlan.counts.graduate} will graduate
+              </li>
+              <li className="text-xs text-slate-500" title={PENDING_TOOLTIP}>
+                {ladderPlan.counts.pendingRegistrations} pending course requests in this programme
+              </li>
+            </ul>
+
+            <div className="max-h-72 space-y-2 overflow-y-auto">
+              {ladderPlan.steps.map((s) => (
+                <div key={s.fromTermNumber} className="rounded-lg border border-slate-200 px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-slate-800">
+                      Term {s.fromTermNumber} of {ladderPlan.termCount}
+                    </span>
+                    {s.graduating ? (
+                      <Badge tone="indigo">Graduate → ALUMNI</Badge>
+                    ) : (
+                      <Badge tone="green">Advance → term {s.toTermNumber}</Badge>
+                    )}
+                  </div>
+                  {s.count === 0 ? (
+                    <p className="mt-1 text-xs text-slate-400">No students at this term — this step does nothing.</p>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-xs text-slate-600">
+                        {s.count} student(s): {s.rows.map((r) => nameOf(r.studentId)).join(", ")}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        {s.counts.classIdWarnings > 0 && `${s.counts.classIdWarnings} also in a school class · `}
+                        {s.counts.pendingRegistrations} pending course requests
+                      </p>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Steps are applied from the final term backwards so each cohort moves exactly one step — the server decides
+              that order. This cannot be undone from here.
+            </p>
+
+            <div className="flex justify-end gap-2">
+              <button className="btn btn-secondary" onClick={() => setLadderOpen(false)} disabled={busy}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={runLadder} disabled={busy || ladderPlan.count === 0}>
+                {busy ? "Running…" : `Run the whole ladder (${ladderPlan.count})`}
               </button>
             </div>
           </div>

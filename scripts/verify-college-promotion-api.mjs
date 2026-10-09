@@ -529,6 +529,150 @@ console.log("\n### the programme shrink guard — an on-roll student may not be 
   check("a branch-A admin still cannot PATCH a branch-B programme (403)", branchPatch.status === 403, `HTTP ${branchPatch.status} ${branchPatch.error || ""}`);
 }
 
+/* ---------------------------------------------- whole-programme ladder (Phase 5d) */
+console.log("\n### the whole-programme ladder — every cohort moves exactly one step");
+{
+  // A fresh 3-term programme. Term 1 holds an on-roll student in branch A AND one
+  // in branch B (the branch probe); term 2 holds an on-roll student (flagged with a
+  // classId) plus a TRANSFERRED one; term 3 holds an on-roll student plus an ALUMNI
+  // one. A student of ANOTHER programme sits at term 2 as well.
+  const LAD = await makeProgram("lad", 3, BRANCH_A);
+  const OTHERP = await makeProgram("ladother", 3, BRANCH_A);
+  check("the two ladder programmes were created (201)", !!LAD && !!OTHERP, `${LAD} / ${OTHERP}`);
+
+  const l1 = await makeStudent("lad1", { programId: LAD, termNumber: 1, branchId: BRANCH_A });
+  const lB = await makeStudent("ladb", { programId: LAD, termNumber: 1, branchId: BRANCH_B });
+  const l2 = await makeStudent("lad2", { programId: LAD, termNumber: 2, branchId: BRANCH_A, classId: `${M}class-lad-${stamp}` });
+  const lTrans = await makeStudent("ladtrans", { programId: LAD, termNumber: 2, branchId: BRANCH_A, status: "TRANSFERRED" });
+  const l3 = await makeStudent("lad3", { programId: LAD, termNumber: 3, branchId: BRANCH_A });
+  const lAlum = await makeStudent("ladalum", { programId: LAD, termNumber: 3, branchId: BRANCH_A, status: "ALUMNI" });
+  const lOther = await makeStudent("ladother1", { programId: OTHERP, termNumber: 2, branchId: BRANCH_A });
+  const REG_L1 = await makeRegistration("ladt1", { studentId: l1, programId: LAD, termNumber: 1 });
+  check(
+    "the seven ladder students and their registration were written",
+    [l1, lB, l2, lTrans, l3, lAlum, lOther].every(Boolean) && !!REG_L1,
+    `${created.students.length} student row(s) tracked in total`
+  );
+
+  const lar = (id, cookie) => req(`/api/college-promotion/ladder?programId=${encodeURIComponent(id)}`, { cookie });
+  const ladderPost = (body, cookie) => post("/api/college-promotion/ladder", body, cookie);
+
+  /* -------- the plan -------- */
+  const plan = await lar(LAD, collegeAdmin);
+  check("GET the ladder plan → 200", plan.status === 200, `HTTP ${plan.status} ${plan.error || ""}`);
+  const steps = plan.data?.steps || [];
+  check(
+    "…one step per term, ASCENDING, each naming its destination (1→2, 2→3, 3→graduation)",
+    plan.data?.termCount === 3 && steps.length === 3 &&
+      steps[0].fromTermNumber === 1 && steps[0].toTermNumber === 2 && steps[0].graduating === false &&
+      steps[1].fromTermNumber === 2 && steps[1].toTermNumber === 3 && steps[1].graduating === false &&
+      steps[2].fromTermNumber === 3 && steps[2].toTermNumber === null && steps[2].graduating === true,
+    JSON.stringify(steps.map((s) => [s.fromTermNumber, s.toTermNumber, s.graduating]))
+  );
+  const stepIds = (i) => (steps[i]?.rows || []).map((r) => r.studentId);
+  check(
+    "…each step's cohort is strict and ON_ROLL-only (ALUMNI/TRANSFERRED/other-programme excluded)",
+    steps[0].count === 2 && stepIds(0).includes(l1) && stepIds(0).includes(lB) &&
+      steps[1].count === 1 && stepIds(1)[0] === l2 &&
+      steps[2].count === 1 && stepIds(2)[0] === l3 &&
+      !JSON.stringify(steps).includes(lAlum) && !JSON.stringify(steps).includes(lTrans) && !JSON.stringify(steps).includes(lOther),
+    JSON.stringify(steps.map((s) => [s.count, (s.rows || []).map((r) => r.studentId)]))
+  );
+  check(
+    "…the plan's totals sum the steps (4 students, 3 advance / 1 graduate, the D4 warning and the term-filtered D6 pending count)",
+    plan.data?.count === 4 && plan.data?.counts?.advance === 3 && plan.data?.counts?.graduate === 1 &&
+      plan.data?.counts?.classIdWarnings === 1 && plan.data?.counts?.pendingRegistrations === 1,
+    `count=${plan.data?.count} ${JSON.stringify(plan.data?.counts)}`
+  );
+
+  /* -------- guards on the new surface -------- */
+  const branchPlan = await lar(LAD, collegeBranchAdmin);
+  check(
+    "…a branch-A admin's plan excludes the same programme's branch-B student",
+    branchPlan.status === 200 && branchPlan.data?.count === 3 && !JSON.stringify(branchPlan.data?.steps || []).includes(lB),
+    `HTTP ${branchPlan.status} count=${branchPlan.data?.count}`
+  );
+  const branchProg = await lar(PROG_B, collegeBranchAdmin);
+  check("…and it cannot ladder a branch-B programme at all (403)", branchProg.status === 403, `HTTP ${branchProg.status} ${branchProg.error || ""}`);
+  const anon = await lar(LAD, undefined);
+  check("…anonymous GET is 401", anon.status === 401, `HTTP ${anon.status}`);
+  const wrongRole = await lar(LAD, accountant);
+  check("…an ACCOUNTANT is 403 (no `registration` action, and there is no accountant bypass)", wrongRole.status === 403, `HTTP ${wrongRole.status}`);
+  const schoolPlan = await lar(LAD, schoolAdmin);
+  check("…a SCHOOL tenant is 403 — the college gate, not the permission", schoolPlan.status === 403, `HTTP ${schoolPlan.status}`);
+  const noId = await req("/api/college-promotion/ladder", { cookie: collegeAdmin });
+  check("…a missing programId is 400", noId.status === 400, `HTTP ${noId.status} ${noId.error || ""}`);
+  const foreignGet = await lar(FOREIGN_PROG, collegeAdmin);
+  check("…a FOREIGN programme id is the same 400, never a 404 oracle", foreignGet.status === 400, `HTTP ${foreignGet.status} ${foreignGet.error || ""}`);
+
+  /* -------- the run: the ordering proof -------- */
+  const run = await ladderPost({ programId: LAD }, collegeAdmin);
+  check("POST the whole ladder → 200", run.status === 200, `HTTP ${run.status} ${run.error || ""}`);
+  check(
+    "…and reports 3 advanced / 1 graduated / 0 failed across 3 steps",
+    run.data?.promoted === 3 && run.data?.graduated === 1 && run.data?.failed === 0 && (run.data?.steps || []).length === 3,
+    JSON.stringify(run.data)
+  );
+  const r1 = await readStudent(l1), rB = await readStudent(lB), r2 = await readStudent(l2), r3 = await readStudent(l3);
+  check(
+    "…EVERY cohort moved exactly ONE step (1→2, 1→2, 2→3, 3→ALUMNI) — the DESCENDING order, proved",
+    r1.termNumber === 2 && rB.termNumber === 2 && r2.termNumber === 3 && r3.status === "ALUMNI",
+    `l1=${r1.termNumber} lB=${rB.termNumber} l2=${r2.termNumber} l3=${r3.status}`
+  );
+  check(
+    "…ALUMNI and TRANSFERRED students were never moved (ON_ROLL_STUDENT, reused verbatim)",
+    (await readStudent(lAlum)).status === "ALUMNI" && (await readStudent(lAlum)).termNumber === 3 &&
+      (await readStudent(lTrans)).status === "TRANSFERRED" && (await readStudent(lTrans)).termNumber === 2,
+    `alum=${(await readStudent(lAlum)).status} trans=${(await readStudent(lTrans)).status}`
+  );
+  const regDoc = (await db.collection("courseRegistrations").doc(REG_L1).get()).data() || {};
+  check("…registrations are untouched (D7 — still PENDING at term 1)", regDoc.status === "PENDING" && regDoc.termNumber === 1, `${regDoc.status}@${regDoc.termNumber}`);
+
+  const after1 = await lar(LAD, collegeAdmin);
+  const s1 = after1.data?.steps || [];
+  check(
+    "…the plan now reflects the new state (term 1 empty, term 2 the two movers, term 3 the term-2 one)",
+    after1.data?.count === 3 &&
+      s1[0]?.count === 0 && s1[1]?.count === 2 && s1[2]?.count === 1 &&
+      (s1[1]?.rows || []).map((r) => r.studentId).sort().join(",") === [l1, lB].sort().join(",") &&
+      s1[2]?.rows?.[0]?.studentId === l2,
+    `count=${after1.data?.count} steps=${JSON.stringify(s1.map((x) => x.count))}`
+  );
+
+  // A ladder run is NOT a per-position no-op: it advances one step, so running it
+  // again is a legitimate SECOND advance — and each student still moves exactly one.
+  const run2 = await ladderPost({ programId: LAD }, collegeAdmin);
+  const r1b = await readStudent(l1), rBb = await readStudent(lB), r2b = await readStudent(l2);
+  check(
+    "…a second run advances each ACTIVE student one more step (1s and 2 → 3, the term-3 one graduates)",
+    run2.status === 200 && run2.data?.promoted === 2 && run2.data?.graduated === 1 &&
+      r1b.termNumber === 3 && rBb.termNumber === 3 && r2b.status === "ALUMNI",
+    `HTTP ${run2.status} ${JSON.stringify(run2.data)} | l1=${r1b.termNumber} l2=${r2b.status}`
+  );
+  check(
+    "…and the TRANSFERRED student is STILL untouched after two runs",
+    (await readStudent(lTrans)).termNumber === 2 && (await readStudent(lTrans)).status === "TRANSFERRED",
+    `trans=${(await readStudent(lTrans)).termNumber}/${(await readStudent(lTrans)).status}`
+  );
+
+  // Each refusal is bracketed by its OWN before/after snapshot, so a stray write
+  // by either one is visible even though the ladder has already moved rows twice.
+  const beforeSchool = await snapshot();
+  const schoolRun = await ladderPost({ programId: OTHERP }, schoolAdmin);
+  check(
+    "a SCHOOL tenant's ladder run is 403 and writes nothing",
+    schoolRun.status === 403 && sameSnapshot(beforeSchool, await snapshot()),
+    `HTTP ${schoolRun.status}`
+  );
+  const beforeForeign = await snapshot();
+  const foreignRun = await ladderPost({ programId: FOREIGN_PROG }, collegeAdmin);
+  check(
+    "a FOREIGN programme's ladder run is the same 400, with no write",
+    foreignRun.status === 400 && sameSnapshot(beforeForeign, await snapshot()),
+    `HTTP ${foreignRun.status} ${foreignRun.error || ""}`
+  );
+}
+
 /* -------------------------------------------------------------------- cleanup */
 console.log("\n### cleanup");
 {
@@ -562,6 +706,6 @@ console.log("\n### cleanup");
 console.log(
   failures
     ? `\n❌ ${failures} college-promotion API failure(s) (of ${checks} checks)`
-    : `\n✅ COLLEGE PROMOTION API OK — preview/apply, strict cohort, branch + tenant confinement, SCHOOL 403 with no write, idempotent re-run, ALUMNI graduation, programme shrink guard (${checks} checks)`
+    : `\n✅ COLLEGE PROMOTION API OK — preview/apply, strict cohort, branch + tenant confinement, SCHOOL 403 with no write, idempotent re-run, ALUMNI graduation, programme shrink guard, whole-programme ladder (${checks} checks)`
 );
 process.exit(failures ? 1 : 0);

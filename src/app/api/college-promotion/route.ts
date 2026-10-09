@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, invalidateReferenceCache, ON_ROLL_STUDENT } from "@/lib/db";
-import { getSession, requireCollege, audit, type SessionUser } from "@/lib/auth";
-import { can, scopeWhere, canAccessBranch } from "@/lib/permissions";
+import { prisma, invalidateReferenceCache } from "@/lib/db";
+import { getSession, requireCollege, audit } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
-import { termCount } from "@/lib/college-terms";
-import { normalizeRegistrationStatus } from "@/lib/registration-status";
+import { buildCollegePromotionPreview } from "@/lib/college-promotion";
 import {
-  buildCollegePromotionPreview,
-  normalizeTermNumber,
-  type CollegeCohortStudent,
-} from "@/lib/college-promotion";
+  PROMOTION_BATCH,
+  readCohort,
+  readPendingCounts,
+  resolveLadder,
+} from "@/lib/college-promotion-server";
 
 /**
  * Phase 5b — the college promotion ladder API (docs/COLLEGE-DECISIONS.md §15, §16).
@@ -24,8 +24,9 @@ import {
  * (`termCount = durationYears × termsPerYear`, `src/lib/college-terms.ts`), so a
  * term is an integer position on a ladder — **no term rows, no marker field, no
  * session coupling** (D2/D9). The pure half of that ladder lives in
- * `src/lib/college-promotion.ts` (Phase 5a) and is imported here; this file is
- * only the HTTP/DB half.
+ * `src/lib/college-promotion.ts` (Phase 5a); the DB half this file shares with
+ * `/api/college-promotion/ladder` lives in `src/lib/college-promotion-server.ts`,
+ * because a `route.ts` may not export a helper for a sibling route to import.
  *
  * Why this is its OWN college segment (D1) and not a branch of
  * `/api/students/promote`: `scripts/verify-college-routes.mjs` check 3 forbids a
@@ -64,117 +65,11 @@ import {
  *   D9  — independent of the academic session: no `sessionId` is read or written.
  *   D10 — the write path mirrors the school ladder: `prisma.$transaction` in ≤400
  *      operation slices, then `audit`, `invalidateStats`, `invalidateReferenceCache`.
- */
-
-/** The Firestore write-batch chunk the rest of the codebase uses (school ladder). */
-const BATCH = 400;
-
-/** Trimmed string, or "" for any non-string (the college routes' `read`). */
-const read = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-
-/**
- * Read a term value that may arrive as a JSON number or as query text.
  *
- * A numeric string is the number it names (`"2"` → `2`); anything else is handed
- * to `normalizeTermNumber` unchanged so it is REJECTED rather than silently
- * coerced (a `""`, `"two"` or `null` is not a position).
+ * The whole-programme run (every term in one request) is the SIBLING route
+ * `/api/college-promotion/ladder` (Phase 5d, docs §19); this file keeps its
+ * single-position contract exactly as 5b shipped it.
  */
-function coerceTerm(value: unknown): unknown {
-  if (typeof value === "number") return value;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed === "") return null;
-    const n = Number(trimmed);
-    if (Number.isInteger(n)) return n;
-  }
-  return value;
-}
-
-/** The validated position, plus the programme row it resolved to. */
-interface Ladder {
-  program: any;
-  programId: string;
-  fromTermNumber: number;
-  termCount: number;
-}
-
-type LadderResult = { ok: true; ladder: Ladder } | { ok: false; status: number; message: string };
-
-/**
- * Resolve and validate the request's position, in the college routes' order.
- *
- * A missing or foreign programme id is the SAME 400 — never a 404 that would
- * confirm another tenant's row exists. A term past the programme's derived end
- * (or a non-position: 0, negative, fractional, text) is a 400 too. Branch
- * confinement follows the PROGRAMME (a branch admin can only ladder a programme
- * it can touch), exactly like the programme and mapping routes.
- */
-async function resolveLadder(session: SessionUser, rawProgramId: unknown, rawTerm: unknown): Promise<LadderResult> {
-  const programId = read(rawProgramId);
-  if (!programId) return { ok: false, status: 400, message: "programId is required." };
-
-  const program = await prisma.program.findUnique({ where: { id: programId } });
-  if (!program || (program as any).schoolId !== session.schoolId) {
-    return { ok: false, status: 400, message: "Program not found in this school." };
-  }
-  if ((program as any).status && (program as any).status !== "ACTIVE") {
-    return { ok: false, status: 400, message: "The program is not active." };
-  }
-  if (!canAccessBranch(session, (program as any).branchId)) {
-    return { ok: false, status: 403, message: "Forbidden" };
-  }
-
-  const total = termCount(Number((program as any).durationYears), (program as any).termSystem);
-  const from = normalizeTermNumber(coerceTerm(rawTerm));
-  if (from === null || total === 0 || from > total) {
-    return { ok: false, status: 400, message: `fromTermNumber must be a whole number from 1 to ${total}.` };
-  }
-  return { ok: true, ladder: { program, programId, fromTermNumber: from, termCount: total } };
-}
-
-/**
- * The cohort at `(programme, term)` — recomputed server-side on every call.
- *
- * Scoped with `scopeWhere` (tenant, plus the session's branch when it is
- * branch-scoped) and `ON_ROLL_STUDENT` (ALUMNI and TRANSFERRED are never
- * promoted — the school ladder's existing rule, reused verbatim). The strict
- * `programId` + `termNumber` equality is what makes the cohort, and its
- * idempotency, structural (D2/D3); a student with no programme can never match.
- */
-async function readCohort(session: SessionUser, ladder: Ladder): Promise<CollegeCohortStudent[]> {
-  const where = scopeWhere(session, {
-    programId: ladder.programId,
-    termNumber: ladder.fromTermNumber,
-    ...ON_ROLL_STUDENT,
-  });
-  const rows = await prisma.student.findMany({
-    where,
-    select: { id: true, programId: true, termNumber: true, classId: true, status: true },
-  });
-  return rows as unknown as CollegeCohortStudent[];
-}
-
-/**
- * `studentId → pending registration count`, DISPLAY ONLY (D6).
- *
- * Counts this programme's PENDING rows at the position being advanced. It is an
- * input to the preview alone: `buildCollegePromotionPreview` carries it on the row
- * and never uses it to include or exclude anybody.
- */
-async function readPendingCounts(session: SessionUser, ladder: Ladder): Promise<Record<string, number>> {
-  const rows = await prisma.courseRegistration.findMany({
-    where: scopeWhere(session, { programId: ladder.programId }),
-    select: { studentId: true, termNumber: true, status: true },
-  });
-  const counts: Record<string, number> = {};
-  for (const r of rows as any[]) {
-    if (normalizeRegistrationStatus(r.status) !== "PENDING") continue;
-    if (Number(r.termNumber) !== ladder.fromTermNumber) continue;
-    if (typeof r.studentId !== "string" || !r.studentId) continue;
-    counts[r.studentId] = (counts[r.studentId] || 0) + 1;
-  }
-  return counts;
-}
 
 /** GET — the preview for one (programme, term) position. Reads only. */
 export async function GET(req: NextRequest) {
@@ -256,7 +151,7 @@ export async function POST(req: NextRequest) {
   const ops: any[] = [];
   const flush = async () => {
     while (ops.length) {
-      const slice = ops.splice(0, BATCH);
+      const slice = ops.splice(0, PROMOTION_BATCH);
       await prisma.$transaction(slice);
     }
   };
@@ -272,7 +167,7 @@ export async function POST(req: NextRequest) {
     ops.push(prisma.student.update({ where: { id: student.id }, data }));
     if (graduating) graduated += 1;
     else promoted += 1;
-    if (ops.length >= BATCH) await flush();
+    if (ops.length >= PROMOTION_BATCH) await flush();
   }
   await flush();
 
