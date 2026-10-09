@@ -37,6 +37,11 @@ if (!CRED.admin || !CRED.teacher || !CRED.student) {
 // Emulator-only, credential-free init with the SAME project id as seed.mjs, so
 // the fixture and the seeded tenants share one emulator namespace. No
 // service-account.json, no cert(), no applicationDefault().
+//
+// INTEGRATION 1: origin/main's side of this conflict read service-account.json /
+// applicationDefault() and selected `process.env.FIRESTORE_DB_ID`; that named-DB
+// path is deliberately not used by this emulator-only script (see
+// docs/INTEGRATION-LOG.md and the FIRESTORE_DB_ID rule in scripts/lib/guard.mjs).
 initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID || undefined });
 const db = getFirestore();
 

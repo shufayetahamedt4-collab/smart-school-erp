@@ -56,10 +56,13 @@ function assertLiveFirestoreAllowed(): void {
 export function getDb(): Firestore {
   if (!_db) {
     assertLiveFirestoreAllowed();
-    // Database selection is configuration-driven. Set FIRESTORE_DATABASE_ID to
-    // target a named database; when unset it resolves to "(default)", which is
-    // the rollback database (no code change is needed to roll back).
-    const databaseId = process.env.FIRESTORE_DATABASE_ID;
+    // Database selection is configuration-driven. FIRESTORE_DATABASE_ID is the
+    // CANONICAL name (docs/ENVIRONMENTS-AND-SECRETS.md); FIRESTORE_DB_ID is
+    // accepted as a documented ALIAS — it is origin/main's cutover switch name
+    // (docs/INTEGRATION-LOG.md). When BOTH are set, FIRESTORE_DATABASE_ID wins.
+    // Unset => the project's "(default)" database, which is the rollback
+    // database (no code change is needed to roll back).
+    const databaseId = process.env.FIRESTORE_DATABASE_ID || process.env.FIRESTORE_DB_ID;
     _db = databaseId
       ? getFirestore(adminApp(), databaseId)
       : getFirestore(adminApp());

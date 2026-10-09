@@ -55,7 +55,7 @@ export default function OnboardingMonitorPage() {
   const [filters, setFilters] = useState({ status: "", classId: "", sectionId: "", sessionId: "", batchId: "", branchId: "", q: "" });
 
   const load = (f = filters) =>
-    api<Data>(`/api/onboarding${qs({
+    api<Data>(`/api/guardian-onboarding${qs({
       status: f.status || undefined,
       classId: f.classId || undefined,
       sectionId: f.sectionId || undefined,

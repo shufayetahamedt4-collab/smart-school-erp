@@ -101,7 +101,55 @@ export async function assertSchoolCanWrite(schoolId: string): Promise<Subscripti
   return state;
 }
 
+/**
+ * PRD §12.1 — enforce the plan's maxStudents limit on student-adding writes
+ * (admission enrollment, manual student create, CSV import). Throws a 402
+ * with an upgrade-oriented message when the school is at/over its cap.
+ * Schools with no plan (or a plan without a limit) are unlimited.
+ */
+export async function assertPlanStudentLimit(schoolId: string, adding = 1): Promise<void> {
+  const state = await getSubscriptionState(schoolId);
+  const max = state.maxStudents;
+  if (max === null || max === undefined) return;
+  const current = await prisma.student.count({
+    where: { schoolId, status: { notIn: ["ALUMNI", "TRANSFERRED"] } },
+  });
+  if (current + adding > max) {
+    const err = new Error(
+      `Plan limit reached — ${state.planName || "current"} plan allows ${max} students and this school has ${current}. Upgrade the plan to add more.`
+    ) as Error & { status: number };
+    err.status = 402;
+    throw err;
+  }
+}
+
+/**
+ * Route-friendly plan-limit guard: returns a 402 response when the school is
+ * at/over its plan's student cap, or null when the write may proceed.
+ */
+export async function planLimitGuard(schoolId: string | null | undefined, adding = 1): Promise<NextResponse | null> {
+  if (!schoolId) return null;
+  try {
+    await assertPlanStudentLimit(schoolId, adding);
+    return null;
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || "Plan student limit reached" }, { status: 402 });
+  }
+}
+
 /** Soft warning (banner) — non-throwing variant for UI/state checks. */
+/**
+ * Students used vs. the plan's cap (for the school-side billing page §12.1).
+ * Unlimited plans return used = current count, limit = null.
+ */
+export async function studentUsageFor(schoolId: string): Promise<{ used: number; limit: number | null }> {
+  const used = await prisma.student.count({
+    where: { schoolId, status: { notIn: ["ALUMNI", "TRANSFERRED"] } },
+  });
+  const state = await getSubscriptionState(schoolId);
+  return { used, limit: state.maxStudents };
+}
+
 export async function subscriptionStateForSession(schoolId: string | null | undefined): Promise<SubscriptionState | null> {
   if (!schoolId) return null;
   try {

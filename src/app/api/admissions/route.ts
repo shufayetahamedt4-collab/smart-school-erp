@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import type { AdmissionStatus } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { planLimitGuard } from "@/lib/subscription";
 import {
   canTransition,
   suggestClassIndex,
@@ -85,6 +86,12 @@ export async function POST(req: NextRequest) {
     if (!can(session.role, "admission", "full") && !can(session.role, "admission", "entry")) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    // PRD §12.1 — plan maxStudents cap on enrollment. INTEGRATION 1: this guard
+    // sits BEFORE the admission lookup and the body parse, which is origin/main's
+    // order (its QA suite asserts 402 "before lookup"); the auto-merge had placed
+    // it inside the try below. docs/INTEGRATION-LOG.md.
+    const limit = await planLimitGuard(schoolId);
+    if (limit) return limit;
     const body = await req.json().catch(() => null);
     const admissionId = String(body?.admissionId || "");
     const enrAdmission = await prisma.admission.findUnique({ where: { id: admissionId } });

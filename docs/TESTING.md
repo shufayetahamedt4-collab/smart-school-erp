@@ -79,6 +79,7 @@ These must be **unset**:
 | Variable | Why it must be unset |
 |---|---|
 | `FIRESTORE_DATABASE_ID` | It selects a **named Cloud** database (`smart-school-db` in production). Set it and the app talks to real data. The emulator is selected **only** by `FIRESTORE_EMULATOR_HOST`. |
+| `FIRESTORE_DB_ID` | The **alias** for `FIRESTORE_DATABASE_ID` (`src/lib/firebase.ts` reads either, the canonical name winning when both are set). It must be unset for the same reason — and `requireEmulator()` rejects it explicitly, so an exported cutover value cannot slip past the guard. |
 | `FIREBASE_CLIENT_EMAIL` | The emulator needs no credentials. |
 | `FIREBASE_PRIVATE_KEY` | The emulator needs no credentials. |
 | `SMOKE_ORIGIN` | Pointing it at a deployment makes the HTTP half of a script write to that deployment regardless of the emulator. Must be **unset or loopback**. |
@@ -88,7 +89,7 @@ In short, the guard requires all of the following:
 
 - `FIRESTORE_EMULATOR_HOST` is set and resolves to a loopback host
   (`localhost`, `127.0.0.0/8`, or `::1`);
-- `FIRESTORE_DATABASE_ID` is unset;
+- `FIRESTORE_DATABASE_ID` **and its alias `FIRESTORE_DB_ID`** are unset;
 - `FIREBASE_PROJECT_ID`, if set, is only paired with a loopback emulator host;
 - `SMOKE_ORIGIN`, `BASE` and `BASE_URL`, if set, resolve to a loopback host;
 - `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` are unset.
@@ -117,14 +118,17 @@ Already guarded: `smoke-all.mjs` and the full `verify-*.mjs` suite.
 ## 5. Never agent-runnable — production-targeted scripts
 
 These are **not** guarded with `requireEmulator()` because their deliberate purpose is to touch
-real credentials or a real project. They terminate immediately, before reading credentials,
-building a Firestore/HTTP client, or opening a network connection:
+real credentials or a real project. They terminate immediately (or refuse to start), before
+reading credentials, building a Firestore/HTTP client, or opening a network connection. The
+post-merge pair from `origin/main` uses the `ALLOW_LIVE_FIRESTORE=1` opt-in instead of an
+unconditional exit, because `PROGRESS.md` records them as permanent cutover tools an operator
+must be able to re-run:
 
 | Script | Behaviour |
 |---|---|
 | `scripts/wire-env.mjs` | Reads the **production** `service-account.json` and writes its credentials into `.env`. Prints `[SAFETY] This script targets the production environment and must never be run by an agent.` and `process.exit(1)`. |
 | `scripts/verify-deployed-rules.mjs` | Hard-codes the real project (`amar-e-school`) and deploys/reads its security rules. Exits immediately. |
-| `scripts/migrate-firestore.mjs`, `scripts/verify-firestore-parity.mjs` | Production Firestore cutover/parity tools. **Not present on this branch** (`origin/main` only); if ever ported here they must be hard-blocked the same way. |
+| `scripts/migrate-firestore.mjs`, `scripts/verify-firestore-parity.mjs` | Production Firestore cutover / parity tools, merged in from `origin/main` by integration 1. Both target the LIVE project (`amar-e-school`: `(default)` africa-south1 ↔ `smart-school-db` asia-southeast1) and read `service-account.json`. They **fail closed**: they refuse to start (exit 1, `[SAFETY]` banner) unless the operator sets `ALLOW_LIVE_FIRESTORE=1` deliberately — the same opt-in `src/lib/firebase.ts` uses to reach live Firestore. |
 
 Production migration, cutover and parity scripts are **never agent-runnable** — regardless of
 environment.

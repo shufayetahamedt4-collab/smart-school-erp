@@ -15,8 +15,13 @@ env:
   - variable: JWT_SECRET
     secret: JWT_SECRET
 
-  # Firestore database selection. Unset => "(default)" (the rollback
-  # database). Set to the named database for the asia-southeast1 cutover.
+  # Firestore database selection — the asia-southeast1 database next to the
+  # backend. Unset or "(default)" = the africa-south1 database (the rollback DB).
+  # FIRESTORE_DATABASE_ID is the CANONICAL name; src/lib/firebase.ts also accepts
+  # FIRESTORE_DB_ID as a documented ALIAS (origin/main's cutover switch). Both
+  # read the same database, and FIRESTORE_DATABASE_ID wins if both are set, so
+  # only the canonical variable is set here — one name, one behaviour
+  # (docs/INTEGRATION-LOG.md, docs/ENVIRONMENTS-AND-SECRETS.md).
   - variable: FIRESTORE_DATABASE_ID
     value: smart-school-db
 
@@ -27,6 +32,7 @@ env:
   # Not a secret: the bucket name is already in the web app config.
   - variable: FIREBASE_STORAGE_BUCKET
     value: amar-e-school.firebasestorage.app
+
 
   # Public origin — used for QR links and storage download URLs.
   # ⚠️ Replace with the real App Hosting URL after the first deploy
@@ -41,10 +47,10 @@ env:
     value: "1"
 
 runConfig:
-  # One instance always warm: measured on this project, a cold instance added
-  # ~150-300ms on top of the Firestore round trip for the first click after an
-  # idle gap. Set by the perf(infra) session on main — kept here so rolling out
-  # this branch does not undo it.
+  # One always-warm instance kills cold starts (scale-to-zero reconnection cost
+  # was visible as +150–300 ms on the first request after idle). Kept by
+  # college-support from the perf(infra) session on main so rolling out this
+  # branch does not undo it.
   minInstances: 1
   maxInstances: 10
   concurrency: 80

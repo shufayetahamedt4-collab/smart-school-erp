@@ -174,6 +174,10 @@ const COLS: Record<string, string> = {
   // `rand()`; nothing uses `create` here, because a claim must be atomic and
   // goes through `$claim` instead.
   promotionRun: "promotionRuns",
+  // ---- Certificates (origin/main) ----
+  // Custom per-school certificate templates. The union keeps this next to the
+  // college collections above (integration 1, docs/INTEGRATION-LOG.md).
+  certificateTemplate: "certificateTemplates",
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
@@ -736,6 +740,7 @@ const RELS: Record<string, Record<string, Rel>> = {
   },
   twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
+  certificateTemplate: { school: { to: "school", fk: "schoolId", kind: "one" } },
 };
 
 // ---------------------------------------------------------------------------
@@ -2256,6 +2261,8 @@ export const prisma = {
   // The ladder's lease row, addressed through the shim like every other model
   // (read/update/delete). `$claim` is the one write that must be atomic.
   promotionRun: model("promotionRun"),
+  // ---- Certificates (origin/main) ----
+  certificateTemplate: model("certificateTemplate"),
   $transaction: transaction,
   $claim: claim,
   // ---- College support (Phase 6-pre 4) ----

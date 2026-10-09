@@ -118,13 +118,13 @@ if (class1) {
 /* ---------------------------------------------------------- authorization */
 console.log("\n### authorization");
 {
-  const anon = await req(HOSTS.school, "/api/onboarding");
+  const anon = await req(HOSTS.school, "/api/guardian-onboarding");
   check("anonymous is refused (401)", anon.status === 401, `HTTP ${anon.status}`);
-  const t = await req(HOSTS.school, "/api/onboarding", { cookie: teacher });
+  const t = await req(HOSTS.school, "/api/guardian-onboarding", { cookie: teacher });
   check("a teacher is refused (403)", t.status === 403, `HTTP ${t.status}`);
-  const g = await req(HOSTS.school, "/api/onboarding", { cookie: guardian });
+  const g = await req(HOSTS.school, "/api/guardian-onboarding", { cookie: guardian });
   check("a guardian is refused (403)", g.status === 403, `HTTP ${g.status}`);
-  const a = await req(HOSTS.school, "/api/onboarding", { cookie: admin });
+  const a = await req(HOSTS.school, "/api/guardian-onboarding", { cookie: admin });
   check("a school admin is allowed (200)", a.status === 200 && !!a.data?.summary, `HTTP ${a.status}`);
 }
 
@@ -134,7 +134,7 @@ const allStudents = (await req(HOSTS.school, "/api/students", { cookie: admin })
 const legacyStudent = allStudents.find((s) => !s.guardianOnboarding) || null;
 check("there is a markerless (legacy) student to check", !!legacyStudent, legacyStudent?.admissionNo);
 {
-  const leg = await req(HOSTS.school, "/api/onboarding?status=LEGACY&limit=500", { cookie: admin });
+  const leg = await req(HOSTS.school, "/api/guardian-onboarding?status=LEGACY&limit=500", { cookie: admin });
   const ids = (leg.data?.students || []).map((r) => r.id);
   check("a markerless student is classified LEGACY", !!legacyStudent && ids.includes(legacyStudent.id), `${ids.length} legacy row(s)`);
   check("every LEGACY row truly has no marker", (leg.data?.students || []).every((r) => r.status === "legacy"));
@@ -155,7 +155,7 @@ const existingGuardian = (await db.collection("users").where("schoolId", "==", s
   .find((u) => u.role === "GUARDIAN" && u.email) || null;
 check("there is an existing guardian for a LINKED row", !!existingGuardian, existingGuardian?.email);
 
-const before = (await req(HOSTS.school, "/api/onboarding", { cookie: admin })).data?.summary;
+const before = (await req(HOSTS.school, "/api/guardian-onboarding", { cookie: admin })).data?.summary;
 {
   const rows = [
     row({ name: `Onb Ready ${stamp}`, admissionNo: admReady, class: class1?.name, guardianName: `Onb Ready G ${stamp}`, guardianEmail: emailReady }),
@@ -167,7 +167,7 @@ const before = (await req(HOSTS.school, "/api/onboarding", { cookie: admin })).d
   check("the import created all three students", cm.status === 200 && cm.data?.totals?.created === 3, `HTTP ${cm.status} created=${cm.data?.totals?.created}`);
 }
 
-const after = (await req(HOSTS.school, "/api/onboarding", { cookie: admin })).data?.summary;
+const after = (await req(HOSTS.school, "/api/guardian-onboarding", { cookie: admin })).data?.summary;
 {
   check("CREDENTIALS_READY increased by the new-guardian row", after.credentialsReady - before.credentialsReady >= 1, `${before.credentialsReady} → ${after.credentialsReady}`);
   check("LINKED increased by the reused-guardian row", after.linked - before.linked >= 1, `${before.linked} → ${after.linked}`);
@@ -180,7 +180,7 @@ const after = (await req(HOSTS.school, "/api/onboarding", { cookie: admin })).da
 console.log("\n### batch filter + status filter + canPrintSlip");
 const statusByAdm = {};
 {
-  const b = await req(HOSTS.school, `/api/onboarding?batchId=${mainBatchId}&limit=500`, { cookie: admin });
+  const b = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${mainBatchId}&limit=500`, { cookie: admin });
   const rows = b.data?.students || [];
   check("the batch filter returns exactly the three rows", b.status === 200 && rows.length === 3 && b.data?.total === 3, `HTTP ${b.status} n=${rows.length}`);
   for (const r of rows) statusByAdm[r.admissionNo] = r;
@@ -190,19 +190,19 @@ const statusByAdm = {};
   check("only the credentialsReady row can print a slip", statusByAdm[admReady]?.canPrintSlip === true && statusByAdm[admLinked]?.canPrintSlip === false && statusByAdm[admIncomplete]?.canPrintSlip === false, JSON.stringify(rows.map((r) => [r.admissionNo, r.canPrintSlip])));
   check("every batch row exposes its batchId", rows.every((r) => r.batchId === mainBatchId));
 
-  const onlyReady = await req(HOSTS.school, `/api/onboarding?batchId=${mainBatchId}&status=CREDENTIALS_READY`, { cookie: admin });
+  const onlyReady = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${mainBatchId}&status=CREDENTIALS_READY`, { cookie: admin });
   check("the status filter narrows to one credentialsReady row", (onlyReady.data?.students || []).length === 1 && onlyReady.data.students[0].admissionNo === admReady, JSON.stringify((onlyReady.data?.students || []).map((r) => r.admissionNo)));
-  const onlyLinked = await req(HOSTS.school, `/api/onboarding?batchId=${mainBatchId}&status=LINKED`, { cookie: admin });
+  const onlyLinked = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${mainBatchId}&status=LINKED`, { cookie: admin });
   check("the status filter narrows to one linked row", (onlyLinked.data?.students || []).length === 1 && onlyLinked.data.students[0].admissionNo === admLinked, JSON.stringify((onlyLinked.data?.students || []).map((r) => r.admissionNo)));
-  const onlyIncomplete = await req(HOSTS.school, `/api/onboarding?batchId=${mainBatchId}&status=INCOMPLETE`, { cookie: admin });
+  const onlyIncomplete = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${mainBatchId}&status=INCOMPLETE`, { cookie: admin });
   check("the status filter narrows to one incomplete row", (onlyIncomplete.data?.students || []).length === 1 && onlyIncomplete.data.students[0].admissionNo === admIncomplete, JSON.stringify((onlyIncomplete.data?.students || []).map((r) => r.admissionNo)));
 
-  const byClass = await req(HOSTS.school, `/api/onboarding?batchId=${mainBatchId}&classId=${class1?.id}`, { cookie: admin });
+  const byClass = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${mainBatchId}&classId=${class1?.id}`, { cookie: admin });
   check("the class filter keeps the batch rows", (byClass.data?.students || []).length === 3, `n=${(byClass.data?.students || []).length}`);
-  const wrongClass = await req(HOSTS.school, `/api/onboarding?batchId=${mainBatchId}&classId=cls_nope`, { cookie: admin });
+  const wrongClass = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${mainBatchId}&classId=cls_nope`, { cookie: admin });
   check("a non-matching class yields no rows", (wrongClass.data?.students || []).length === 0, `n=${(wrongClass.data?.students || []).length}`);
 
-  const byQ = await req(HOSTS.school, `/api/onboarding?q=${encodeURIComponent(admReady)}`, { cookie: admin });
+  const byQ = await req(HOSTS.school, `/api/guardian-onboarding?q=${encodeURIComponent(admReady)}`, { cookie: admin });
   check("the search filter finds the row by admission number", (byQ.data?.students || []).some((r) => r.admissionNo === admReady), `n=${(byQ.data?.students || []).length}`);
 }
 
@@ -211,9 +211,9 @@ console.log("\n### foreign batch is refused (404)");
 {
   const foreignId = `imp_onb_foreign_${stamp}`;
   await db.collection("importBatches").doc(foreignId).set({ schoolId: `s_other_${stamp}`, module: "students", status: "DONE" });
-  const r = await req(HOSTS.school, `/api/onboarding?batchId=${foreignId}`, { cookie: admin });
+  const r = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${foreignId}`, { cookie: admin });
   check("a batch from another school answers 404", r.status === 404, `HTTP ${r.status}`);
-  const missing = await req(HOSTS.school, `/api/onboarding?batchId=imp_missing_${stamp}`, { cookie: admin });
+  const missing = await req(HOSTS.school, `/api/guardian-onboarding?batchId=imp_missing_${stamp}`, { cookie: admin });
   check("an unknown batch answers 404", missing.status === 404, `HTTP ${missing.status}`);
   await db.collection("importBatches").doc(foreignId).delete();
 }
@@ -251,14 +251,14 @@ console.log("\n### branch isolation with a real BRANCH_ADMIN");
   const cmA = await post(HOSTS.school, "/api/import/students/commit", { fileName: "onb-brancha.csv", headers: HEADERS, rows: numbered([row({ name: `Onb BranchA ${stamp}`, admissionNo: admA, class: class1?.name, guardianName: `Onb BranchA G ${stamp}`, guardianEmail: emailA })]), allowWarnings: true, totalRows: 1, final: true }, branchAdmin);
   check("the branch admin imports into its own branch", cmA.status === 200 && cmA.data?.totals?.created === 1, `HTTP ${cmA.status} ${cmA.error || ""}`);
 
-  const scoped = await req(HOSTS.school, "/api/onboarding?limit=500", { cookie: branchAdmin });
+  const scoped = await req(HOSTS.school, "/api/guardian-onboarding?limit=500", { cookie: branchAdmin });
   check("the branch admin can read the monitor (200)", scoped.status === 200, `HTTP ${scoped.status}`);
   const scopedAdms = (scoped.data?.students || []).map((r) => r.admissionNo);
   check("the branch admin sees its own branch's student", scopedAdms.includes(admA), `${scopedAdms.length} row(s)`);
   check("the branch admin never sees branch B's student", !scopedAdms.includes(admB), `${scopedAdms.length} row(s)`);
   check("the branch admin sees only its own branch", (scoped.data?.students || []).every((r) => r.branchId === branchA?.id || r.branchId === null), "branch filter");
 
-  const crossBatch = await req(HOSTS.school, `/api/onboarding?batchId=${branchBatchId}`, { cookie: branchAdmin });
+  const crossBatch = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${branchBatchId}`, { cookie: branchAdmin });
   check("the branch admin cannot filter by another branch's batch (404)", crossBatch.status === 404, `HTTP ${crossBatch.status}`);
 
   const ownBranchOption = (scoped.data?.options?.batches || []).map((b) => b.id);
@@ -275,13 +275,13 @@ guardianEmails.push(orphanEmail);
   const cm = await post(HOSTS.school, "/api/import/students/commit", { fileName: "onb-orphan.csv", headers: HEADERS, rows: numbered([row({ name: `Onb Orphan ${stamp}`, admissionNo: admOrphan, class: class1?.name, guardianName: `Onb Orphan G ${stamp}`, guardianEmail: orphanEmail })]), allowWarnings: true, totalRows: 1, final: true }, admin);
   orphanBatchId = cm.data?.batchId || null;
 
-  const preUndo = (await req(HOSTS.school, "/api/onboarding?limit=500", { cookie: admin })).data;
+  const preUndo = (await req(HOSTS.school, "/api/guardian-onboarding?limit=500", { cookie: admin })).data;
   check("the provisioned account is NOT orphaned while it has a child", !(preUndo?.orphanedAccounts || []).some((g) => g.email === orphanEmail));
 
   const un = await post(HOSTS.school, `/api/import/students/${orphanBatchId}/undo`, {}, admin);
   check("undo removes the imported student", un.status === 200 && un.data?.removedStudents === 1, JSON.stringify(un.data));
 
-  const postUndo = (await req(HOSTS.school, "/api/onboarding?limit=500", { cookie: admin })).data;
+  const postUndo = (await req(HOSTS.school, "/api/guardian-onboarding?limit=500", { cookie: admin })).data;
   const orphans = postUndo?.orphanedAccounts || [];
   check("the account becomes orphaned after undo", orphans.some((g) => g.email === orphanEmail), JSON.stringify(orphans.map((g) => g.email)));
   check("orphaned accounts are separate from student status totals", postUndo.summary.total === postUndo.summary.credentialsReady + postUndo.summary.linked + postUndo.summary.incomplete + postUndo.summary.legacy, JSON.stringify(postUndo.summary));

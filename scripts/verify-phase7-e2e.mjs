@@ -642,11 +642,11 @@ async function main() {
   /* ---------------------------------------------------------- 8. onboarding monitor */
   sec("8. onboarding monitor (LINKED / CREDENTIALS_READY / INCOMPLETE / LEGACY / orphan / filters)");
   {
-    const anon = await req(HOSTS.school, "/api/onboarding");
+    const anon = await req(HOSTS.school, "/api/guardian-onboarding");
     check("anonymous is refused (401)", anon.status === 401, `HTTP ${anon.status}`);
-    const t = await req(HOSTS.school, "/api/onboarding", { cookie: teacher });
+    const t = await req(HOSTS.school, "/api/guardian-onboarding", { cookie: teacher });
     check("a teacher is refused (403)", t.status === 403, `HTTP ${t.status}`);
-    const mon = await req(HOSTS.school, "/api/onboarding?limit=500", { cookie: admin });
+    const mon = await req(HOSTS.school, "/api/guardian-onboarding?limit=500", { cookie: admin });
     const sum = mon.data?.summary || {};
     check("the school admin reads the monitor (200)", mon.status === 200 && !!sum.total, `HTTP ${mon.status}`);
     check("summary totals add up", sum.total === sum.credentialsReady + sum.linked + sum.incomplete + sum.legacy, JSON.stringify(sum));
@@ -655,11 +655,11 @@ async function main() {
     check("INCOMPLETE is present (no-contact / ambiguous rows)", sum.incomplete >= 2, `incomplete=${sum.incomplete}`);
     // New Admission students have no marker → LEGACY
     const legacyStudent = (await fsDocs("students", "schoolId", SYN)).find((s) => !s.guardianOnboarding);
-    const leg = await req(HOSTS.school, `/api/onboarding?status=LEGACY&limit=500`, { cookie: admin });
+    const leg = await req(HOSTS.school, `/api/guardian-onboarding?status=LEGACY&limit=500`, { cookie: admin });
     check("a markerless New-Admission student is classified LEGACY", !!legacyStudent && (leg.data?.students || []).some((r) => r.id === legacyStudent.id), `${(leg.data?.students || []).length} legacy`);
     check("LEGACY rows genuinely carry no marker", (leg.data?.students || []).every((r) => r.status === "legacy"));
 
-    const byBatch = await req(HOSTS.school, `/api/onboarding?batchId=${batch1}&limit=500`, { cookie: admin });
+    const byBatch = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${batch1}&limit=500`, { cookie: admin });
     check("the batch filter returns batch 1's rows", byBatch.status === 200 && (byBatch.data?.students || []).length >= 9, `n=${(byBatch.data?.students || []).length}`);
     const stMap = {};
     for (const r of byBatch.data?.students || []) stMap[r.admissionNo] = r;
@@ -667,9 +667,9 @@ async function main() {
     check("the reused-guardian row is linked", stMap[`P7-IMP-${stamp}-5`]?.status === "linked", String(stMap[`P7-IMP-${stamp}-5`]?.status));
     check("the ambiguous/no-contact row is incomplete", stMap[ambAdm]?.status === "incomplete" && stMap[`P7-IMP-${stamp}-9`]?.status === "incomplete", `${stMap[ambAdm]?.status}/${stMap[`P7-IMP-${stamp}-9`]?.status}`);
     check("only credentialsReady rows can print a slip", (byBatch.data?.students || []).every((r) => r.canPrintSlip === (r.status === "credentialsReady" && !!r.batchId)));
-    const byClass = await req(HOSTS.school, `/api/onboarding?batchId=${batch1}&classId=${cls1}`, { cookie: admin });
+    const byClass = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${batch1}&classId=${cls1}`, { cookie: admin });
     check("the class filter narrows the batch rows", (byClass.data?.students || []).length >= 1 && (byClass.data?.students || []).every((r) => r.classId === cls1), `n=${(byClass.data?.students || []).length}`);
-    const byQ = await req(HOSTS.school, `/api/onboarding?q=${encodeURIComponent(`P7-IMP-${stamp}-1`)}`, { cookie: admin });
+    const byQ = await req(HOSTS.school, `/api/guardian-onboarding?q=${encodeURIComponent(`P7-IMP-${stamp}-1`)}`, { cookie: admin });
     check("the search filter finds a row by admission number", (byQ.data?.students || []).some((r) => r.admissionNo === `P7-IMP-${stamp}-1`));
 
     // orphaned account after undo
@@ -679,24 +679,24 @@ async function main() {
     SYN_EMAILS.push(orphanEmail);
     const ob = await commit("p7-orphan.csv", [mkRow({ name: `P7 Orphan ${stamp}`, admissionNo: orphanAdm, class: "Class 7", guardianName: `P7 Orphan Guardian ${stamp}`, guardianEmail: orphanEmail })], { branchId: branchA.id });
     const orphanBatch = ob.data?.batchId;
-    const pre = await req(HOSTS.school, "/api/onboarding?limit=500", { cookie: admin });
+    const pre = await req(HOSTS.school, "/api/guardian-onboarding?limit=500", { cookie: admin });
     check("a provisioned account is not orphaned while it has a child", !(pre.data?.orphanedAccounts || []).some((g) => g.email === orphanEmail));
     const un = await post(HOSTS.school, `/api/import/students/${orphanBatch}/undo`, {}, admin);
     check("import undo removes the created student", un.status === 200 && Number(un.data?.removedStudents) === 1, JSON.stringify(un.data));
-    const post2 = await req(HOSTS.school, "/api/onboarding?limit=500", { cookie: admin });
+    const post2 = await req(HOSTS.school, "/api/guardian-onboarding?limit=500", { cookie: admin });
     check("the account becomes orphaned after undo", (post2.data?.orphanedAccounts || []).some((g) => g.email === orphanEmail));
     check("orphaned accounts stay out of the student status totals", post2.data.summary.total === post2.data.summary.credentialsReady + post2.data.summary.linked + post2.data.summary.incomplete + post2.data.summary.legacy);
 
     // branch filtering
-    const scoped = await req(HOSTS.school, "/api/onboarding?limit=500", { cookie: branchAdmin });
+    const scoped = await req(HOSTS.school, "/api/guardian-onboarding?limit=500", { cookie: branchAdmin });
     check("the branch admin can read the monitor (200)", scoped.status === 200, `HTTP ${scoped.status}`);
     check("the branch admin sees only its own branch", (scoped.data?.students || []).every((r) => r.branchId === branchB.id || r.branchId === null), `n=${(scoped.data?.students || []).length}`);
-    const crossBatch = await req(HOSTS.school, `/api/onboarding?batchId=${batch1}`, { cookie: branchAdmin });
+    const crossBatch = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${batch1}`, { cookie: branchAdmin });
     check("the branch admin cannot filter by another branch's batch (404)", crossBatch.status === 404, `HTTP ${crossBatch.status}`);
     // foreign batch
     const foreignId = `imp_p7_foreign_${stamp}`;
     await db.collection("importBatches").doc(foreignId).set({ schoolId: `s_other_${stamp}`, module: "students", status: "DONE" });
-    const fb = await req(HOSTS.school, `/api/onboarding?batchId=${foreignId}`, { cookie: admin });
+    const fb = await req(HOSTS.school, `/api/guardian-onboarding?batchId=${foreignId}`, { cookie: admin });
     check("a foreign-school batch answers 404", fb.status === 404, `HTTP ${fb.status}`);
     await db.collection("importBatches").doc(foreignId).delete().catch(() => null);
   }

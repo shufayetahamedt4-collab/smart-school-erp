@@ -70,6 +70,17 @@ export function requireEmulator(scriptName = process.argv[1] || "script") {
     );
   }
 
+  // INTEGRATION 1: `FIRESTORE_DB_ID` is the documented ALIAS for
+  // FIRESTORE_DATABASE_ID (src/lib/firebase.ts reads either; origin/main's cutover
+  // switch used this name). Now that the app honours it, the guard must reject it
+  // too — otherwise a shell holding the cutover value could point an emulator run
+  // at the named Cloud database. docs/INTEGRATION-LOG.md, docs/TESTING.md.
+  if (String(process.env.FIRESTORE_DB_ID || "").trim()) {
+    problems.push(
+      "FIRESTORE_DB_ID is set — it is the alias for FIRESTORE_DATABASE_ID and selects a named Cloud database; it must be unset for emulator runs"
+    );
+  }
+
   const project = String(process.env.FIREBASE_PROJECT_ID || "").trim();
   if (project && !emulatorIsLoopback) {
     problems.push(

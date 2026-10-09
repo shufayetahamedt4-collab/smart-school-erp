@@ -25,6 +25,12 @@ requireEmulator();
 // Emulator-only, credential-free init with the SAME project id as seed.mjs and
 // the verifier, so the fixture lands in the namespace the emulator seed uses.
 // No service-account.json, no cert(), no applicationDefault().
+//
+// INTEGRATION 1: origin/main's side of this conflict read service-account.json /
+// applicationDefault() and selected `process.env.FIRESTORE_DB_ID`. Both are
+// deliberately NOT used here — this script is emulator-only by design, and
+// `requireEmulator()` (plus the FIRESTORE_DB_ID rule added to guard.mjs) fails
+// closed if a named Cloud database is ever named. See docs/INTEGRATION-LOG.md.
 initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID || undefined });
 const db = getFirestore();
 

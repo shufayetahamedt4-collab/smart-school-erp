@@ -91,12 +91,20 @@ const API_DIR = join(ROOT, "src", "app", "api");
  * Every NON-college top-level directory under `src/app/api`, frozen. A directory
  * that is neither listed here nor in `COLLEGE_API_SEGMENTS` is unclassified and
  * fails check 1 — which is the point: adding an API surface is a decision.
+ *
+ * INTEGRATION 1 added exactly three names, all genuinely non-college:
+ *   - `certificate-templates` and `export` came from origin/main's SaaS line
+ *     (custom certificate templates; the CSV export route);
+ *   - `guardian-onboarding` is the college-support guardian-onboarding MONITOR,
+ *     renamed off `/api/onboarding` so origin/main's tenant onboarding WIZARD can
+ *     keep that path (docs/INTEGRATION-LOG.md).
  */
 const FROZEN_NON_COLLEGE_API_DIRS = [
   "academic-sessions", "admissions", "assignments", "assistant", "attendance",
-  "auth", "books", "branches", "certificates", "chat", "class-sessions",
-  "classes", "complaints", "exams", "fee-categories", "fee-templates", "fees",
-  "gallery", "grading-scheme", "guardians", "health", "homework", "import",
+  "auth", "books", "branches", "certificate-templates", "certificates", "chat",
+  "class-sessions",
+  "classes", "complaints", "exams", "export", "fee-categories", "fee-templates", "fees",
+  "gallery", "grading-scheme", "guardian-onboarding", "guardians", "health", "homework", "import",
   "leave-requests", "ledger", "marks", "meetings", "messages", "mode", "notices",
   "notifications", "onboarding", "parent", "payments", "plans", "public", "qr",
   "quizzes", "remarks", "resources", "routine-config", "routines", "schools",

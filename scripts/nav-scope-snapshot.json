@@ -1,5 +1,5 @@
 {
-  "capturedFrom": "406ee9b:src/components/nav.ts (pre-Phase-1)",
+  "capturedFrom": "406ee9b:src/components/nav.ts (pre-Phase-1) + origin/main's four school nav items (integration 1, f4ed2a5)",
   "roles": [
     "SUPER_ADMIN",
     "SCHOOL_ADMIN",
@@ -80,6 +80,10 @@
         "Routine"
       ],
       [
+        "/dashboard/timetable",
+        "Timetable Builder"
+      ],
+      [
         "/dashboard/live-classes",
         "Live Classes"
       ],
@@ -106,6 +110,10 @@
       [
         "/dashboard/fees/payments",
         "Payment channels"
+      ],
+      [
+        "/dashboard/billing",
+        "Billing & Plan"
       ],
       [
         "/dashboard/ledger",
@@ -154,6 +162,14 @@
       [
         "/dashboard/reports",
         "Reports"
+      ],
+      [
+        "/dashboard/import-export",
+        "Import & Export"
+      ],
+      [
+        "/dashboard/certificate-templates",
+        "Certificate Templates"
       ],
       [
         "/dashboard/messages",
@@ -218,6 +234,10 @@
         "Routine"
       ],
       [
+        "/dashboard/timetable",
+        "Timetable Builder"
+      ],
+      [
         "/dashboard/live-classes",
         "Live Classes"
       ],
@@ -244,6 +264,10 @@
       [
         "/dashboard/fees/payments",
         "Payment channels"
+      ],
+      [
+        "/dashboard/billing",
+        "Billing & Plan"
       ],
       [
         "/dashboard/ledger",
@@ -288,6 +312,14 @@
       [
         "/dashboard/reports",
         "Reports"
+      ],
+      [
+        "/dashboard/import-export",
+        "Import & Export"
+      ],
+      [
+        "/dashboard/certificate-templates",
+        "Certificate Templates"
       ],
       [
         "/dashboard/messages",
@@ -553,6 +585,7 @@
           "/dashboard/academic-sessions",
           "/dashboard/subjects",
           "/dashboard/routine",
+          "/dashboard/timetable",
           "/dashboard/live-classes",
           "/dashboard/exams",
           "/dashboard/grades",
@@ -581,6 +614,7 @@
           "/dashboard/fees",
           "/dashboard/fees/structure",
           "/dashboard/fees/payments",
+          "/dashboard/billing",
           "/dashboard/ledger"
         ]
       ],
@@ -604,6 +638,8 @@
           "/dashboard/gallery",
           "/dashboard/id-cards",
           "/dashboard/reports",
+          "/dashboard/import-export",
+          "/dashboard/certificate-templates",
           "/dashboard/branches"
         ]
       ],
@@ -631,6 +667,7 @@
           "/dashboard/academic-sessions",
           "/dashboard/subjects",
           "/dashboard/routine",
+          "/dashboard/timetable",
           "/dashboard/live-classes",
           "/dashboard/exams",
           "/dashboard/grades",
@@ -658,6 +695,7 @@
           "/dashboard/fees",
           "/dashboard/fees/structure",
           "/dashboard/fees/payments",
+          "/dashboard/billing",
           "/dashboard/ledger"
         ]
       ],
@@ -681,6 +719,8 @@
           "/dashboard/gallery",
           "/dashboard/id-cards",
           "/dashboard/reports",
+          "/dashboard/import-export",
+          "/dashboard/certificate-templates",
           "/dashboard/branches"
         ]
       ],

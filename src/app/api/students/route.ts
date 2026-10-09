@@ -7,7 +7,7 @@ import { qrToken, qrPin } from "@/lib/qr";
 import { scopeWhere } from "@/lib/permissions";
 import { queryId } from "@/lib/utils";
 import { resolveBranchId } from "@/lib/branches";
-import { writeGuard } from "@/lib/subscription";
+import { writeGuard, planLimitGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 import { resolveCollegeEnrolment } from "@/lib/college-enrollment";
 
@@ -85,6 +85,8 @@ export async function POST(req: NextRequest) {
   if (locked) return locked; // PRD §12.1 — subscription auto-lock
   const body = await req.json().catch(() => null);
   if (!body || !body.name) return NextResponse.json({ error: "Student name is required." }, { status: 400 });
+  const limit = await planLimitGuard(schoolId);
+  if (limit) return limit; // PRD §12.1 — plan maxStudents cap
 
   const existing = await prisma.student.findFirst({
     where: { schoolId, admissionNo: String(body.admissionNo || "") },
