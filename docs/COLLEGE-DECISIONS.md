@@ -1315,8 +1315,8 @@ A small hardening pass before the push. It closes the two items the pre-push aud
   answered **200 with a measured lease window of 30 283 ms** (control, no file: 200 / 30 240 ms); the
   SAME file against a dev server answered **503** (fail-closed) — so the production result is not
   vacuous. The same audit found the two unguarded parameters (fixed here) and the stale gitignored
-  scratch files (`scripts/_tmp-*.mjs`, removed before this commit and NEVER committed — they are
-  ignored by `.gitignore:73`). It also confirmed that no seam is reachable from a header, body, query
+  scratch files (`scripts/_tmp-*.mjs`, removed AFTER this commit, in post-push housekeeping, and
+  NEVER committed — they are ignored by `.gitignore:73`). It also confirmed that no seam is reachable from a header, body, query
   parameter or environment variable: the only trigger is a JSON file in the OS temp directory.
 - **D-6pre6-5 — what did NOT change.** `permissions.ts`, `nav.ts`, `college-routes.ts`, `db.ts`,
   `students/promote`, `classes`, `college-promotion.ts`, the single-position route, the isolation

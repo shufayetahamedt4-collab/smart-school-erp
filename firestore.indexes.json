@@ -12,7 +12,7 @@
       "collectionGroup": "subscriptions",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "schoold", "order": "ASCENDING" },
+        { "fieldPath": "schoolId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     }
