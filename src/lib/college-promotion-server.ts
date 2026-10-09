@@ -44,14 +44,45 @@ import { normalizeTermNumber, type CollegeCohortStudent } from "@/lib/college-pr
 export const PROMOTION_BATCH = 400;
 
 /**
- * How long a whole-programme run may hold the programme's lease (Phase 6-pre 2,
- * docs/COLLEGE-DECISIONS.md §21). ONE constant: a run that crashes mid-step, or a
- * process that dies, must not wedge a programme for ever, so a lease older than
- * this is treated as abandoned and may be taken over. Two minutes is several times
- * the longest run the verifier exercises (a 405-student ladder), so the window is
- * about crash recovery, not about the run's normal duration.
+ * How long a run may go WITHOUT RENEWING its programme lease (Phase 6-pre 4,
+ * docs/COLLEGE-DECISIONS.md §22).
+ *
+ * Phase 6-pre 2 sized this as "longer than a whole run", which was the wrong shape:
+ * a run that outlived it could be taken over mid-flight and double-advance a cohort.
+ * The run now RENEWS before every step and before every ≤400-op slice flush
+ * (`renewProgrammeRun`), so this window only has to cover ONE slice — the longest gap
+ * between two renewals — and it is renewed on the run's own key, so a successor can
+ * still only take over a run that has genuinely stopped renewing.
+ *
+ * 30 s is a deliberate safety factor on a MEASURED slice (§22 records the numbers):
+ * 400 single-field writes in one `WriteBatch` against the local emulator took 195 ms
+ * cold and 23 / 14 ms warm, so the window covers a slice ~150× over. A production
+ * worst case (cold Cloud Firestore, a full batch, contention) is **NOT PROVEN** — it
+ * is reasoned about in §22 — and a crashed run is still recoverable in 30 s rather
+ * than two minutes.
  */
-export const LADDER_LEASE_MS = 2 * 60 * 1000;
+export const LADDER_LEASE_MS = 30 * 1000;
+
+/**
+ * The abort reason when a run discovers it no longer owns its lease (Phase 6-pre 4).
+ *
+ * It reaches the operator through the structured 500's `data.reason` — the response
+ * shape itself is unchanged — and it says what happened and what to do, because the
+ * run has stopped and the remaining terms now belong to the operator.
+ */
+export const LADDER_LEASE_LOST_MESSAGE =
+  "Another run has taken over this programme's lease, so this run stopped where it was. The terms reported as completed are already applied; finish the rest with the single-position apply, descending.";
+
+/**
+ * The refusal when the programme's run state cannot be READ (Phase 6-pre 4).
+ *
+ * The block used to fail OPEN (a read error read as "not blocked"), which would let a
+ * re-run double-advance a half-applied ladder precisely when the store is having
+ * trouble. It now fails CLOSED: the ladder does not start, nothing is written, and
+ * the operator is told to try again.
+ */
+export const LADDER_BLOCK_UNREADABLE_MESSAGE =
+  "This programme's run state could not be read, so the ladder was not started. Nothing was written. Try again in a moment.";
 
 /** The refusal a second, concurrent run receives. */
 export const LADDER_RUN_IN_PROGRESS_MESSAGE =
@@ -82,12 +113,25 @@ export function promotionRunId(schoolId: string, programId: string): string {
   return `run_${runHash(key, 5381)}${runHash(key, 131)}`;
 }
 
+/**
+ * WHO holds a claimed lease: the id the run records and the instant it was claimed.
+ * Both are written by `$claim` and compared by every later owned write, so a successor
+ * taking the row over changes them and the previous run can no longer renew, release
+ * or overwrite it (Phase 6-pre 4).
+ */
+export interface ProgrammeRunOwner {
+  ownerId: string | null;
+  acquiredAtMs: number;
+}
+
 /** What a claim attempt answered. */
 export interface ProgrammeRunClaim {
   /** The row's document id (deterministic from the pair). */
   id: string;
   /** True when THIS caller now holds the programme's lease. */
   claimed: boolean;
+  /** The key every later owned write (renew/release) must still match. */
+  owner: ProgrammeRunOwner;
 }
 
 /**
@@ -104,12 +148,17 @@ export interface ProgrammeRunClaim {
  * `expiresAtMs` (the lease), plus `finishedAt`, `completed` and `remainingTerms`
  * (filled in by `finaliseProgrammeRun`).
  */
-export async function claimProgrammeRun(input: {
-  schoolId: string;
-  programId: string;
-  branchId?: string | null;
-  ownerId?: string | null;
-}): Promise<ProgrammeRunClaim> {
+export async function claimProgrammeRun(
+  input: {
+    schoolId: string;
+    programId: string;
+    branchId?: string | null;
+    ownerId?: string | null;
+  },
+  /** TEST-ONLY override of the lease window (a shorter one lets a verifier outlive a
+   *  renewal interval deterministically); unset in production. */
+  options: { ttlMs?: number } = {}
+): Promise<ProgrammeRunClaim> {
   const id = promotionRunId(input.schoolId, input.programId);
   // When THIS request began asking. The claim is refused if the row it finds was
   // released after this instant, because that means the row was still held while
@@ -132,19 +181,53 @@ export async function claimProgrammeRun(input: {
       completed: [],
       remainingTerms: [],
     },
-    { ttlMs: LADDER_LEASE_MS, attemptedAtMs }
+    { ttlMs: options.ttlMs ?? LADDER_LEASE_MS, attemptedAtMs }
   );
-  return { id, claimed: result.claimed };
+  return {
+    id,
+    claimed: result.claimed,
+    owner: { ownerId: input.ownerId ?? null, acquiredAtMs: attemptedAtMs },
+  };
+}
+
+/**
+ * Renew this run's lease, atomically, only while it is still the owner
+ * (Phase 6-pre 4).
+ *
+ * Called before every step and before every ≤400-op slice flush. It is one
+ * transaction (`$renewOwned`): read, compare `ownerId` + `acquiredAtMs`, write the new
+ * expiry. `renewed: false` means the row is GONE or a successor holds it — the run
+ * must stop, write nothing further, and say so.
+ *
+ * A renewal never touches a row it does not own, so it cannot revive a lease that has
+ * already been taken over.
+ */
+export async function renewProgrammeRun(input: {
+  schoolId: string;
+  programId: string;
+  owner: ProgrammeRunOwner;
+  ttlMs?: number;
+}): Promise<{ renewed: boolean; reason?: string }> {
+  const result = await prisma.$renewOwned("promotionRun", promotionRunId(input.schoolId, input.programId), {
+    ownerId: input.owner.ownerId,
+    acquiredAtMs: input.owner.acquiredAtMs,
+    ttlMs: input.ttlMs ?? LADDER_LEASE_MS,
+  });
+  return result.ok ? { renewed: true } : { renewed: false, reason: result.reason };
 }
 
 /**
  * Release the lease and record how the run ended (Phase 6-pre 2).
  *
  * Called from the run's `finally`, on SUCCESS and on FAILURE alike, so a lease can
- * never outlive its run. It ALWAYS clears `expiresAtMs`, which is what makes the
- * lease released rather than merely re-stamped: the moment a run ends, the next
- * run is allowed — unless this run FAILED, in which case Phase 6-pre 3 refuses the
- * next LADDER run until the recorded work list has been applied.
+ * never outlive its run. It clears `expiresAtMs`, which is what makes the lease
+ * released rather than merely re-stamped: the moment a run ends, the next run is
+ * allowed — unless this run FAILED, in which case Phase 6-pre 3 refuses the next
+ * LADDER run until the recorded work list has been applied.
+ *
+ * Phase 6-pre 4: it does so ONLY while this run still owns the row. If a successor
+ * took the lease over, the row is left exactly as the successor left it, and the
+ * refusal is reported (`released: false`) instead of silently ignored.
  *
  * `status` is `"OK"` for a completed run and `"PARTIAL"` / `"FAILED"` for a run
  * that threw — the distinction `wroteAnything` already makes in the response.
@@ -159,41 +242,41 @@ export async function claimProgrammeRun(input: {
 export async function finaliseProgrammeRun(input: {
   schoolId: string;
   programId: string;
+  /** The key this run claimed with — the release happens ONLY if it still matches. */
+  owner: ProgrammeRunOwner;
   status: "OK" | "PARTIAL" | "FAILED";
   completed?: any[];
   remainingTerms?: number[];
   /** The terms that still have to be applied, DESCENDING (Phase 6-pre 3). */
   finishTerms?: number[];
   reason?: string | null;
-}): Promise<void> {
-  try {
-    await prisma.promotionRun.update({
-      where: { id: promotionRunId(input.schoolId, input.programId) },
-      data: {
-        status: input.status,
-        finishedAt: new Date().toISOString(),
-        completed: input.completed ?? [],
-        remainingTerms: input.remainingTerms ?? [],
-        // The failed term PLUS the terms never attempted, DESCENDING: the work list
-        // the single-position route strikes off, one term at a time (6-pre 3). Empty
-        // for a clean run, which is what makes an OK run never block.
-        finishTerms: input.finishTerms ?? [],
-        reason: input.reason ?? null,
-        // RELEASED: the lease is over whatever the outcome, so the next run may
-        // claim it. The release itself stays unconditional — what a FAILED run
-        // additionally changes is that a ladder RE-RUN is refused until the
-        // recorded work list is finished (Phase 6-pre 3, `readProgrammeRunBlock`).
-        expiresAtMs: 0,
-        // WHEN it was released. A claim that asked BEFORE this instant was asking
-        // while this run was in flight, and is refused as a concurrent run rather
-        // than queued behind it (`$claim`); a claim that asked after it is the
-        // ordinary re-run the 5b/5d verifiers pin, and is allowed.
-        releasedAtMs: Date.now(),
-      },
-    });
-  } catch {
-    /* best effort: never mask the run's own answer */
-  }
+}): Promise<{ released: boolean; reason?: string }> {
+  // PHASE 6-PRE 4: owned, NOT unconditional. `$releaseOwned` compares this run's key
+  // (ownerId + acquiredAtMs) inside a transaction and writes the ending ONLY if the
+  // row is still this run's. A run that lost its lease therefore cannot clear a
+  // SUCCESSOR's `expiresAtMs` or overwrite its status — which is what the previous
+  // unconditional merge update could do, letting a third run straight in.
+  const result = await prisma.$releaseOwned(
+    "promotionRun",
+    promotionRunId(input.schoolId, input.programId),
+    {
+      status: input.status,
+      finishedAt: new Date().toISOString(),
+      completed: input.completed ?? [],
+      remainingTerms: input.remainingTerms ?? [],
+      // The failed term PLUS the terms never attempted, DESCENDING: the work list the
+      // single-position route strikes off, one term at a time (6-pre 3). Empty for a
+      // clean run, which is what makes an OK run never block.
+      finishTerms: input.finishTerms ?? [],
+      reason: input.reason ?? null,
+      // `expiresAtMs: 0` and `releasedAtMs` are written BY the helper, on the same
+      // transaction that proved the row is still ours.
+    },
+    { ownerId: input.owner.ownerId, acquiredAtMs: input.owner.acquiredAtMs }
+  );
+  // Never thrown: a release that could not be written (or was refused because the
+  // lease is gone) is REPORTED to the caller and must not change the run's own answer.
+  return result.ok ? { released: true } : { released: false, reason: result.reason };
 }
 
 /* ---------------------------------------------------------------------------
@@ -252,10 +335,19 @@ export function ladderRunBlockedMessage(input: {
  * ladder's claim/finalise and that strike-off. Between this read and the claim, a
  * concurrent run is refused by the lease, so a `PARTIAL` row can never be seen as free:
  * the release and the `PARTIAL` status are written in the SAME update.
+ *
+ * PHASE 6-PRE 4 — it FAILS CLOSED. Until then a store error was swallowed and read as
+ * "not blocked", which would let a re-run double-advance a half-applied ladder exactly
+ * when the store is unhealthy. Now a read error is THROWN: the ladder's POST answers
+ * 503 and writes nothing at all (`LADDER_BLOCK_UNREADABLE_MESSAGE`), and a programme
+ * that has never run is still simply "not blocked" (`no row = no block`).
  */
 export async function readProgrammeRunBlock(
   schoolId: string,
-  programId: string
+  programId: string,
+  /** TEST-ONLY (Phase 6-pre 4): force the unreadable case. Set ONLY from the temp-file
+   *  seam (`NODE_ENV`-gated, inert in production) and never from a request body. */
+  options: { failRead?: boolean } = {}
 ): Promise<ProgrammeRunBlock> {
   const nothing: ProgrammeRunBlock = {
     blocked: false,
@@ -265,33 +357,28 @@ export async function readProgrammeRunBlock(
     stoppedAtTermNumber: null,
     message: null,
   };
-  try {
-    const row: any = await prisma.promotionRun.findFirst({
-      where: { id: promotionRunId(schoolId, programId) },
-    });
-    if (!row) return nothing;
-    const status = typeof row.status === "string" ? row.status : null;
-    const nums = (v: unknown) =>
-      (Array.isArray(v) ? v : []).filter((t): t is number => typeof t === "number").sort((a, b) => b - a);
-    const finishTerms = nums(row.finishTerms);
-    const remainingTerms = nums(row.remainingTerms);
-    const unfinished = status === "PARTIAL" || status === "FAILED";
-    if (!unfinished || finishTerms.length === 0) {
-      return { ...nothing, status, finishTerms, remainingTerms };
-    }
-    return {
-      blocked: true,
-      status,
-      finishTerms,
-      remainingTerms,
-      stoppedAtTermNumber: finishTerms[0],
-      message: ladderRunBlockedMessage({ status, finishTerms }),
-    };
-  } catch {
-    // Fail OPEN, deliberately: this is a guard on top of the run, and a read error
-    // must not turn a working ladder into a 500. The lease still serialises runs.
-    return nothing;
+  if (options.failRead) throw new Error("qa-injected block read failure (test-only)");
+  const row: any = await prisma.promotionRun.findFirst({
+    where: { id: promotionRunId(schoolId, programId) },
+  });
+  if (!row) return nothing;
+  const status = typeof row.status === "string" ? row.status : null;
+  const nums = (v: unknown) =>
+    (Array.isArray(v) ? v : []).filter((t): t is number => typeof t === "number").sort((a, b) => b - a);
+  const finishTerms = nums(row.finishTerms);
+  const remainingTerms = nums(row.remainingTerms);
+  const unfinished = status === "PARTIAL" || status === "FAILED";
+  if (!unfinished || finishTerms.length === 0) {
+    return { ...nothing, status, finishTerms, remainingTerms };
   }
+  return {
+    blocked: true,
+    status,
+    finishTerms,
+    remainingTerms,
+    stoppedAtTermNumber: finishTerms[0],
+    message: ladderRunBlockedMessage({ status, finishTerms }),
+  };
 }
 
 /**

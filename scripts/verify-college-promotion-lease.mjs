@@ -37,7 +37,25 @@
  *     programme is unaffected, and finishing those terms with the single-position
  *     route strikes them off and UNBLOCKS the ladder — with every student advanced
  *     exactly once (Phase 6-pre 3);
+ *   • a run LONGER than its own lease window is kept alive by the RENEWAL (the
+ *     heartbeat before every step and every ≤400-op slice) and a rival fired while it
+ *     renews is refused 409 — so the TTL covers one slice, not a whole run
+ *     (Phase 6-pre 4);
+ *   • a run that LOSES its lease mid-flight aborts with the structured 500 and writes
+ *     nothing further (no double-advance), and its STALE finalise does NOT clear the
+ *     successor's live lease (Phase 6-pre 4);
+ *   • an UNREADABLE run state fails CLOSED — 503, no lease, no cohort read, ZERO
+ *     writes — while "no row at all" is still simply "not blocked" (Phase 6-pre 4);
+ *   • a failure on the FIRST step records EVERY term as outstanding (and names the
+ *     term it really stopped at), so the work list can never silently drop the top
+ *     term (Phase 6-pre 4);
  *   • cleanup leaves no `zzls-` row and no `promotionRuns` row for its programmes.
+ *
+ * Phase 6-pre 4 uses the SAME temp-file seam as the §20 fault injection, extended with
+ * lease timing/failure switches (`leaseTtlMs`, `noRenew`, `stepDelayMs`,
+ * `stealAfterSlice`, `failBlockRead`). It is gated exactly like the fault seam (a
+ * production build ignores it, and the values come from a file in the OS temp directory
+ * — never from a request), and the file is removed by this script.
  *
  * The ladder's tenant/branch isolation checks deliberately stay in
  * `verify-college-promotion-api.mjs` (D11), so those established counts are
@@ -92,6 +110,14 @@ const RUNS = db.collection("promotionRuns");
 const FAULT_FILE = join(tmpdir(), "smart-school-qa-ladder-fault.json");
 const injectFault = (programId, term, message = `qa-injected lease fault (${M})`) =>
   writeFileSync(FAULT_FILE, JSON.stringify({ programId, term, message }));
+/**
+ * The Phase 6-pre 4 switches, written into the SAME seam file and gated the same way:
+ * `leaseTtlMs` (a short lease window), `stepDelayMs` (a slow step, so a run can outlive
+ * its window while still renewing), `stealAfterSlice` (plant a foreign live lease after
+ * the Nth slice), `failBlockRead` (make the run state unreadable). One writer, so the
+ * file always holds exactly the switches the check below intends.
+ */
+const writeSeam = (spec) => writeFileSync(FAULT_FILE, JSON.stringify(spec));
 const clearFault = () => rmSync(FAULT_FILE, { force: true });
 
 /* ------------------------------------------------------------ fixture ids */
@@ -582,6 +608,202 @@ console.log("\n### a PARTIAL run BLOCKS the ladder until the outstanding terms a
   );
 }
 
+/* ------------------------------------------------------------------ section 8 */
+console.log("\n### a run LONGER than its lease window is kept alive by the RENEWAL (6-pre 4)");
+{
+  const PROG_SLOW = await makeProgram("slow", 3);
+  check("a programme was created for the long-run proof", !!PROG_SLOW, PROG_SLOW || "none");
+  const S1 = await makeStudent("slow-1", { programId: PROG_SLOW, termNumber: 1 });
+  const S2 = await makeStudent("slow-2", { programId: PROG_SLOW, termNumber: 2 });
+  const S3 = await makeStudent("slow-3", { programId: PROG_SLOW, termNumber: 3 });
+
+  // A ~1.2 s run under an 800 ms lease window: it MUST renew before each of its three
+  // steps or the rival below would be able to take it over. The window covers the
+  // per-step delay (400 ms) plus the cohort read with room to spare — which is exactly
+  // the claim this phase makes: the TTL only has to cover ONE short interval, never a
+  // whole run.
+  writeSeam({ leaseTtlMs: 800, stepDelayMs: 400 });
+
+  const started = Date.now();
+  const slow = ladderPost(PROG_SLOW, collegeAdmin); // NOT awaited: the rival fires mid-run
+  await new Promise((r) => setTimeout(r, 250));
+  const rival = await ladderPost(PROG_SLOW, collegeAdmin);
+  const result = await slow;
+  const elapsed = Date.now() - started;
+  clearFault();
+
+  check(
+    "the run really outlived its own lease window (~1.2 s of work under an 800 ms lease)",
+    elapsed > 900,
+    `${elapsed} ms elapsed`
+  );
+  check(
+    "…and a rival fired while it was renewing is refused 409 (the lease is LIVE, not expired)",
+    rival.status === 409,
+    `HTTP ${rival.status} ${rival.error || ""}`
+  );
+  check(
+    "…and the long run itself finished 200 — the RENEWAL, not a long TTL, kept it alive",
+    result.status === 200,
+    `HTTP ${result.status} ${result.error || ""}`
+  );
+  const row = await runRow(PROG_SLOW);
+  check(
+    "…and the row was renewed then released (expiresAtMs cleared, status OK)",
+    row?.expiresAtMs === 0 && row?.status === "OK",
+    `expiresAtMs=${row?.expiresAtMs} status=${row?.status}`
+  );
+  check(
+    "…and every student advanced exactly ONE step (the rival advanced nobody)",
+    (await readStudent(S1)).termNumber === 2 &&
+      (await readStudent(S2)).termNumber === 3 &&
+      (await readStudent(S3)).status === "ALUMNI",
+    `s1=${(await readStudent(S1)).termNumber} s2=${(await readStudent(S2)).termNumber} s3=${(await readStudent(S3)).status}`
+  );
+}
+
+/* ------------------------------------------------------------------ section 9 */
+console.log("\n### a run that LOSES its lease aborts with no further writes, and its stale finalise keeps hands off (6-pre 4)");
+{
+  const PROG_STEAL = await makeProgram("steal", 3);
+  check("a programme was created for the takeover proof", !!PROG_STEAL, PROG_STEAL || "none");
+  const X1 = await makeStudent("steal-1", { programId: PROG_STEAL, termNumber: 1 });
+  const X2 = await makeStudent("steal-2", { programId: PROG_STEAL, termNumber: 2 });
+  const X3 = await makeStudent("steal-3", { programId: PROG_STEAL, termNumber: 3 });
+
+  // After the FIRST committed slice (term 3's graduation — the descending walk starts
+  // there) a FOREIGN, live lease is planted on the row: exactly the state a successor's
+  // takeover leaves. Everything after that point must stop writing.
+  writeSeam({ stealAfterSlice: 1 });
+  const aborted = await ladderPost(PROG_STEAL, collegeAdmin);
+  clearFault();
+  const row = await runRow(PROG_STEAL);
+
+  check(
+    "the run stops with the STRUCTURED 500, status PARTIAL (the first slice had landed)",
+    aborted.status === 500 && aborted.data?.status === "PARTIAL",
+    `HTTP ${aborted.status} status=${JSON.stringify(aborted.data?.status || null)}`
+  );
+  check(
+    "…and the reason says the lease was taken over (not a generic error)",
+    /taken over/i.test(String(aborted.data?.reason || "")),
+    JSON.stringify(aborted.data?.reason || null)
+  );
+  check(
+    "…and the report names the landed step and the untouched ones (completed [3], finish [2,1])",
+    (aborted.data?.completed || []).map((s) => s.fromTermNumber).join(",") === "3" &&
+      (aborted.data?.finishTerms || []).join(",") === "2,1",
+    `completed=${JSON.stringify((aborted.data?.completed || []).map((s) => s.fromTermNumber))} finish=${JSON.stringify(aborted.data?.finishTerms || null)}`
+  );
+  check(
+    "…and NO further student moved: term 3 graduated, but terms 2 and 1 never advanced (no double-advance)",
+    (await readStudent(X3)).status === "ALUMNI" &&
+      (await readStudent(X2)).termNumber === 2 &&
+      (await readStudent(X1)).termNumber === 1,
+    `x1=${(await readStudent(X1)).termNumber} x2=${(await readStudent(X2)).termNumber} x3=${(await readStudent(X3)).status}`
+  );
+  check(
+    "…and the STALE finalise did NOT clear the successor's lease (still the foreign holder's, still LIVE)",
+    row?.ownerId === `${PROG_STEAL}~qa-successor` &&
+      Number(row?.expiresAtMs) > Date.now() &&
+      row?.status === "IN_PROGRESS",
+    `owner=${row?.ownerId} expiresAtMs=${row?.expiresAtMs} status=${row?.status}`
+  );
+}
+
+/* ----------------------------------------------------------------- section 10 */
+console.log("\n### an UNREADABLE run state fails CLOSED: 503 and ZERO writes (6-pre 4)");
+{
+  const PROG_UNREAD = await makeProgram("unread", 2);
+  check("a programme was created for the fail-closed proof", !!PROG_UNREAD, PROG_UNREAD || "none");
+  const U1 = await makeStudent("unread-1", { programId: PROG_UNREAD, termNumber: 1 });
+  const U2 = await makeStudent("unread-2", { programId: PROG_UNREAD, termNumber: 2 });
+  check("…and it has NO run state row yet (so any row afterwards would be a new write)", !(await runRow(PROG_UNREAD)));
+
+  writeSeam({ failBlockRead: true });
+  const before = await tenantDocCounts();
+  const refused = await ladderPost(PROG_UNREAD, collegeAdmin);
+  const after = await tenantDocCounts();
+  clearFault();
+
+  check(
+    "POST while the run state cannot be read → 503 (not 200, not 500, not 409)",
+    refused.status === 503,
+    `HTTP ${refused.status} ${refused.error || ""}`
+  );
+  check(
+    "…with a message that says the read failed and nothing was written",
+    /could not be read/i.test(String(refused.error || "")) && /nothing was written/i.test(String(refused.error || "")),
+    JSON.stringify(refused.error || null)
+  );
+  check(
+    "…and it took NO lease and wrote NOTHING anywhere in the tenant",
+    sameCounts(before, after) && !(await runRow(PROG_UNREAD)),
+    `${JSON.stringify(after)}`
+  );
+  check(
+    "…and the cohort did not move",
+    (await readStudent(U1)).termNumber === 1 && (await readStudent(U2)).status === "ACTIVE",
+    `u1=${(await readStudent(U1)).termNumber} u2=${(await readStudent(U2)).status}`
+  );
+
+  // "no row = no block": with the read healthy again the SAME programme runs — the
+  // fail-closed path must not have left anything behind that blocks it.
+  const ok = await ladderPost(PROG_UNREAD, collegeAdmin);
+  check(
+    "…and once the read is healthy again the same programme runs normally (200, cohort advanced)",
+    ok.status === 200 && (await readStudent(U1)).termNumber === 2 && (await readStudent(U2)).status === "ALUMNI",
+    `HTTP ${ok.status} u1=${(await readStudent(U1)).termNumber} u2=${(await readStudent(U2)).status}`
+  );
+}
+
+/* ----------------------------------------------------------------- section 11 */
+console.log("\n### a failure on the FIRST step still records EVERY term as outstanding (6-pre 4)");
+{
+  const PROG_FIRST = await makeProgram("first", 3);
+  check("a programme was created for the first-step proof", !!PROG_FIRST, PROG_FIRST || "none");
+  const Y1 = await makeStudent("first-1", { programId: PROG_FIRST, termNumber: 1 });
+  const Y2 = await makeStudent("first-2", { programId: PROG_FIRST, termNumber: 2 });
+  const Y3 = await makeStudent("first-3", { programId: PROG_FIRST, termNumber: 3 });
+
+  // The descending walk ATTEMPTS term 3 first, so this fault lands before ANY write:
+  // nothing has been attempted except the term that failed, and the work list must
+  // therefore cover every term — the top one included.
+  injectFault(PROG_FIRST, 3);
+  const failed = await ladderPost(PROG_FIRST, collegeAdmin);
+  clearFault();
+  const row = await runRow(PROG_FIRST);
+
+  check(
+    "the first-step failure is the structured 500 with status FAILED (no slice landed)",
+    failed.status === 500 && failed.data?.status === "FAILED",
+    `HTTP ${failed.status} status=${JSON.stringify(failed.data?.status || null)}`
+  );
+  check(
+    "…and the work list covers EVERY term DESCENDING (3,2,1) — nothing was attempted, so nothing may be dropped",
+    (failed.data?.finishTerms || []).join(",") === "3,2,1",
+    JSON.stringify(failed.data?.finishTerms || null)
+  );
+  check(
+    "…and the report names the term it DID stop at (term 3), never a term it never attempted",
+    /stopped at term 3/.test(String(failed.error || "")) && /descending: term 3, then term 2, then term 1/.test(String(failed.error || "")),
+    JSON.stringify(failed.error || null)
+  );
+  check(
+    "…and no student moved at all",
+    (await readStudent(Y1)).termNumber === 1 &&
+      (await readStudent(Y2)).termNumber === 2 &&
+      (await readStudent(Y3)).termNumber === 3 &&
+      (await readStudent(Y3)).status === "ACTIVE",
+    `y1=${(await readStudent(Y1)).termNumber} y2=${(await readStudent(Y2)).termNumber} y3=${(await readStudent(Y3)).termNumber}/${(await readStudent(Y3)).status}`
+  );
+  check(
+    "…and the row records the same full work list, so the ladder is blocked until all three are applied",
+    row?.status === "FAILED" && (row?.finishTerms || []).join(",") === "3,2,1" && row?.expiresAtMs === 0,
+    `status=${row?.status} finish=${JSON.stringify(row?.finishTerms || null)} expiresAtMs=${row?.expiresAtMs}`
+  );
+}
+
 /* -------------------------------------------------------------------- cleanup */
 console.log("\n### cleanup");
 {
@@ -619,6 +841,6 @@ console.log("\n### cleanup");
 console.log(
   failures
     ? `\n❌ ${failures} college-promotion LEASE failure(s) (of ${checks} checks)`
-    : `\n✅ COLLEGE PROMOTION LEASE OK — one run at a time per programme, released on success and on failure, taken over when expired, and no double-advance under concurrency (${checks} checks)`
+    : `\n✅ COLLEGE PROMOTION LEASE OK — one run at a time per programme, renewed by the heartbeat, released on success and on failure, taken over only when genuinely expired, fail-closed when unreadable, and no double-advance under concurrency (${checks} checks)`
 );
 process.exit(failures ? 1 : 0);

@@ -13,10 +13,15 @@ import {
   readCohort,
   readPendingCounts,
   resolveProgramme,
+  LADDER_BLOCK_UNREADABLE_MESSAGE,
+  LADDER_LEASE_LOST_MESSAGE,
+  LADDER_LEASE_MS,
   LADDER_RUN_IN_PROGRESS_MESSAGE,
   claimProgrammeRun,
   finaliseProgrammeRun,
+  promotionRunId,
   readProgrammeRunBlock,
+  renewProgrammeRun,
   type Ladder,
 } from "@/lib/college-promotion-server";
 
@@ -137,6 +142,54 @@ function ladderFault(programId: string, term: number): string | null {
   return null;
 }
 
+/**
+ * TEST-ONLY (Phase 6-pre 4) — the lease timing and failure switches the lease verifier
+ * needs, from the SAME temp file as the fault seam and gated the same way.
+ *
+ *   leaseTtlMs      — a short lease window, so a verifier can outlive a renewal
+ *                     interval deterministically instead of waiting 30 s;
+ *   noRenew         — stop renewing (the only way to let a live run be overtaken);
+ *   stepDelayMs     — slow ONE step down, so a run can be made to OUTLIVE its own
+ *                     lease window while still renewing before every step: that is how
+ *                     the lease verifier proves a LONG RUN is kept alive by the
+ *                     heartbeat rather than by a long TTL;
+ *   stealAfterSlice — after the Nth ≤400-op slice, write a FOREIGN, live lease onto the
+ *                     row, exactly as a successor's takeover would, so the abort path is
+ *                     reached deterministically rather than by racing;
+ *   failBlockRead   — make the programme's run state unreadable, to prove the block
+ *                     fails CLOSED.
+ *
+ * Inert in production (`NODE_ENV`), unreachable from a request (the values come from a
+ * file in the OS temp directory, never from the body or a header), and the file is
+ * deleted by the verifier that created it. Nothing here can be triggered by a user.
+ */
+interface LeaseSeam {
+  ttlMs?: number;
+  noRenew?: boolean;
+  stepDelayMs?: number;
+  stealAfterSlice?: number;
+  failBlockRead?: boolean;
+}
+function qaLeaseSeam(): LeaseSeam {
+  if (process.env.NODE_ENV === "production") return {};
+  try {
+    const spec = JSON.parse(readFileSync(join(tmpdir(), "smart-school-qa-ladder-fault.json"), "utf8"));
+    const seam: LeaseSeam = {};
+    const ttl = Number(spec?.leaseTtlMs);
+    if (Number.isFinite(ttl) && ttl > 0) seam.ttlMs = ttl;
+    if (spec?.noRenew === true) seam.noRenew = true;
+    const delay = Number(spec?.stepDelayMs);
+    if (Number.isFinite(delay) && delay > 0) seam.stepDelayMs = delay;
+    const steal = Number(spec?.stealAfterSlice);
+    if (Number.isInteger(steal) && steal > 0) seam.stealAfterSlice = steal;
+    if (spec?.failBlockRead === true) seam.failBlockRead = true;
+    return seam;
+  } catch {
+    /* no seam file — the ordinary path */
+    return {};
+  }
+}
+
 /** The tallies a step and the whole plan carry (mirrors the 5b preview shape). */
 interface StepCounts {
   advance: number;
@@ -249,6 +302,9 @@ export async function POST(req: NextRequest) {
   const resolved = await resolveRun(body?.programId, session);
   if (!resolved.ok) return NextResponse.json({ error: resolved.message }, { status: resolved.status });
   const { program, programId, termCount } = resolved;
+  // TEST-ONLY seam switches (empty in production). See `qaLeaseSeam`.
+  const seam = qaLeaseSeam();
+  const leaseTtl = seam.ttlMs ?? LADDER_LEASE_MS;
 
   // ---- Phase 6-pre 3: no re-run while the LAST run is unfinished (docs §21) ---
   // A run that failed midway left a work list on its row (`finishTerms`). Re-running
@@ -259,7 +315,17 @@ export async function POST(req: NextRequest) {
   // status are the SAME write, so a row this read sees as free is a row whose status
   // is already settled. Placed after every authorization step: a 403 must never learn
   // anything about a programme's run state.
-  const block = await readProgrammeRunBlock(schoolId, programId);
+  // Phase 6-pre 4 — the block FAILS CLOSED. A store error is no longer read as "not
+  // blocked" (which would let a re-run double-advance a half-applied ladder): the
+  // ladder does not start at all, answers 503, takes no lease, reads no cohort and
+  // writes nothing. A programme that has never run has NO row, and that is still
+  // simply "not blocked" — the common case is untouched.
+  let block;
+  try {
+    block = await readProgrammeRunBlock(schoolId, programId, { failRead: seam.failBlockRead === true });
+  } catch {
+    return NextResponse.json({ error: LADDER_BLOCK_UNREADABLE_MESSAGE }, { status: 503 });
+  }
   if (block.blocked) {
     return NextResponse.json(
       {
@@ -282,12 +348,15 @@ export async function POST(req: NextRequest) {
   // writes NOTHING. Claimed AFTER every authorization step (a 403 must never take
   // a lease) and BEFORE the first cohort read, because the cohort a run walks must
   // not be able to change underneath it.
-  const claim = await claimProgrammeRun({
-    schoolId,
-    programId,
-    branchId: (program as any).branchId ?? null,
-    ownerId: (session as any).id ?? null,
-  });
+  const claim = await claimProgrammeRun(
+    {
+      schoolId,
+      programId,
+      branchId: (program as any).branchId ?? null,
+      ownerId: (session as any).id ?? null,
+    },
+    { ttlMs: leaseTtl }
+  );
   if (!claim.claimed) {
     return NextResponse.json(
       { error: LADDER_RUN_IN_PROGRESS_MESSAGE, data: { status: "IN_PROGRESS" } },
@@ -319,13 +388,49 @@ export async function POST(req: NextRequest) {
   let runFinishTerms: number[] = [];
   let runReason: string | null = null;
 
+  /**
+   * TEST-ONLY: put a FOREIGN, live lease on the row, exactly as a successor's takeover
+   * would (a new `acquiredAtMs` ours cannot match). Reached only from `stealAfterSlice`.
+   */
+  const simulateTakeover = async () => {
+    await prisma.promotionRun.update({
+      where: { id: promotionRunId(schoolId, programId) },
+      data: {
+        ownerId: `${programId}~qa-successor`,
+        acquiredAtMs: Date.now() + 1,
+        expiresAtMs: Date.now() + LADDER_LEASE_MS,
+        status: "IN_PROGRESS",
+      },
+    });
+  };
+
+  /**
+   * Phase 6-pre 4 — the HEARTBEAT. Renew this run's lease and re-check that it still
+   * owns the row, atomically, before the write that follows. A refusal (gone, or a
+   * successor holds it) throws, which sends the run down the ordinary failure path:
+   * nothing further is written, and the report names the steps that landed.
+   */
+  const renewOrAbort = async () => {
+    if (seam.noRenew) return; // TEST-ONLY: let a live run be overtaken
+    const renew = await renewProgrammeRun({ schoolId, programId, owner: claim.owner, ttlMs: leaseTtl });
+    if (!renew.renewed) throw new Error(LADDER_LEASE_LOST_MESSAGE);
+  };
+
   /** Send one step's ops as ≤PROMOTION_BATCH-op slices. Any committed slice counts
    *  as a write, which is what distinguishes PARTIAL from FAILED in the report. */
+  let slices = 0;
   const flushStep = async (ops: any[]) => {
     while (ops.length) {
+      // Before EVERY slice: renew (the window only has to cover one slice) and prove
+      // we still own the row. Between slices a successor cannot have taken over
+      // unnoticed, so a lost lease stops the run before the next write.
+      await renewOrAbort();
       const slice = ops.splice(0, PROMOTION_BATCH);
       await prisma.$transaction(slice);
       wroteAnything = true;
+      slices += 1;
+      // TEST-ONLY: simulate a takeover just AFTER a committed slice.
+      if (seam.stealAfterSlice && slices === seam.stealAfterSlice) await simulateTakeover();
     }
   };
 
@@ -335,6 +440,13 @@ export async function POST(req: NextRequest) {
     for (let term = termCount; term >= 1; term--) {
       const ladder: Ladder = { program, programId, fromTermNumber: term, termCount };
       attemptedTerm = term;
+      // Phase 6-pre 4 — heartbeat + ownership check BEFORE this step reads its cohort,
+      // so a run that lost its lease cannot even plan a write, let alone make one.
+      await renewOrAbort();
+      // TEST-ONLY: slow the run down AFTER the renewal, so a run can be made longer
+      // than its own lease window while still renewing before every step. Unset in
+      // production, so the ordinary run has no delay at all.
+      if (seam.stepDelayMs) await new Promise((r) => setTimeout(r, seam.stepDelayMs));
       const students = await readCohort(session, ladder);
       attemptedCount = students.length;
       const graduating = term === termCount;
@@ -387,9 +499,16 @@ export async function POST(req: NextRequest) {
       // A PARTIAL run: report what landed, what failed and what was never attempted,
       // and audit it, so the half-done ladder is neither silent nor invisible (§20).
       const completed = results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber);
+      // Phase 6-pre 4 — if NO step was attempted (the run failed before it read its
+      // first cohort), EVERY term is outstanding, the top one included. The old rule
+      // derived the list from `attemptedTerm ?? termCount`, which silently dropped
+      // termCount and could lift the block with the last term never applied.
       const remainingTerms: number[] = [];
-      const fromTerm = attemptedTerm === null ? termCount : attemptedTerm;
-      for (let t = fromTerm - 1; t >= 1; t--) remainingTerms.push(t);
+      if (attemptedTerm === null) {
+        for (let t = termCount; t >= 1; t--) remainingTerms.push(t);
+      } else {
+        for (let t = attemptedTerm - 1; t >= 1; t--) remainingTerms.push(t);
+      }
       // To finish safely: re-apply the FAILED term (idempotent, D2) and then every
       // not-attempted term, all DESCENDING. Re-running the LADDER is forbidden here:
       // the steps that landed have moved students into the next term, so a ladder
@@ -410,9 +529,14 @@ export async function POST(req: NextRequest) {
         : "none";
       const remainingText = remainingTerms.length ? remainingTerms.map((t) => `term ${t}`).join(", ") : "none";
       const finishText = finishTerms.map((t) => `term ${t}`).join(", then ");
+      // Phase 6-pre 4 — never name a term that was not attempted. With no attempted
+      // step the report says the run stopped BEFORE the first one.
+      const stoppedText =
+        attemptedTerm === null ? "before any term was attempted" : `at term ${attemptedTerm}`;
+      const failedText = attemptedTerm === null ? "none" : `term ${attemptedTerm}`;
       const message =
-        `The ladder run stopped at term ${attemptedTerm ?? "?"}. Completed: ${completedText}. ` +
-        `Failed: term ${attemptedTerm ?? "?"}. Not attempted: ${remainingText}. ` +
+        `The ladder run stopped ${stoppedText}. Completed: ${completedText}. ` +
+        `Failed: ${failedText}. Not attempted: ${remainingText}. ` +
         `The completed terms are already written, so do NOT re-run the ladder (that would advance them again). ` +
         `Finish the rest with the single-position apply (POST /api/college-promotion), descending: ${finishText}.`;
 
@@ -498,9 +622,14 @@ export async function POST(req: NextRequest) {
       },
     });
   } finally {
-    await finaliseProgrammeRun({
+    // Phase 6-pre 4 — the release is OWNED (ownerId + acquiredAtMs): a run whose lease
+    // was taken over writes NOTHING here, so it cannot clear a successor's lease or
+    // overwrite its status. The refusal is reported, not surfaced: the response shape
+    // is part of the contract and the operator cannot act on it.
+    const release = await finaliseProgrammeRun({
       schoolId,
       programId,
+      owner: claim.owner,
       status: failure ? (wroteAnything ? "PARTIAL" : "FAILED") : "OK",
       completed: failure
         ? runCompleted
@@ -509,5 +638,10 @@ export async function POST(req: NextRequest) {
       finishTerms: failure ? runFinishTerms : [],
       reason: runReason,
     });
+    if (!release.released) {
+      console.warn(
+        `[college-promotion] run row for programme ${programId} was not released (${release.reason || "unknown"}) — the lease belongs to another run`
+      );
+    }
   }
 }

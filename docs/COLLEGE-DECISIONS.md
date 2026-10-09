@@ -945,6 +945,13 @@ promotion-logic 12, promotion-api 100, promotion-rollover 50 × 10 runs.
   lease lasts `LADDER_LEASE_MS` = **2 minutes** (one constant); a row whose `expiresAtMs` has passed
   is **abandoned, not held**, and may be taken over — a crashed run cannot wedge a programme. The
   claim happens AFTER `requireCollege`/`can`/`writeGuard`, so a 403 takes no lease.
+  > **NOTE (2026-10-09, superseded by §22 / D-6pre4-2).** The window is no longer **2 minutes**,
+  > and "long enough for a whole run" was the wrong shape: a run could outlive it and be taken over
+  > mid-flight, double-advancing a cohort. The run now RENEWS before every step and every ≤400-op
+  > slice, and the constant is **30 s** — a window that only has to cover ONE slice. The paragraph
+  > above is kept as the history of the decision, not as the current rule. The rest of D-6pre-6
+  > (per-programme, claimed after every guard, before the first cohort read, released in a
+  > `finally`) still holds.
 - **D-6pre-7 — a run that COMPLETED releases the lease, so the next run is still allowed.** The
   `finally` finalises the row on SUCCESS and on FAILURE alike: `status` OK / PARTIAL / FAILED,
   `finishedAt`, `completed[]`, `remainingTerms[]`, `reason` and `releasedAtMs`, with `expiresAtMs`
@@ -1027,3 +1034,113 @@ which was measured on that tree by its own verification run: enrollment 40, cour
 50, registration-status 9, tenant 75, branch 52, college-gate 3, college-permissions 7,
 college-routes 3, nav-scope 7, college-terms 8, promotion-logic 12, promotion-api **100**,
 rollover 50 × 10 runs. `tsc` 0 errors; `next build` 164/164.
+
+
+## 22. Phase 6-pre 4 / 6-pre 5 decisions (the lease made correct; the permanent-block wedges removed)
+
+This section records the two fixes made after a **read-only review** of `5847f26`, `74bf386` and
+`d8e12a2`. The review found, and this section must not quietly lose, that as shipped at `d8e12a2`:
+the finalise released the row **unconditionally**, so a run that had lost its lease could clear a
+successor's live lease and let a third run in; the lease was **never renewed**, so a long run could
+be taken over mid-flight; the block read **failed open**, so a store error let a re-run double-advance
+a half-applied ladder; `finishTerms` could drop the top term when the run failed before attempting
+any step; an empty outstanding term could **wedge** a programme with no affordance on the page; and a
+programme shrink/delete left its run row behind. 6-pre 4 fixes the lease. 6-pre 5 removes the wedges.
+
+### 6-pre 4 — the lease is renewed, owned and fail-closed
+
+- **D-6pre4-1 — the release is OWNED, not unconditional.** `finaliseProgrammeRun` now runs
+  `prisma.$releaseOwned`, a transaction that compares the caller's claim key — `ownerId` **and**
+  `acquiredAtMs`, the same pair `$claim` wrote — and finalises the row ONLY if it still matches. A
+  run whose lease was taken over writes NOTHING: it cannot clear a successor's `expiresAtMs`, cannot
+  overwrite its `status`, and cannot let a third run in through a lease it no longer holds. The
+  refusal is REPORTED (`released: false` + a reason) and logged server-side; it is deliberately not
+  surfaced in the response, whose shape is part of the structured-500 contract. **PROVEN**: with a
+  foreign, live lease planted mid-run, the row afterwards still carries that holder, a live
+  `expiresAtMs` and `IN_PROGRESS` — the stale finalise touched nothing.
+- **D-6pre4-2 — the lease is RENEWED (heartbeat) before every step and every ≤400-op slice, and the
+  TTL only has to cover ONE slice.** `renewProgrammeRun` (`prisma.$renewOwned`) re-checks the key and
+  re-stamps the expiry in one transaction. `LADDER_LEASE_MS` becomes **30 s** — one constant, said
+  here as this phase requires — replacing the 2-minute "longer than a whole run" window that was the
+  wrong shape. Why 30 s: the longest gap between two renewals is one cohort read plus one slice
+  write. **Measured** on the local emulator: a 400-op `WriteBatch` (the exact slice `flushStep`
+  commits) took 195 ms cold and 23 / 14 ms warm, and the slow-run check's three-step run under an
+  800 ms window completed in ~1.66 s with a rival refused — the window covers a slice with two
+  orders of magnitude to spare. A production worst case (cold Cloud Firestore, a full 400-op batch,
+  contention, a slow runtime) is **NOT PROVEN** — reasoned about, not measured — and a crashed run is
+  recoverable in 30 s rather than two minutes. **PROVEN**: a run that OUTLIVES its own window while
+  renewing is not taken over (the rival gets 409) and completes 200.
+- **D-6pre4-3 — two new `db.ts` primitives and nothing else.** `$renewOwned` and `$releaseOwned`
+  (plus `OwnedKey`, `OwnedResult`, `ownedBy`) are ADDED; `$claim` gains an options argument
+  (`ttlMs`). No other symbol, `COLS`/`RELS` entry or behaviour changes, so every school code path and
+  every non-promotion verifier count stays identical — measured, below. Both new writes are
+  transactions for the same reason `$claim` is: the comparison and the write must be one step, or a
+  renewal could resurrect a lease a successor has already taken.
+- **D-6pre4-4 — the block read FAILS CLOSED.** A store error while reading the programme's run state
+  is no longer swallowed and read as "not blocked" (which would let a re-run double-advance exactly
+  when the store is unhealthy). The ladder does not start: the POST answers **503** with a message
+  that says nothing was written, and it takes NO lease, reads NO cohort and writes NOTHING — not even
+  an audit row. `no row = no block` is unchanged, so the ordinary first run of a programme is
+  untouched. **PROVEN**: 503 with a tenant-wide document-count bracket around it, then the SAME
+  programme runs normally once the read is healthy again.
+- **D-6pre4-5 — a run that attempted NO step records EVERY term, and the message never names a term
+  it did not attempt.** The work list was derived from `attemptedTerm ?? termCount`, which dropped
+  the top term and could lift the block with the last term never applied; it is now built from the
+  attempted term when there is one, and from `termCount` down to 1 when there is not. The failure
+  sentence no longer interpolates a `?`. **PROVEN** by forcing the fault onto the FIRST step the
+  descending walk attempts (term `termCount`): the 500 carries `status: "FAILED"`, `finishTerms`
+  `[3,2,1]`, no student moved, the row records the same full list, and the message says "stopped at
+  term 3". **NOT PROVEN, and stated rather than papered over**: the `attemptedTerm === null` branch
+  itself is not reachable over HTTP — `attemptedTerm` is assigned at the top of the loop, before
+  anything that can throw — so that half of the fix is defensive, and the check above proves the
+  observable requirement (every term listed, the right term named) instead.
+- **D-6pre4-6 — losing the lease mid-run ABORTS the run.** A failed renewal throws, which enters the
+  ordinary failure path: nothing further is written, the structured 500 names the steps that landed
+  (`completed`), the term that stopped it and the terms never attempted, and the release is the owned
+  one (D-6pre4-1), so a successor's row is left alone. **PROVEN**: after the first committed slice the
+  row is handed to a foreign holder; the run ends with `completed [3]`, `finishTerms [2,1]`, term 3
+  graduated, terms 2 and 1 untouched — no double-advance — and the holder's lease is still live.
+- **D-6pre4-7 — the test-only seam was extended, not replaced.** The §20 temp-file fault seam (a
+  production build ignores it, and the values come from a file in the OS temp directory — never from
+  a request) gains `leaseTtlMs`, `noRenew`, `stepDelayMs`, `stealAfterSlice` and `failBlockRead`, so
+  a short window, a slow run, a mid-run takeover and an unreadable block are all reachable
+  deterministically over HTTP. It cannot be triggered by a user, and the verifier deletes the file.
+- **D-6pre4-8 — what did NOT change.** The structured-500 contract (status codes, the `data` shape,
+  the 500-not-207 reasoning), the single-position route (still deliberately unleased, still
+  idempotent), the run-#2 semantics, and every school code path. `students/promote`, `classes`,
+  `permissions.ts`, `nav.ts`, `college-routes.ts` (no new route file), `college-promotion.ts` and the
+  other programs routes are untouched.
+
+**Verification (6-pre 4).** Measured BOTH ways in one session: the parent (`d8e12a2`) restored through
+`git stash` for the baseline, then the working tree for the after-run. Environment: the local Firestore
+emulator only (`npm run dev:emulator`, `FIREBASE_PROJECT_ID=demo-ss-test`,
+`FIRESTORE_EMULATOR_HOST=127.0.0.1:8080`), a **sentinel round-trip** first (write → read → delete,
+`write+read=true deleted=true`), the seed AND the isolation fixture created, the app RESTARTED after
+the edit (and again between the two halves), the `zzcp-/zzls-` leftover scan run BEFORE the baseline —
+**0 stray rows** (the 37 `zziso-` rows present are the fixture this run created) — and `next build`
+run LAST, with dev stopped first. Every run individually:
+
+| suite | parent `d8e12a2` | after 6-pre 4 | expected |
+|---|---|---|---|
+| `verify-college-enrollment` | 40 | 40 | 40 |
+| `verify-course-registrations` | 50 | 50 | 50 |
+| `verify-registration-status` | 9 | 9 | 9 |
+| `verify-tenant-isolation` | 75 | 75 | 75 |
+| `verify-branch-isolation` | 52 | 52 | 52 |
+| `verify-college-gate` | 3 | 3 | 3 |
+| `verify-college-permissions` | 7 | 7 | 7 |
+| `verify-college-routes` | 3 | 3 | 3 |
+| `verify-nav-scope` | 7 | 7 | 7 |
+| `verify-college-terms` | 8 | 8 | 8 |
+| `verify-college-promotion-logic` | 12 | 12 | 12 |
+| `verify-college-promotion-api` | 100 | 100 | 100 |
+| `verify-college-promotion-page` | 14 | 14 | 14 |
+| `verify-college-promotion-lease` | 54 | **79** | grows (the new lease checks) |
+| `verify-promotion-rollover` ×10 | 50/0 ×10 | 50/0 ×10 | 50 pass, 0 fail each |
+| `npm run typecheck` | 0 errors | 0 errors | 0 |
+| `npm run build` | 164 pages | 164 pages | 164 |
+
+`verify-college-promotion-lease.mjs` grows **54 → 79 checks** (25 new). The new sections — the
+long-run heartbeat, the mid-run takeover plus the stale finalise, the fail-closed read, and the
+first-step work list — create and clean up their own programmes, students and lease rows, and the
+cleanup checks still pass: no `zzls-` row left, no `promotionRuns` row left, and no seam file left.

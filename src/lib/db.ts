@@ -2074,6 +2074,109 @@ async function claim(
   return result;
 }
 
+/**
+ * The answer to an ownership-scoped write (Phase 6-pre 4): done, or refused because
+ * the row is no longer this caller's.
+ */
+export interface OwnedResult {
+  /** True when the row was still this caller's and the write landed. */
+  ok: boolean;
+  /** Why it was refused: the row is gone, or another run holds it now. */
+  reason?: "MISSING" | "NOT_OWNER" | "ERROR";
+  /** The row that was found and left UNTOUCHED, when the write was refused. */
+  holder?: any;
+}
+
+/**
+ * WHO a claimed row belongs to: the owner id AND the instant it was claimed.
+ *
+ * Both halves matter. An owner id may be null (a session without one), so it cannot
+ * distinguish two runs by the same user; `acquiredAtMs` is written by the claim and
+ * never by anything else, so it is the real discriminator — a successor's takeover
+ * moves it, which is exactly what makes a stale run notice the loss of its lease.
+ */
+export interface OwnedKey {
+  ownerId: string | null;
+  acquiredAtMs: number;
+}
+
+/** True when `row` is the row this key claimed. */
+function ownedBy(row: any, key: OwnedKey): boolean {
+  if (!row) return false;
+  const owner = typeof row.ownerId === "string" ? row.ownerId : null;
+  return owner === (key.ownerId ?? null) && Number(row.acquiredAtMs) === Number(key.acquiredAtMs);
+}
+
+/**
+ * Renew a row this caller still OWNS — the lease heartbeat (Phase 6-pre 4).
+ *
+ * Same shape as `claim` (one real transaction: read, compare, conditional write), and
+ * the same reason it must be a transaction: the comparison and the write have to be
+ * one step, or a renewal could resurrect a lease a successor has already taken over.
+ *
+ * The row is written back as it was FOUND (its own fields, plus the new
+ * `expiresAtMs`), so a renewal can never invent or drop state, and a row that is no
+ * longer this caller's is left completely untouched (`NOT_OWNER`, with the holder
+ * returned so the caller can say why).
+ */
+async function renewOwned(
+  model: string,
+  id: string,
+  options: OwnedKey & { ttlMs: number }
+): Promise<OwnedResult> {
+  try {
+    const ttl = Math.max(0, Number(options?.ttlMs) || 0);
+    const ref = col(model).doc(id);
+    const result = await getDb().runTransaction(async (tx): Promise<OwnedResult> => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return { ok: false, reason: "MISSING" };
+      const row = conv(snap.data());
+      if (!ownedBy(row, options)) return { ok: false, reason: "NOT_OWNER", holder: row };
+      tx.set(ref, clean({ ...row, expiresAtMs: Date.now() + ttl }));
+      return { ok: true };
+    });
+    invalidateDbCacheScope({ model });
+    return result;
+  } catch {
+    return { ok: false, reason: "ERROR" };
+  }
+}
+
+/**
+ * Release/finalise a row ONLY IF this caller still owns it (Phase 6-pre 4).
+ *
+ * Without this, a run that lost its lease (a successor took the row over) would still
+ * write its own ending onto that row when it finished — clearing the SUCCESSOR's live
+ * `expiresAtMs` and overwriting its status — which is how a stale run could let a
+ * third run straight in. So the release is a transaction that compares the caller's
+ * key first and, when it does not match, writes NOTHING and reports `NOT_OWNER`.
+ *
+ * As in `claim`, the row is the ONLY thing this touches: no other symbol, collection
+ * entry or behaviour in this shim is involved.
+ */
+async function releaseOwned(
+  model: string,
+  id: string,
+  data: Record<string, any>,
+  options: OwnedKey
+): Promise<OwnedResult> {
+  try {
+    const ref = col(model).doc(id);
+    const result = await getDb().runTransaction(async (tx): Promise<OwnedResult> => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return { ok: false, reason: "MISSING" };
+      const row = conv(snap.data());
+      if (!ownedBy(row, options)) return { ok: false, reason: "NOT_OWNER", holder: row };
+      tx.set(ref, clean({ ...row, ...data, expiresAtMs: 0, releasedAtMs: Date.now() }));
+      return { ok: true };
+    });
+    invalidateDbCacheScope({ model });
+    return result;
+  } catch {
+    return { ok: false, reason: "ERROR" };
+  }
+}
+
 export const prisma = {
   school: model("school"),
   user: model("user"),
@@ -2155,4 +2258,10 @@ export const prisma = {
   promotionRun: model("promotionRun"),
   $transaction: transaction,
   $claim: claim,
+  // ---- College support (Phase 6-pre 4) ----
+  // The two ownership-scoped writes the lease needs on top of `$claim`: a heartbeat
+  // that only renews a row this run still owns, and a release that only finalises one
+  // it still owns. Both compare `ownerId` + `acquiredAtMs` inside the transaction.
+  $renewOwned: renewOwned,
+  $releaseOwned: releaseOwned,
 };
