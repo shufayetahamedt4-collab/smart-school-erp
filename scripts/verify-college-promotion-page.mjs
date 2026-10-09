@@ -244,11 +244,20 @@ console.log("\n3. the D6 pending figure — requests, never students (D6)");
 
 /* ------------------------------------------------------------------------ 4 */
 
-console.log("\n4. the run-in-progress warning is present and truthful");
+console.log("\n4. the run-in-progress warning matches what the server actually does");
 {
-  if (!/no run lock/.test(LADDER_RUN_WARNING)) bad("warning", `LADDER_RUN_WARNING no longer states there is no run lock: ${JSON.stringify(LADDER_RUN_WARNING)}`);
-  else if (!/two runs at once/.test(LADDER_RUN_WARNING)) bad("warning", "the warning no longer names the two-runs-at-once hazard");
-  else ok("the warning names the two-runs-at-once hazard and states there is no run lock");
+  // Phase 6-pre 2 gave the ladder a real lease, so the OLD statement ("there is no
+  // run lock") is now false and must not come back. The line must promise exactly
+  // the guarantee the route enforces: a second run of the same programme is refused.
+  if (/no run lock/.test(LADDER_RUN_WARNING)) {
+    bad("warning", `LADDER_RUN_WARNING still claims there is no run lock, which Phase 6-pre 2 made false: ${JSON.stringify(LADDER_RUN_WARNING)}`);
+  } else if (!/refused/.test(LADDER_RUN_WARNING) || !/same programme/.test(LADDER_RUN_WARNING)) {
+    bad("warning", `LADDER_RUN_WARNING must state the lease's real guarantee (a second run of the same programme is refused): ${JSON.stringify(LADDER_RUN_WARNING)}`);
+  } else if (!/one at a time/i.test(LADDER_RUN_WARNING)) {
+    bad("warning", "the warning no longer tells the operator to run one at a time");
+  } else {
+    ok("the warning promises the refusal the lease enforces, and no longer claims there is no lock");
+  }
 }
 
 /* ------------------------------------------------------------------------ 5 */

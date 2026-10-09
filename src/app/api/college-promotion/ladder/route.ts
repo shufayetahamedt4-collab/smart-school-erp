@@ -13,6 +13,9 @@ import {
   readCohort,
   readPendingCounts,
   resolveProgramme,
+  LADDER_RUN_IN_PROGRESS_MESSAGE,
+  claimProgrammeRun,
+  finaliseProgrammeRun,
   type Ladder,
 } from "@/lib/college-promotion-server";
 
@@ -70,6 +73,21 @@ import {
  * run is neither silent nor invisible. The operator is told to finish the remaining
  * terms with the idempotent single-position route (`POST /api/college-promotion`),
  * DESCENDING — re-running the ladder would double-advance the steps that landed.
+ *
+ * Phase 6-pre 2 — ONE RUN AT A TIME (docs/COLLEGE-DECISIONS.md §21). The POST now
+ * takes a per-(school, programme) LEASE through `prisma.$claim` (a real Firestore
+ * transaction: read, then conditional write) BEFORE it reads its first cohort, and
+ * releases it in a `finally`. A second concurrent run of the same programme is
+ * refused with 409 and writes NOTHING — the concurrency limitation §20 recorded as
+ * D-5d2-7 is closed here. A lease older than `LADDER_LEASE_MS` is abandoned, not
+ * held, so a crashed run cannot wedge a programme. The single-position route is
+ * deliberately NOT leased: it is idempotent by construction (D2/D3) and it is the
+ * documented way to FINISH a partial ladder, so leasing it would break the very
+ * recovery this route's 500 message tells the operator to perform. Residual, and
+ * recorded rather than hidden: a deliberate single-position apply fired at the same
+ * moment as a ladder run is still possible — the lease serialises whole-programme
+ * runs against each other, not against that. The GET plan is unaffected and the
+ * structured-500 contract is unchanged.
  *
  * Guard order (identical to the 5b route):
  *   `getSession()` → target `schoolId` → `requireCollege({ schoolId })` →
@@ -214,6 +232,26 @@ export async function POST(req: NextRequest) {
   if (!resolved.ok) return NextResponse.json({ error: resolved.message }, { status: resolved.status });
   const { program, programId, termCount } = resolved;
 
+  // ---- Phase 6-pre 2: ONE whole-programme run at a time (docs §21) ----------
+  // The claim is ATOMIC (`prisma.$claim`: a real Firestore transaction, read then
+  // conditional write). Two runs that race cannot both win, and a live lease means
+  // another run is already moving this programme's cohorts — so this request
+  // writes NOTHING. Claimed AFTER every authorization step (a 403 must never take
+  // a lease) and BEFORE the first cohort read, because the cohort a run walks must
+  // not be able to change underneath it.
+  const claim = await claimProgrammeRun({
+    schoolId,
+    programId,
+    branchId: (program as any).branchId ?? null,
+    ownerId: (session as any).id ?? null,
+  });
+  if (!claim.claimed) {
+    return NextResponse.json(
+      { error: LADDER_RUN_IN_PROGRESS_MESSAGE, data: { status: "IN_PROGRESS" } },
+      { status: 409 }
+    );
+  }
+
   // The steps that COMPLETED, in application order (descending). A step's ops are
   // collected in its own array and flushed at its END, so a slice never spans two
   // steps (D-5d2-2). A step that needs more than one ≤400-op slice is still
@@ -230,6 +268,12 @@ export async function POST(req: NextRequest) {
   let attemptedTerm: number | null = null;
   let attemptedCount: number | null = null;
   let failure: any = null;
+  // What the `finally` records on the run's row when the run does NOT complete
+  // (Phase 6-pre 2). Filled in by the failure branch below, and read only by the
+  // release — never by the response, whose shape is unchanged.
+  let runCompleted: any[] = [];
+  let runRemainingTerms: number[] = [];
+  let runReason: string | null = null;
 
   /** Send one step's ops as ≤PROMOTION_BATCH-op slices. Any committed slice counts
    *  as a write, which is what distinguishes PARTIAL from FAILED in the report. */
@@ -291,108 +335,131 @@ export async function POST(req: NextRequest) {
     failure = e;
   }
 
-  if (failure) {
-    // A PARTIAL run: report what landed, what failed and what was never attempted,
-    // and audit it, so the half-done ladder is neither silent nor invisible (§20).
-    const completed = results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber);
-    const remainingTerms: number[] = [];
-    const fromTerm = attemptedTerm === null ? termCount : attemptedTerm;
-    for (let t = fromTerm - 1; t >= 1; t--) remainingTerms.push(t);
-    // To finish safely: re-apply the FAILED term (idempotent, D2) and then every
-    // not-attempted term, all DESCENDING. Re-running the LADDER is forbidden here:
-    // the steps that landed have moved students into the next term, so a ladder
-    // re-run would advance them a SECOND time.
-    const finishTerms = attemptedTerm === null ? remainingTerms : [attemptedTerm, ...remainingTerms];
-    const status = wroteAnything ? "PARTIAL" : "FAILED";
-    const failedStep =
-      attemptedTerm === null
-        ? null
-        : {
-            fromTermNumber: attemptedTerm,
-            toTermNumber: attemptedTerm === termCount ? null : attemptedTerm + 1,
-            graduating: attemptedTerm === termCount,
-            count: attemptedCount,
-          };
-    const completedText = completed.length
-      ? completed.map((s) => `term ${s.fromTermNumber} (${s.promoted} advanced, ${s.graduated} graduated)`).join("; ")
-      : "none";
-    const remainingText = remainingTerms.length ? remainingTerms.map((t) => `term ${t}`).join(", ") : "none";
-    const finishText = finishTerms.map((t) => `term ${t}`).join(", then ");
-    const message =
-      `The ladder run stopped at term ${attemptedTerm ?? "?"}. Completed: ${completedText}. ` +
-      `Failed: term ${attemptedTerm ?? "?"}. Not attempted: ${remainingText}. ` +
-      `The completed terms are already written, so do NOT re-run the ladder (that would advance them again). ` +
-      `Finish the rest with the single-position apply (POST /api/college-promotion), descending: ${finishText}.`;
+  // Everything from here runs under the lease, released in the `finally` below
+  // whatever the outcome: a completed run marks the row OK (so the NEXT run is
+  // allowed — unchanged behaviour), a failed one records why (read in 6-pre 3).
+  try {
+    if (failure) {
+      // A PARTIAL run: report what landed, what failed and what was never attempted,
+      // and audit it, so the half-done ladder is neither silent nor invisible (§20).
+      const completed = results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber);
+      const remainingTerms: number[] = [];
+      const fromTerm = attemptedTerm === null ? termCount : attemptedTerm;
+      for (let t = fromTerm - 1; t >= 1; t--) remainingTerms.push(t);
+      // To finish safely: re-apply the FAILED term (idempotent, D2) and then every
+      // not-attempted term, all DESCENDING. Re-running the LADDER is forbidden here:
+      // the steps that landed have moved students into the next term, so a ladder
+      // re-run would advance them a SECOND time.
+      const finishTerms = attemptedTerm === null ? remainingTerms : [attemptedTerm, ...remainingTerms];
+      const status = wroteAnything ? "PARTIAL" : "FAILED";
+      const failedStep =
+        attemptedTerm === null
+          ? null
+          : {
+              fromTermNumber: attemptedTerm,
+              toTermNumber: attemptedTerm === termCount ? null : attemptedTerm + 1,
+              graduating: attemptedTerm === termCount,
+              count: attemptedCount,
+            };
+      const completedText = completed.length
+        ? completed.map((s) => `term ${s.fromTermNumber} (${s.promoted} advanced, ${s.graduated} graduated)`).join("; ")
+        : "none";
+      const remainingText = remainingTerms.length ? remainingTerms.map((t) => `term ${t}`).join(", ") : "none";
+      const finishText = finishTerms.map((t) => `term ${t}`).join(", then ");
+      const message =
+        `The ladder run stopped at term ${attemptedTerm ?? "?"}. Completed: ${completedText}. ` +
+        `Failed: term ${attemptedTerm ?? "?"}. Not attempted: ${remainingText}. ` +
+        `The completed terms are already written, so do NOT re-run the ladder (that would advance them again). ` +
+        `Finish the rest with the single-position apply (POST /api/college-promotion), descending: ${finishText}.`;
 
-    // Best effort — `audit()` already swallows its own failure, and this try/catch
-    // guarantees an audit problem can never mask the original write error.
-    try {
-      await audit("COLLEGE_PROMOTION", "program", programId, {
-        scope: "PROGRAMME_LADDER",
-        status,
-        termCount,
-        promoted,
-        graduated,
-        failed,
-        completed,
-        failedStep,
-        remainingTerms,
-        reason: String(failure?.message || failure),
-      });
-    } catch {
-      /* best effort: never mask the original error */
-    }
-    invalidateStats(schoolId, "students");
-    invalidateReferenceCache(schoolId);
-
-    return NextResponse.json(
-      {
-        error: message,
-        data: {
-          programId,
-          termCount,
+      // Best effort — `audit()` already swallows its own failure, and this try/catch
+      // guarantees an audit problem can never mask the original write error.
+      try {
+        await audit("COLLEGE_PROMOTION", "program", programId, {
+          scope: "PROGRAMME_LADDER",
           status,
+          termCount,
           promoted,
           graduated,
           failed,
           completed,
           failedStep,
           remainingTerms,
-          finishTerms,
           reason: String(failure?.message || failure),
+        });
+      } catch {
+        /* best effort: never mask the original error */
+      }
+      invalidateStats(schoolId, "students");
+      invalidateReferenceCache(schoolId);
+
+      // Phase 6-pre 2: hand this outcome to the release in the `finally`, so the
+      // run's row says how it ended (OK / PARTIAL / FAILED) without the response
+      // shape changing at all.
+      runCompleted = completed;
+      runRemainingTerms = remainingTerms;
+      runReason = String(failure?.message || failure);
+
+      return NextResponse.json(
+        {
+          error: message,
+          data: {
+            programId,
+            termCount,
+            status,
+            promoted,
+            graduated,
+            failed,
+            completed,
+            failedStep,
+            remainingTerms,
+            finishTerms,
+            reason: String(failure?.message || failure),
+          },
         },
-      },
-      // 500, NOT 207: the run did not complete and left a partial write behind. The
-      // shared client treats every 2xx (207 included) as success — it returns only
-      // `body.data` and never throws — so a 207 would silently take the UI's success
-      // path and hide the failure. 500 keeps it on the error path, and `error`
-      // carries the whole report.
-      { status: 500 }
-    );
-  }
+        // 500, NOT 207: the run did not complete and left a partial write behind. The
+        // shared client treats every 2xx (207 included) as success — it returns only
+        // `body.data` and never throws — so a 207 would silently take the UI's success
+        // path and hide the failure. 500 keeps it on the error path, and `error`
+        // carries the whole report.
+        { status: 500 }
+      );
+    }
 
-  // ONE audit row for the whole run (D10) — now carrying the per-step breakdown.
-  await audit("COLLEGE_PROMOTION", "program", programId, {
-    scope: "PROGRAMME_LADDER",
-    status: "OK",
-    termCount,
-    promoted,
-    graduated,
-    failed,
-    steps: results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber),
-  });
-  invalidateStats(schoolId, "students");
-  invalidateReferenceCache(schoolId);
-
-  return NextResponse.json({
-    data: {
-      programId,
+    // ONE audit row for the whole run (D10) — now carrying the per-step breakdown.
+    await audit("COLLEGE_PROMOTION", "program", programId, {
+      scope: "PROGRAMME_LADDER",
+      status: "OK",
       termCount,
       promoted,
       graduated,
       failed,
-      // Ascending for the reader; the writes happened descending (see header).
       steps: results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber),
-    },
-  });
+    });
+    invalidateStats(schoolId, "students");
+    invalidateReferenceCache(schoolId);
+
+    return NextResponse.json({
+      data: {
+        programId,
+        termCount,
+        promoted,
+        graduated,
+        failed,
+        // Ascending for the reader; the writes happened descending (see header).
+        steps: results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber),
+      },
+    });
+  } finally {
+    await finaliseProgrammeRun({
+      schoolId,
+      programId,
+      status: failure ? (wroteAnything ? "PARTIAL" : "FAILED") : "OK",
+      completed: failure
+        ? runCompleted
+        : results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber),
+      remainingTerms: failure ? runRemainingTerms : [],
+      reason: runReason,
+    });
+  }
 }

@@ -166,6 +166,14 @@ const COLS: Record<string, string> = {
   // register any mapped course). Uniqueness of (studentId, courseId,
   // termNumber) among the non-REJECTED rows is enforced in-code by the route.
   courseRegistration: "courseRegistrations",
+  // ---- College support (Phase 6-pre 2) ----
+  // One row per (school, programme): the whole-programme ladder's LEASE, and the
+  // record of its last run's outcome. The id is derived from the pair, so a
+  // second run of the same programme addresses the same row. Ordinary shape (no
+  // `idFor` entry — the caller supplies the id), so `create` would fall back to
+  // `rand()`; nothing uses `create` here, because a claim must be atomic and
+  // goes through `$claim` instead.
+  promotionRun: "promotionRuns",
 };
 
 const sha1 = (s: string) => createHash("sha1").update(s).digest("hex");
@@ -1982,6 +1990,90 @@ async function transaction<T>(
   throw new Error("$transaction expects an array of ops or a callback");
 }
 
+// ---------------------------------------------------------------------------
+// Phase 6-pre 2 — the atomic claim (docs/COLLEGE-DECISIONS.md §21)
+// ---------------------------------------------------------------------------
+
+/** The answer to a claim: either this caller owns the row, or someone else does. */
+export interface ClaimResult {
+  /** True when this caller now holds the row. */
+  claimed: boolean;
+  /** The row that was found and left untouched, when the claim was refused. */
+  holder?: any;
+}
+
+/**
+ * Atomically claim ONE document, or report the holder that made it impossible.
+ *
+ * Why this exists at all: every other write in this shim is unconditional. `create`
+ * is `ref.set(…)`, `update` is `set(…, { merge: true })`, and `$transaction`'s array
+ * form is a single `WriteBatch` — which carries no read and therefore no condition.
+ * None of them can express "take this row ONLY IF it is free", and that is exactly
+ * what a lock needs. `claim` is that one missing primitive, and it is deliberately
+ * the ONLY addition: no existing function, collection entry or exported symbol is
+ * touched.
+ *
+ * It runs inside a real Firestore transaction (`runTransaction`), so the read that
+ * checks the row and the write that takes it are one atomic step: two callers that
+ * race, and both see a free row, cannot both win — the loser's transaction is
+ * re-read and retried, sees the winner's row, and is refused. A row whose
+ * `expiresAtMs` has passed is **expired**, not held, and may be taken over by the
+ * same mechanism (that is what stops a crashed run from wedging a programme).
+ *
+ * The row is REPLACED (`set`, no merge) so a new claim can never inherit a previous
+ * run's fields. `data` is whatever the caller wants recorded; `expiresAtMs` is
+ * always written as `now + ttlMs`.
+ *
+ * `attemptedAtMs` is when the CALLER began this attempt (defaults to now). It is
+ * what tells a genuine re-run apart from a second, CONCURRENT run: a row whose
+ * `releasedAtMs` is after it was still HELD while this attempt was asking, so
+ * its run was in flight when this request arrived and this attempt is refused
+ * rather than queued behind it. Without that rule a loser would merely wait out the
+ * winner's lease — the SDK re-runs this callback on a conflict — and become an
+ * ordinary second run, advancing the cohort twice. A row released BEFORE the
+ * attempt began carries no such meaning: that run had finished, so the claim is a
+ * deliberate re-run and is allowed (the behaviour the 5b/5d verifiers pin).
+ *
+ * `model` is a MODEL name (`COLS` maps it to the collection), like every other
+ * function here — not a raw collection name.
+ */
+async function claim(
+  model: string,
+  id: string,
+  data: Record<string, any>,
+  options: { ttlMs: number; attemptedAtMs?: number }
+): Promise<ClaimResult> {
+  const ttl = Math.max(0, Number(options?.ttlMs) || 0);
+  const startedAt = Number(options?.attemptedAtMs ?? Date.now()) || 0;
+  const ref = col(model).doc(id);
+
+  const result = await getDb().runTransaction(async (tx) => {
+    // Firestore requires EVERY read before ANY write in a transaction. This is the
+    // only read and the only write, in that order — which is what makes the check
+    // and the take one step.
+    const snap = await tx.get(ref);
+    const holder = snap.exists ? conv(snap.data()) : null;
+    const heldUntil = holder && typeof holder.expiresAtMs === "number" ? holder.expiresAtMs : 0;
+    const live = !!holder && heldUntil > Date.now();
+    // Held when this attempt began (even if released since) — see the doc above.
+    const heldDuringAttempt =
+      !live &&
+      !!holder &&
+      typeof holder.releasedAtMs === "number" &&
+      holder.releasedAtMs > startedAt;
+    if (live || heldDuringAttempt) {
+      return { claimed: false, holder };
+    }
+    tx.set(ref, clean({ ...data, expiresAtMs: Date.now() + ttl }));
+    return { claimed: true };
+  });
+
+  // Taking the row IS a write to this model: drop what this model has cached so a
+  // reader can never be handed a pre-claim copy of it.
+  invalidateDbCacheScope({ model });
+  return result;
+}
+
 export const prisma = {
   school: model("school"),
   user: model("user"),
@@ -2057,5 +2149,10 @@ export const prisma = {
   programCourse: model("programCourse"),
   // ---- College support (Phase 4b) ----
   courseRegistration: model("courseRegistration"),
+  // ---- College support (Phase 6-pre 2) ----
+  // The ladder's lease row, addressed through the shim like every other model
+  // (read/update/delete). `$claim` is the one write that must be atomic.
+  promotionRun: model("promotionRun"),
   $transaction: transaction,
+  $claim: claim,
 };

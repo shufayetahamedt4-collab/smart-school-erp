@@ -58,12 +58,16 @@ export function pendingRequests(n: unknown): string {
  * -------------------------------------------------------------------------- */
 
 /**
- * The ladder run modal's one-line warning. It must stay truthful: a run that is
- * refused gives a run its own message ("another run is in progress"), and this
- * line is the standing advice about not firing two runs at once.
+ * The ladder run modal's one-line warning.
+ *
+ * It must stay TRUTHFUL, and it changed in Phase 6-pre 2: until then there was no
+ * run lock, so the line said so. Now the server refuses a second concurrent run of
+ * the same programme (409), so the line states the guarantee instead of the hazard.
+ * The verifier pins the current claim, so this string cannot drift back to a
+ * statement the server no longer honours.
  */
 export const LADDER_RUN_WARNING =
-  "Run this one at a time: two runs at once can advance the same cohort twice (there is no run lock).";
+  "Run this one at a time: a second run of the same programme is refused while one is already in progress.";
 
 /* ----------------------------------------------------------------------------
  * Failure phrasing — the human fallback for every load, in one place.

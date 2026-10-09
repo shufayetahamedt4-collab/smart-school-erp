@@ -882,8 +882,8 @@ page's error path remains covered by `tsc` and `next build`, **not** by the suit
 Phase 5 is finished and pushed (`a770a03`). Four items were still open. Phase 6-pre closes the three
 that are code, in **three separate commits**, and defers the fourth:
 
-1. **6-pre 1 (this commit)** — the promotion page's view logic extracted and verified **offline**.
-2. **6-pre 2** — an atomic per-programme LEASE on the whole-programme ladder (concurrency).
+1. **6-pre 1 (commit 1)** — the promotion page's view logic extracted and verified **offline**.
+2. **6-pre 2 (this commit)** — an atomic per-programme LEASE on the whole-programme ladder (concurrency).
 3. **6-pre 3** — refuse a ladder re-run while the last run for the programme is PARTIAL/FAILED.
 - **Item 4 is DEFERRED** — `retain` (hold a student at the same term) and the fail/unfinished-course
   rule. The fail half waits for a results/grades phase: no college marks exist today, and college
@@ -925,3 +925,58 @@ component and one new offline script, and no route, `db.ts`, collection or schem
 count: enrollment 40, course-registrations 50, registration-status 9, tenant 75, branch 52,
 college-gate 3, college-permissions 7, college-routes 3, nav-scope 7, college-terms 8,
 promotion-logic 12, promotion-api 100, promotion-rollover 50 × 10 runs.
+
+### 6-pre 2 — the whole-programme ladder's lease
+
+- **D-6pre-5 — ONE new primitive, ONE new collection, and nothing else.** `src/lib/db.ts` gains
+  `$claim` (with its `ClaimResult` type) plus the `promotionRun` → `promotionRuns` `COLS` entry and
+  the matching `prisma.promotionRun` model. That is the whole exception, granted for this commit
+  only: `create`, `update`, `upsert`, `$transaction`, every existing `COLS`/`RELS` entry and every
+  existing exported symbol are untouched, so every school code path is byte-for-byte unchanged.
+  `$claim` is the one write the shim never had — `create` is `set`, `update` is merge, and the array
+  form of `$transaction` carries no read, so none of them can say *take this row ONLY IF it is free*.
+  It runs inside a real Firestore transaction (read, then conditional write), so the check and the
+  take are one step.
+- **D-6pre-6 — the lease is per `(school, programme)`, claimed after every guard and before the
+  first cohort read, and released in a `finally`.** One row per pair (its id is a hash of both), so
+  a second run of the same programme addresses the same row. A live lease makes the next run a
+  **409 with ZERO writes** ("Another run is in progress for this programme."), proved twice: a
+  per-student term/status snapshot AND a tenant document count bracketing the refused request. The
+  lease lasts `LADDER_LEASE_MS` = **2 minutes** (one constant); a row whose `expiresAtMs` has passed
+  is **abandoned, not held**, and may be taken over — a crashed run cannot wedge a programme. The
+  claim happens AFTER `requireCollege`/`can`/`writeGuard`, so a 403 takes no lease.
+- **D-6pre-7 — a run that COMPLETED releases the lease, so the next run is still allowed.** The
+  `finally` finalises the row on SUCCESS and on FAILURE alike: `status` OK / PARTIAL / FAILED,
+  `finishedAt`, `completed[]`, `remainingTerms[]`, `reason` and `releasedAtMs`, with `expiresAtMs`
+  cleared. A run after a SUCCESSFUL run therefore stays allowed — the run-#2 check in
+  `verify-college-promotion-api.mjs` passes **unchanged** — and a failed run records *why* without
+  blocking anything yet (commit 3 reads those fields).
+- **D-6pre-8 — a second CONCURRENT run is refused, not queued behind the first, and that is what
+  makes the guarantee real.** A lease alone is not enough: the Firestore SDK re-runs a conflicting
+  transaction, so a loser would simply wait out the winner's lease and then claim a free row — an
+  ordinary second run, advancing the cohort twice. So the claim also refuses a row whose
+  `releasedAtMs` is *after* the instant the attempt began: that row was still HELD while this
+  request was arriving. A row released BEFORE the attempt began is an ordinary, deliberate re-run
+  and is allowed (D-6pre-7). **PROVEN**: two POSTs fired without awaiting give exactly one 200 and
+  one 409, and every student advances exactly once.
+- **D-6pre-9 — the single-position apply is deliberately NOT leased.** It is idempotent by
+  construction (D2/D3) and it is the documented way to FINISH a partially applied ladder, so leasing
+  it would break the very recovery the ladder's own structured 500 tells the operator to perform.
+  Residual, and recorded rather than hidden: a deliberate single-position apply fired at the same
+  moment as a ladder run is still possible — the lease serialises whole-programme runs against each
+  other, not against that. **NOT PROVEN**: that a single-position apply cannot interleave with a
+  live ladder run.
+- **D-6pre-10 — the page's standing warning was made true.** It claimed the opposite of the new
+  guarantee ("there is no run lock"); it now states the guarantee, and
+  `verify-college-promotion-page.mjs` fails if the old claim returns. The GET plan is unaffected and
+  the structured-500 contract is unchanged.
+
+**Verification (6-pre 2).** New: `scripts/verify-college-promotion-lease.mjs` — **40 checks**, over
+HTTP, against the isolation fixture, creating and cleaning up all of its own rows (programmes,
+students, an ACCOUNTANT, and the lease rows). It was chosen over growing
+`verify-college-promotion-api.mjs` so that the established API count stays exactly **100**. Every
+existing count is identical to the parent (`5847f26`), measured BOTH ways (parent restored through
+`git stash` for the baseline, then the working tree for the after-run): enrollment 40,
+course-registrations 50, registration-status 9, tenant 75, branch 52, college-gate 3,
+college-permissions 7, college-routes 3, nav-scope 7, college-terms 8, promotion-logic 12,
+promotion-api 100, page 13, rollover 50 × 10 runs. `tsc` 0 errors; `next build` 164/164.

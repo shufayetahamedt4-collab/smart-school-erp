@@ -43,6 +43,149 @@ import { normalizeTermNumber, type CollegeCohortStudent } from "@/lib/college-pr
 /** The Firestore write-batch chunk the rest of the codebase uses (school ladder). */
 export const PROMOTION_BATCH = 400;
 
+/**
+ * How long a whole-programme run may hold the programme's lease (Phase 6-pre 2,
+ * docs/COLLEGE-DECISIONS.md §21). ONE constant: a run that crashes mid-step, or a
+ * process that dies, must not wedge a programme for ever, so a lease older than
+ * this is treated as abandoned and may be taken over. Two minutes is several times
+ * the longest run the verifier exercises (a 405-student ladder), so the window is
+ * about crash recovery, not about the run's normal duration.
+ */
+export const LADDER_LEASE_MS = 2 * 60 * 1000;
+
+/** The refusal a second, concurrent run receives. */
+export const LADDER_RUN_IN_PROGRESS_MESSAGE =
+  "Another run is in progress for this programme.";
+
+/** FNV-style string hash, base-36. Pure, deterministic, no dependency. */
+function runHash(value: string, seed: number): string {
+  let x = seed >>> 0;
+  for (let i = 0; i < value.length; i++) {
+    x = (((x << 5) + x) ^ value.charCodeAt(i)) >>> 0;
+  }
+  return x.toString(36);
+}
+
+/**
+ * The document id of a programme's run row: deterministic from `(schoolId,
+ * programId)` so every run of the same programme addresses the SAME row.
+ *
+ * The pair is hashed twice, with different seeds, so the id is a 64-bit address
+ * rather than a readable concatenation — a raw id could contain `/` (illegal in a
+ * document id) or exceed Firestore's 1500-byte limit. The id is only an ADDRESS:
+ * the row itself stores the true `schoolId` and `programId`, so a hash collision
+ * could at worst refuse an unrelated run (the claim fails closed) and could never
+ * let one programme write another's students.
+ */
+export function promotionRunId(schoolId: string, programId: string): string {
+  const key = `${schoolId}\u0000${programId}`;
+  return `run_${runHash(key, 5381)}${runHash(key, 131)}`;
+}
+
+/** What a claim attempt answered. */
+export interface ProgrammeRunClaim {
+  /** The row's document id (deterministic from the pair). */
+  id: string;
+  /** True when THIS caller now holds the programme's lease. */
+  claimed: boolean;
+}
+
+/**
+ * Claim the programme's lease, atomically (Phase 6-pre 2).
+ *
+ * One row per `(schoolId, programId)`. A live lease means another run is moving
+ * this programme's cohorts right now, so the caller must write NOTHING and answer
+ * 409. An EXPIRED lease is not a holder: it may be taken over, which is what keeps
+ * a crashed run from locking a programme out for ever.
+ *
+ * The row is REPLACED on claim, so a new run never inherits a previous run's
+ * fields, and it carries what the run needs to report itself afterwards:
+ * `schoolId`, `branchId`, `programId`, `ownerId`, `status`, `acquiredAt`,
+ * `expiresAtMs` (the lease), plus `finishedAt`, `completed` and `remainingTerms`
+ * (filled in by `finaliseProgrammeRun`).
+ */
+export async function claimProgrammeRun(input: {
+  schoolId: string;
+  programId: string;
+  branchId?: string | null;
+  ownerId?: string | null;
+}): Promise<ProgrammeRunClaim> {
+  const id = promotionRunId(input.schoolId, input.programId);
+  // When THIS request began asking. The claim is refused if the row it finds was
+  // released after this instant, because that means the row was still held while
+  // this request was arriving: a second, CONCURRENT run — not a deliberate re-run
+  // (see `$claim`). `Date.now()` is read once, outside the transaction, so the
+  // SDK's own conflict retries cannot move it forward.
+  const attemptedAtMs = Date.now();
+  const result = await prisma.$claim(
+    "promotionRun",
+    id,
+    {
+      schoolId: input.schoolId,
+      branchId: input.branchId ?? null,
+      programId: input.programId,
+      ownerId: input.ownerId ?? null,
+      status: "IN_PROGRESS",
+      acquiredAt: new Date().toISOString(),
+      acquiredAtMs: attemptedAtMs,
+      finishedAt: null,
+      completed: [],
+      remainingTerms: [],
+    },
+    { ttlMs: LADDER_LEASE_MS, attemptedAtMs }
+  );
+  return { id, claimed: result.claimed };
+}
+
+/**
+ * Release the lease and record how the run ended (Phase 6-pre 2).
+ *
+ * Called from the run's `finally`, on SUCCESS and on FAILURE alike, so a lease can
+ * never outlive its run. It ALWAYS clears `expiresAtMs`, which is what makes the
+ * lease released rather than merely re-stamped: the moment a run ends, the next
+ * run is allowed (Phase 6-pre 2 deliberately blocks nothing after the fact).
+ *
+ * `status` is `"OK"` for a completed run and `"PARTIAL"` / `"FAILED"` for a run
+ * that threw — the distinction `wroteAnything` already makes in the response. The
+ * failure fields are RECORDED here for the later rule that will refuse a re-run
+ * after a partial run (§21, commit 3); nothing reads them yet.
+ *
+ * Best effort by design: finalising must never mask the run's own response. A
+ * failure to write the row is swallowed (the run's real answer is already built).
+ */
+export async function finaliseProgrammeRun(input: {
+  schoolId: string;
+  programId: string;
+  status: "OK" | "PARTIAL" | "FAILED";
+  completed?: any[];
+  remainingTerms?: number[];
+  reason?: string | null;
+}): Promise<void> {
+  try {
+    await prisma.promotionRun.update({
+      where: { id: promotionRunId(input.schoolId, input.programId) },
+      data: {
+        status: input.status,
+        finishedAt: new Date().toISOString(),
+        completed: input.completed ?? [],
+        remainingTerms: input.remainingTerms ?? [],
+        reason: input.reason ?? null,
+        // RELEASED: the lease is over whatever the outcome, so the next run may
+        // claim it. (Phase 6-pre 3 will add the refusal for a PARTIAL/FAILED
+        // last run; the release itself stays unconditional.)
+        expiresAtMs: 0,
+        // WHEN it was released. A claim that asked BEFORE this instant was asking
+        // while this run was in flight, and is refused as a concurrent run rather
+        // than queued behind it (`$claim`); a claim that asked after it is the
+        // ordinary re-run the 5b/5d verifiers pin, and is allowed.
+        releasedAtMs: Date.now(),
+      },
+    });
+  } catch {
+    /* best effort: never mask the run's own answer */
+  }
+}
+
 /** Trimmed string, or "" for any non-string (the college routes' `read`). */
 const read = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
