@@ -63,8 +63,8 @@ const {
   normalizeInstitutionType,
 } = await import("../src/lib/institution.ts");
 
-/** The college-only destinations Phase 2 introduces (marked by Phase 2e/3d). */
-const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses", "/dashboard/registration"];
+/** The college-only destinations Phase 2 introduces (2e/3d; the promotion page marked by 5c). */
+const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses", "/dashboard/registration", "/dashboard/college-promotion"];
 /** The only roles that carry them. */
 const COLLEGE_ROLES = ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR"];
 

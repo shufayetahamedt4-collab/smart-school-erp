@@ -152,6 +152,13 @@ interface LadderRunResult {
 const PENDING_TOOLTIP =
   "Course-registration requests still PENDING at this term. One request = one course; one student may have several. This is not a student count, and it does not block or follow a promotion.";
 
+/**
+ * The D6 pending figure with the right number: "1 pending course request" /
+ * "N pending course requests". It counts REQUESTS, never students, so the label
+ * must read correctly at 1 as well as at N.
+ */
+const pendingRequests = (n: number) => `${n} pending course ${n === 1 ? "request" : "requests"}`;
+
 export default function CollegePromotionPage() {
   const { me, loading: meLoading, error: meError } = useMe();
 
@@ -537,7 +544,7 @@ export default function CollegePromotionPage() {
                   {preview.counts.pendingRegistrations}
                 </p>
                 <p className="text-[11px] text-slate-400" title={PENDING_TOOLTIP}>
-                  {preview.counts.pendingRegistrations} pending course requests in this cohort
+                  {pendingRequests(preview.counts.pendingRegistrations)} in this cohort
                 </p>
               </div>
             </div>
@@ -593,7 +600,7 @@ export default function CollegePromotionPage() {
                         )}
                         {r.pendingRegistrationCount > 0 && (
                           <div className="text-slate-500" title={PENDING_TOOLTIP}>
-                            {r.pendingRegistrationCount} pending course requests at this term
+                            {pendingRequests(r.pendingRegistrationCount)} at this term
                           </div>
                         )}
                         {!r.classIdWarning && r.pendingRegistrationCount === 0 && (
@@ -691,7 +698,7 @@ export default function CollegePromotionPage() {
                 {ladderPlan.counts.graduate} will graduate
               </li>
               <li className="text-xs text-slate-500" title={PENDING_TOOLTIP}>
-                {ladderPlan.counts.pendingRegistrations} pending course requests in this programme
+                {pendingRequests(ladderPlan.counts.pendingRegistrations)} in this programme
               </li>
             </ul>
 
@@ -717,7 +724,7 @@ export default function CollegePromotionPage() {
                       </p>
                       <p className="mt-0.5 text-[11px] text-slate-400">
                         {s.counts.classIdWarnings > 0 && `${s.counts.classIdWarnings} also in a school class · `}
-                        {s.counts.pendingRegistrations} pending course requests
+                        {pendingRequests(s.counts.pendingRegistrations)}
                       </p>
                     </>
                   )}
