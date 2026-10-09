@@ -19,6 +19,33 @@ import {
   PageHeader,
   Select,
 } from "@/components/ui";
+import {
+  LADDER_FAILURE_REFRESH,
+  LADDER_FAILURE_REFRESH_IS_SILENT,
+  LADDER_RUN_WARNING,
+  PAGE_ERRORS,
+  PENDING_TOOLTIP,
+  UNNAMED_PROGRAM,
+  applyBlocked,
+  applyButtonLabel,
+  applyDisabled,
+  applyResultMessage,
+  classIdBannerText,
+  confirmSummary,
+  emptyCohortTitle,
+  ladderGraduateText,
+  ladderRunButtonLabel,
+  ladderRunDisabled,
+  ladderRunMessage,
+  messageOf,
+  pendingRequests,
+  previewLadderDisabled,
+  rowNote,
+  showClassIdBanner,
+  showDestinationLine,
+  showGraduatingBanner,
+  stepNote,
+} from "@/lib/college-promotion-view";
 
 /**
  * College support (Phase 5c) — the college promotion ladder UI
@@ -148,16 +175,13 @@ interface LadderRunResult {
   }[];
 }
 
-/** The exact wording D6 requires for the pending figure (never "pending students"). */
-const PENDING_TOOLTIP =
-  "Course-registration requests still PENDING at this term. One request = one course; one student may have several. This is not a student count, and it does not block or follow a promotion.";
-
-/**
- * The D6 pending figure with the right number: "1 pending course request" /
- * "N pending course requests". It counts REQUESTS, never students, so the label
- * must read correctly at 1 as well as at N.
+/*
+ * Every derivation this page makes that is NOT JSX — the warnings, the D6 pending
+ * phrasing, the disabled predicates, the failure phrasing, the confirmation summary
+ * and what the failure path re-fetches — lives in `@/lib/college-promotion-view`, so
+ * it can be verified offline (`scripts/verify-college-promotion-page.mjs`, §21). The
+ * wording below is unchanged; only its home moved.
  */
-const pendingRequests = (n: number) => `${n} pending course ${n === 1 ? "request" : "requests"}`;
 
 export default function CollegePromotionPage() {
   const { me, loading: meLoading, error: meError } = useMe();
@@ -199,7 +223,7 @@ export default function CollegePromotionPage() {
         if (ps.length) setProgramId(ps[0].id);
       })
       .catch((e: any) => {
-        if (alive) setError(e?.message || "Could not load programmes");
+        if (alive) setError(messageOf(e, PAGE_ERRORS.programs));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -241,7 +265,7 @@ export default function CollegePromotionPage() {
       setPreview(await api<Preview>(`/api/college-promotion${qs({ programId: pid, fromTermNumber: term })}`));
     } catch (e: any) {
       setPreview(null);
-      if (!opts.silent) setError(e?.message || "Could not load the preview");
+      if (!opts.silent) setError(messageOf(e, PAGE_ERRORS.preview));
     } finally {
       setPreviewLoading(false);
     }
@@ -259,7 +283,8 @@ export default function CollegePromotionPage() {
   }, [selected]);
 
   const apply = async () => {
-    if (!preview || busy || preview.count === 0) return;
+    if (!preview) return;
+    if (applyBlocked({ count: preview.count, busy })) return;
     setBusy(true);
     setError("");
     try {
@@ -270,16 +295,12 @@ export default function CollegePromotionPage() {
       });
       setConfirmOpen(false);
       setResult(res);
-      setMessage(
-        res.graduating
-          ? `Graduated ${res.graduated} student(s) as ALUMNI from ${selected?.name ?? "the programme"}.`
-          : `Promoted ${res.promoted} student(s) to Term ${res.toTermNumber} of ${selected?.name ?? "the programme"}.`
-      );
+      setMessage(applyResultMessage(res, selected?.name ?? UNNAMED_PROGRAM));
       // Re-fetch: the cohort has moved off the term, so this should now be empty.
       await loadPreview(programId, fromTermNumber);
     } catch (e: any) {
       setConfirmOpen(false);
-      setError(e?.message || "The promotion could not be applied");
+      setError(messageOf(e, PAGE_ERRORS.apply));
     } finally {
       setBusy(false);
     }
@@ -299,7 +320,7 @@ export default function CollegePromotionPage() {
       setLadderPlan(await api<LadderPlan>(`/api/college-promotion/ladder${qs({ programId: pid })}`));
     } catch (e: any) {
       setLadderPlan(null);
-      if (!opts.silent) setError(e?.message || "Could not build the ladder plan");
+      if (!opts.silent) setError(messageOf(e, PAGE_ERRORS.ladderPlan));
     } finally {
       setLadderLoading(false);
     }
@@ -318,7 +339,8 @@ export default function CollegePromotionPage() {
    * here can reorder the ladder — the rule cannot drift into the UI.
    */
   const runLadder = async () => {
-    if (!ladderPlan || busy || ladderPlan.count === 0) return;
+    if (!ladderPlan) return;
+    if (ladderRunDisabled({ count: ladderPlan.count, busy })) return;
     setBusy(true);
     setError("");
     try {
@@ -330,7 +352,7 @@ export default function CollegePromotionPage() {
       setResult(null);
       const name = ladderPlan.program.name;
       setLadderPlan(null);
-      setMessage(`Ran the whole ladder for ${name}: ${res.promoted} advanced, ${res.graduated} graduated.`);
+      setMessage(ladderRunMessage(res, name));
       // Re-fetch the position preview: every cohort has moved off its term.
       await loadPreview(programId, fromTermNumber);
     } catch (e: any) {
@@ -340,11 +362,16 @@ export default function CollegePromotionPage() {
       // BOTH the plan and the position preview. The refresh is SILENT so that report
       // stays on screen (§20).
       setLadderOpen(false);
-      setError(e?.message || "The ladder could not be run");
-      await Promise.all([
-        loadLadderPlan(programId, { silent: true }),
-        loadPreview(programId, fromTermNumber, { silent: true }),
-      ]);
+      setError(messageOf(e, PAGE_ERRORS.ladderRun));
+      // Both parts of the screen are stale after a partial run — the plan AND the
+      // position preview — so both are re-fetched, from the one shared list.
+      await Promise.all(
+        LADDER_FAILURE_REFRESH.map((target) =>
+          target === "ladderPlan"
+            ? loadLadderPlan(programId, { silent: LADDER_FAILURE_REFRESH_IS_SILENT })
+            : loadPreview(programId, fromTermNumber, { silent: LADDER_FAILURE_REFRESH_IS_SILENT })
+        )
+      );
     } finally {
       setBusy(false);
     }
@@ -421,6 +448,7 @@ export default function CollegePromotionPage() {
 
   const system = selected?.termSystem ?? null;
   const rows = preview?.rows ?? [];
+  const confirm = preview ? confirmSummary(preview) : null;
 
   return (
     <div>
@@ -485,7 +513,7 @@ export default function CollegePromotionPage() {
           <div className="flex sm:justify-end">
             <button
               className="btn btn-primary"
-              disabled={!preview || preview.count === 0 || busy || previewLoading}
+              disabled={applyDisabled({ hasPreview: !!preview, count: preview?.count ?? 0, busy, previewLoading })}
               onClick={() => setConfirmOpen(true)}
             >
               <ArrowUpRight size={15} /> Review &amp; apply
@@ -515,12 +543,12 @@ export default function CollegePromotionPage() {
         ) : preview.count === 0 ? (
           <EmptyState
             icon={GraduationCap}
-            title={`Nobody is at term ${preview.fromTermNumber} of ${preview.termCount}`}
+            title={emptyCohortTitle(preview)}
             description="The cohort for this position is empty — after a promotion has run, it stays empty."
           />
         ) : (
           <>
-            {preview.graduating && (
+            {showGraduatingBanner(preview) && (
               <div className="flex items-start gap-2 border-b border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
                 <GraduationCap size={16} className="mt-0.5 shrink-0" />
                 <span>
@@ -549,17 +577,14 @@ export default function CollegePromotionPage() {
               </div>
             </div>
 
-            {preview.counts.classIdWarnings > 0 && (
+            {showClassIdBanner(preview) && (
               <div className="flex items-start gap-2 border-b border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                <span>
-                  {preview.counts.classIdWarnings} student(s) below are also enrolled in a school class — school
-                  promotion may advance this student too.
-                </span>
+                <span>{classIdBannerText(preview.counts.classIdWarnings)}</span>
               </div>
             )}
 
-            {!preview.graduating && (
+            {showDestinationLine(preview) && (
               <div className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
                 Destination:{" "}
                 <span className="font-semibold text-slate-700">
@@ -580,35 +605,36 @@ export default function CollegePromotionPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.studentId} className="tr-hover">
-                      <td className="td text-sm font-semibold text-slate-700">{nameOf(r.studentId)}</td>
-                      <td className="td text-xs text-slate-500">{admissionOf(r.studentId) || "—"}</td>
-                      <td className="td text-xs">
-                        {r.action === "graduate" ? (
-                          <Badge tone="indigo">Graduate → ALUMNI</Badge>
-                        ) : (
-                          <Badge tone="green">Advance → term {r.toTermNumber}</Badge>
-                        )}
-                      </td>
-                      <td className="td text-right text-xs">
-                        {r.classIdWarning && (
-                          <div className="flex items-center justify-end gap-1 text-amber-700">
-                            <AlertTriangle size={12} />
-                            also enrolled in a school class: school promotion may advance this student too
-                          </div>
-                        )}
-                        {r.pendingRegistrationCount > 0 && (
-                          <div className="text-slate-500" title={PENDING_TOOLTIP}>
-                            {pendingRequests(r.pendingRegistrationCount)} at this term
-                          </div>
-                        )}
-                        {!r.classIdWarning && r.pendingRegistrationCount === 0 && (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {rows.map((r) => {
+                    const notes = rowNote(r);
+                    return (
+                      <tr key={r.studentId} className="tr-hover">
+                        <td className="td text-sm font-semibold text-slate-700">{nameOf(r.studentId)}</td>
+                        <td className="td text-xs text-slate-500">{admissionOf(r.studentId) || "—"}</td>
+                        <td className="td text-xs">
+                          {r.action === "graduate" ? (
+                            <Badge tone="indigo">Graduate → ALUMNI</Badge>
+                          ) : (
+                            <Badge tone="green">Advance → term {r.toTermNumber}</Badge>
+                          )}
+                        </td>
+                        <td className="td text-right text-xs">
+                          {notes.classIdWarning && (
+                            <div className="flex items-center justify-end gap-1 text-amber-700">
+                              <AlertTriangle size={12} />
+                              also enrolled in a school class: school promotion may advance this student too
+                            </div>
+                          )}
+                          {notes.pendingText && (
+                            <div className="text-slate-500" title={PENDING_TOOLTIP}>
+                              {notes.pendingText}
+                            </div>
+                          )}
+                          {notes.placeholder && <span className="text-slate-300">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -626,7 +652,7 @@ export default function CollegePromotionPage() {
             The server walks the programme from its final term downwards, so each student moves exactly once. Open the
             plan to review every step before anything is written.
           </p>
-          <button className="btn btn-secondary" onClick={openLadder} disabled={!programId || busy}>
+          <button className="btn btn-secondary" onClick={openLadder} disabled={previewLadderDisabled({ programId, busy })}>
             <Layers size={15} /> Preview full ladder
           </button>
         </div>
@@ -634,17 +660,17 @@ export default function CollegePromotionPage() {
 
       {/* Explicit two-step apply: restate everything, then confirm. */}
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Confirm this promotion">
-        {preview && (
+        {preview && confirm && (
           <div className="space-y-4">
             <p className="text-sm text-slate-600">
               You are about to{" "}
-              {preview.graduating ? (
+              {confirm.verb === "graduate" ? (
                 <>
                   <span className="font-bold">graduate</span> the cohort
                 </>
               ) : (
                 <>
-                  <span className="font-bold">advance</span> the cohort to term {preview.fromTermNumber + 1}
+                  <span className="font-bold">advance</span> the cohort to term {confirm.toTermNumber}
                 </>
               )}{" "}
               of:
@@ -672,7 +698,7 @@ export default function CollegePromotionPage() {
                 Cancel
               </button>
               <button className="btn btn-primary" onClick={apply} disabled={busy}>
-                {busy ? "Applying…" : preview.graduating ? "Graduate the cohort" : "Advance the cohort"}
+                {busy ? "Applying…" : applyButtonLabel(confirm.verb === "graduate")}
               </button>
             </div>
           </div>
@@ -695,7 +721,7 @@ export default function CollegePromotionPage() {
               </li>
               <li>
                 Students across the ladder: <span className="font-semibold">{ladderPlan.count}</span> —{" "}
-                {ladderPlan.counts.graduate} will graduate
+                {ladderGraduateText(ladderPlan)}
               </li>
               <li className="text-xs text-slate-500" title={PENDING_TOOLTIP}>
                 {pendingRequests(ladderPlan.counts.pendingRegistrations)} in this programme
@@ -723,8 +749,8 @@ export default function CollegePromotionPage() {
                         {s.count} student(s): {s.rows.map((r) => nameOf(r.studentId)).join(", ")}
                       </p>
                       <p className="mt-0.5 text-[11px] text-slate-400">
-                        {s.counts.classIdWarnings > 0 && `${s.counts.classIdWarnings} also in a school class · `}
-                        {pendingRequests(s.counts.pendingRegistrations)}
+                        {stepNote(s).classIdText}
+                        {stepNote(s).pendingText}
                       </p>
                     </>
                   )}
@@ -736,16 +762,18 @@ export default function CollegePromotionPage() {
               Steps are applied from the final term backwards so each cohort moves exactly one step — the server decides
               that order. This cannot be undone from here.
             </p>
-            <p className="text-[11px] font-semibold text-amber-600">
-              Run this one at a time: two runs at once can advance the same cohort twice (there is no run lock).
-            </p>
+            <p className="text-[11px] font-semibold text-amber-600">{LADDER_RUN_WARNING}</p>
 
             <div className="flex justify-end gap-2">
               <button className="btn btn-secondary" onClick={() => setLadderOpen(false)} disabled={busy}>
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={runLadder} disabled={busy || ladderPlan.count === 0}>
-                {busy ? "Running…" : `Run the whole ladder (${ladderPlan.count})`}
+              <button
+                className="btn btn-primary"
+                onClick={runLadder}
+                disabled={ladderRunDisabled({ count: ladderPlan.count, busy })}
+              >
+                {ladderRunButtonLabel(ladderPlan.count, busy)}
               </button>
             </div>
           </div>

@@ -876,3 +876,52 @@ student advancing EXACTLY once (no double-advance); and a 405-student ladder com
 than one slice. The cleanup check now also fails if the fault file is left behind. The new route logic
 stays statically gated by `verify-college-routes.mjs` (11 route files / 24 handlers, unchanged). The
 page's error path remains covered by `tsc` and `next build`, **not** by the suite.
+
+## 21. Phase 6-pre decisions (the promotion page verified offline; the ladder made safe)
+
+Phase 5 is finished and pushed (`a770a03`). Four items were still open. Phase 6-pre closes the three
+that are code, in **three separate commits**, and defers the fourth:
+
+1. **6-pre 1 (this commit)** — the promotion page's view logic extracted and verified **offline**.
+2. **6-pre 2** — an atomic per-programme LEASE on the whole-programme ladder (concurrency).
+3. **6-pre 3** — refuse a ladder re-run while the last run for the programme is PARTIAL/FAILED.
+- **Item 4 is DEFERRED** — `retain` (hold a student at the same term) and the fail/unfinished-course
+  rule. The fail half waits for a results/grades phase: no college marks exist today, and college
+  marks are locked to separate collections (D6, D-3-6). Nothing in 6-pre builds it.
+
+Scope is fixed across all three commits: **no change** to `students/promote`, `classes`,
+`permissions.ts`, `nav.ts`, `college-routes.ts` (no new route is allowed), `college-promotion.ts`,
+the programs routes or any school code path, and **no existing verifier changes its count** except
+`verify-college-promotion-api.mjs` (allowed to grow) plus the new verifiers. The isolation
+harnesses stay at 75 / 52.
+
+### 6-pre 1 — the page's logic, proved offline
+
+- **D-6pre-1 — the page's non-visual decisions live in `src/lib/college-promotion-view.ts`.**
+  Which warnings appear, the D6 pending phrasing (and the 1-vs-N singular), the disabled predicates
+  and the handler guards, the failure phrasing, the confirmation verb and destination, the server's
+  report turned into the operator's sentence, and the list of what the failure path re-fetches. The
+  module is **dependency-free** — no `import`, no `require(`, no prisma, no `node:`, no React — the
+  same property `college-promotion.ts`, `college-terms.ts` and `registration-status.ts` hold, so a
+  verifier, a client component and Edge code can all import it. **PROVEN** —
+  `scripts/verify-college-promotion-page.mjs`, 13 checks, offline.
+- **D-6pre-2 — the wording did not move in meaning.** Every string the module now owns is
+  **byte-identical** to the literal it replaced in the page (26 fragments checked against
+  `git show HEAD:`), so this is a move, not a rewrite: the rendered text is unchanged.
+- **D-6pre-3 — the page must be seen to CONSUME the module.** The verifier fails if the page stops
+  importing the module, stops using its names, or re-inlines a literal the module owns — so the
+  extraction cannot silently regress into a duplicate copy that drifts.
+- **D-6pre-4 — a REAL BROWSER TEST IS STILL NOT DONE, and §21 says so plainly.** Nothing here mounts
+  the page: the verifier has no DOM, no React, no browser and no server, and no browser driver is a
+  dependency of this project (adding one means a new dependency *and* a browser download). **PROVEN**:
+  the page's logic. **NOT PROVEN**: that the page renders, that a click issues the right request,
+  that a real sign-in reaches it, or that the API round trip behaves in a browser. Extracting the
+  logic narrows what an untested UI can get wrong; it does not replace that test.
+
+**Verification (6-pre 1).** New: `scripts/verify-college-promotion-page.mjs` — **13 checks**, offline
+(no emulator guard). Nothing else can move by construction: the new module is imported by one client
+component and one new offline script, and no route, `db.ts`, collection or schema is touched.
+`tsc` 0 errors; `next build` 164/164 (unchanged). Every existing verifier was re-run and kept its
+count: enrollment 40, course-registrations 50, registration-status 9, tenant 75, branch 52,
+college-gate 3, college-permissions 7, college-routes 3, nav-scope 7, college-terms 8,
+promotion-logic 12, promotion-api 100, promotion-rollover 50 × 10 runs.
