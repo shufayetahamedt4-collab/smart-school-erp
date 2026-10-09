@@ -667,3 +667,62 @@ beyond; 200 when only ALUMNI/TRANSFERRED are beyond; 200 when growing; the FOREI
 `nav.ts`, `db.ts` (no collection/`COLS`/`RELS` entry), `college-promotion.ts`, the two isolation
 harnesses (75 / 52 unchanged) and every other verifier — the existing programs/college verifiers keep
 their counts exactly.
+
+## 18. Phase 5c decisions (the college promotion page + nav)
+
+Phase 5c is the UI half of plan-Phase 5 (§15): the `/dashboard/college-promotion` page and its nav
+entry. It changes **no API** — the 5b ladder (`GET`/`POST /api/college-promotion`) already exposes
+everything the screen needs — and touches no `db.ts`, `permissions.ts`, `college-routes.ts`,
+`college-promotion.ts`, programs route, school promote route or class model.
+
+- **D-5c-1 — one page, one href.** `src/app/dashboard/college-promotion/page.tsx` is reachable at
+  `/dashboard/college-promotion` (D8); its nav item carries `requires:"COLLEGE"` for exactly
+  `SCHOOL_ADMIN`, `BRANCH_ADMIN` and `REGISTRAR` — the three roles that hold `registration` **full**
+  (§16) — and is grouped under `academics` in `SCHOOL_GROUP_OF`, the same shape `/dashboard/courses`
+  took in 3d and `/dashboard/registration` in 4c. The school `/dashboard/promotion` item is
+  untouched.
+- **D-5c-2 — the page gates before it reads.** Session loading → non-college refusal → role refusal
+  (`can(role, "registration", "full")`), each BEFORE any request, so a SCHOOL tenant and a role
+  without the permission reach `GET /api/programs` and `GET /api/college-promotion` for nothing. Both
+  ladder handlers need `registration` full (not view), so the page gates on that same level.
+- **D-5c-3 — the client sends a POSITION, never rows.** Apply POSTs only
+  `{ programId, fromTermNumber }`; student ids and preview output are never sent, because the cohort
+  is recomputed server-side (D2/D3). This is what makes a re-run a structural no-op, and it is a
+  property of the page, not merely of the route.
+- **D-5c-4 — an explicit two-step apply.** The button opens a confirmation dialog that restates the
+  programme, the term ("term X of N"), the number of students and whether the run graduates them; only
+  then is the POST issued. While in flight the button is disabled (no double-submit). The server's own
+  report is shown, then the preview is re-fetched — which is now empty, the cohort having moved off the
+  term.
+- **D-5c-5 — the preview names the position and the destination.** It shows the programme name and
+  "term X of N", the cohort rows, the tallies (`counts.advance` / `counts.graduate`), and the
+  destination — the next term, or an explicit **"graduating run"** banner on the programme's LAST term,
+  where every row's action is `graduate` (D5). ALUMNI is never mixed with an advance.
+- **D-5c-6 — D4 is surfaced per row.** A cohort member that also holds a `classId` is flagged ("also
+  enrolled in a school class: school promotion may advance this student too"), so an operator sees
+  that the unrelated SCHOOL ladder (`/api/students/promote`) may advance that student as well.
+- **D-5c-7 — D6 is labelled as §17 requires.** The pending figure is "pending course requests", never
+  "pending students": the per-row line reads "N pending course requests at this term" and the cohort
+  aggregate "N pending course requests in this cohort", both carrying the 5c tooltip (one request =
+  one course; one student may have several; it is not a student count and does not block or follow a
+  promotion). Row-based, per §17 Q1.
+- **D-5c-8 — the school nav is unchanged, proven; one verifier list, no new checks.** The new item is
+  `requires:"COLLEGE"`, so `navForRole` still yields the frozen pre-Phase-1 list for every school-only
+  scope. `scripts/verify-nav-scope.mjs` proves it — its `COLLEGE_HREFS` gains the new href so its
+  marked-set invariant stays exact — and that is the **only** verifier changed: **no new checks, count
+  still 7**. `verify-college-gate.mjs` (its own frozen list), `verify-college-routes.mjs`, the two
+  isolation harnesses (75 / 52) and every other verifier are untouched and keep their counts.
+
+**Verification note (5c).** The existing verifiers are static or HTTP-over-the-API and cannot render a
+React page, so the page has **no automated offline coverage**: the ladder's server contract is (the 5b
+API verifier, 61 checks), the nav invariants are (nav-scope 7 / college-gate 3 / college-routes 3), and
+`tsc` (0 errors) plus the production `next build` (162 → 163 pages, `/dashboard/college-promotion`
+prerendered) prove it compiles and builds. The page itself was confirmed by an **interactive browser
+check** against the logged-in COLLEGE fixture on `school.localhost:3000`: it rendered at
+`/dashboard/college-promotion` with its "College Promotion" nav item present, the preview showed the
+position ("term 1 of 2"), the tallies, the destination and the cohort row, the confirmation dialog
+restated the programme, the term and the student count, the apply returned 200 with the success message
+and a re-fetched (now empty) preview with the button disabled, and the final term showed the
+**graduating run** banner with `Graduate → ALUMNI` rows — no console or network errors. That check was
+**manual and is not part of the suite**, so no automated test guards against a future regression in the
+page's markup; that is the honest limit of 5c's verification.

@@ -35,6 +35,7 @@ import {
   Upload,
   Network,
   Layers,
+  TrendingUp,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -117,6 +118,7 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/programs", label: "Programs", icon: Layers, requires: "COLLEGE" },
     { href: "/dashboard/courses", label: "Courses", icon: BookOpen, requires: "COLLEGE" },
     { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
+    { href: "/dashboard/college-promotion", label: "College Promotion", icon: TrendingUp, requires: "COLLEGE" },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
@@ -157,6 +159,7 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/programs", label: "Programs", icon: Layers, requires: "COLLEGE" },
     { href: "/dashboard/courses", label: "Courses", icon: BookOpen, requires: "COLLEGE" },
     { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
+    { href: "/dashboard/college-promotion", label: "College Promotion", icon: TrendingUp, requires: "COLLEGE" },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
     { href: "/dashboard/exams", label: "Exams & Results", icon: FileText },
@@ -190,6 +193,7 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/programs", label: "Programs", icon: Layers, requires: "COLLEGE" },
     { href: "/dashboard/courses", label: "Courses", icon: BookOpen, requires: "COLLEGE" },
     { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
+    { href: "/dashboard/college-promotion", label: "College Promotion", icon: TrendingUp, requires: "COLLEGE" },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
     { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
@@ -346,6 +350,7 @@ const SCHOOL_GROUP_OF: Record<string, string> = {
   "/dashboard/programs": "academics",
   "/dashboard/courses": "academics",
   "/dashboard/registration": "academics",
+  "/dashboard/college-promotion": "academics",
   "/dashboard/routine": "academics",
   "/dashboard/live-classes": "academics",
   "/dashboard/exams": "academics",
