@@ -786,3 +786,93 @@ ordering proved by "moved exactly one step", the untouched ALUMNI/TRANSFERRED st
 registrations, the shifted plan after a run, a second run, and both refusals writing nothing. The new
 route is statically gated by `verify-college-routes.mjs`. The page's ladder UI is covered by `tsc`,
 `next build` and an interactive browser pass — **not** by the suite.
+
+## 20. Phase 5d-2 decisions (the whole-programme ladder fails safely)
+
+5d shipped the ladder knowing it was **not atomic**: it committed in ≤400-op slices and, if a later
+step threw after an earlier one had landed, the run left a partial state, answered an unstructured
+500, wrote **no** audit row, and left the UI showing a stale plan — and a re-run then double-advanced
+the cohorts that had already moved. 5d-2 fixes the failure path without changing the happy path.
+
+- **D-5d2-1 — NO cap and NO refusal: a ladder of any size must run.** 5d-2 deliberately does **not**
+  introduce an "abort before write when the run exceeds one batch" rule: a real programme can exceed
+  400 students, and refusing to promote them would be a regression. A step's writes still go out in
+  ≤400-op slices (D10), so a 405-student term is written as 400 + 5. **PROVEN** — the verifier builds
+  a 2-term programme with **405** students at term 1 and 1 at term 2 and the run completes: 405
+  advanced, 1 graduated, 0 failed, every one of the 405 ON-ROLL at term 2 and only the term-2
+  original retired.
+- **D-5d2-2 — flush at the END of each step, never mid-step across a term boundary.** The ops array
+  is now per-step: a step collects its own ops and flushes them when the step finishes, so a slice can
+  never mix two terms' writes. A step may still need several ≤400 slices (405 students), and that is
+  acceptable because the SINGLE-POSITION cohort is idempotent (D2): re-applying a half-written
+  position selects only the students still at that term, so it completes the step without advancing
+  anybody twice.
+- **D-5d2-3 — a mid-run failure is CAUGHT and answered with a STRUCTURED 500.** The response body is
+  `{ error: <human report>, data: { programId, termCount, status, promoted, graduated, failed,
+  completed[], failedStep, remainingTerms[], finishTerms[], reason } }`, where `completed` are the
+  steps that landed (term + advanced/graduated counts), `failedStep` is the step whose flush threw,
+  `remainingTerms` are the terms never attempted (descending), and `finishTerms` is the descending
+  order to complete them. **Status 500, not 207 — and the reason is code, not taste:** the shared
+  client (`src/lib/client.ts`) treats every 2xx as success, returning only `body.data` and never
+  throwing, so a 207 would silently take the UI's success path and hide the failure; 500 keeps it on
+  the error path, and `error` carries the whole report for the operator.
+- **D-5d2-4 — the failure is AUDITED, and the success audit grew the per-step breakdown.** The
+  success row is now `COLLEGE_PROMOTION` / `scope: "PROGRAMME_LADDER"` / `status: "OK"` with a
+  `steps[]` array, so a run is reconstructable server-side. A failed run writes the SAME shape with
+  `status: "PARTIAL"` (something landed) or `"FAILED"` (nothing did), plus `completed`, `failedStep`,
+  `remainingTerms` and the `reason`. The audit is **best effort**: `audit()` already swallows its own
+  failure, and the call is additionally wrapped so an audit problem can never mask the original write
+  error. **PROVEN** — after an injected mid-run failure the row exists with `status: "PARTIAL"`, the
+  completed term 3 and `remainingTerms: [1]`.
+- **D-5d2-5 — the page's error path is not stale.** On failure the page closes the run modal, shows
+  the server's structured message, and **re-fetches BOTH the plan and the position preview** — the
+  refresh is `{ silent: true }` so it does not wipe the message the run just set. The success path is
+  unchanged. The run modal also carries a one-line warning that two runs at once can advance the same
+  cohort twice.
+- **D-5d2-6 — a partial failure is finished with the SINGLE-POSITION route, descending.** The
+  message tells the operator to complete the FAILED term and then the not-attempted terms with
+  `POST /api/college-promotion` (descending), and never to re-run the ladder. Re-running the LADDER
+  is what double-advances: the steps that landed have moved students into the next term's cohort, so
+  a ladder re-run would move them again, whereas the single-position route re-selects only who is
+  still at the position (idempotent, D2). **PROVEN** — after the injected failure, applying term 2
+  then term 1 completes the ladder with every student moved EXACTLY once (f1→2, f2→3, f3 graduated
+  once) and the plan then names exactly those two already-moved students, which is why a ladder
+  re-run is forbidden.
+- **D-5d2-7 — CONCURRENCY: NO run lock, recorded as a KNOWN LIMITATION.** Investigated read-only:
+  `src/lib/db.ts` exposes no create-only and no preconditioned write — `create` is `ref.set(...)`,
+  `update` is `set(..., { merge: true })`, `$transaction(array)` is one `WriteBatch`, and its callback
+  form is **not** transactional — and a per-programme lock needs exactly that (a create-only claim or
+  a compare-and-set with an expiry). Adding the primitive means editing `db.ts` (explicitly out of
+  scope for 5d-2) or reaching around the shim with raw Firestore inside a route, which is not "small
+  and safe". It was therefore **not built**: two concurrent ladder runs (double-click, two admins, a
+  retry) can still double-advance, and that is stated plainly in the run modal. This is a real,
+  accepted limitation, not a claim of safety.
+- **D-5d2-8 — the forced-failure TEST SEAM is production-inert and not request-reachable.** A
+  deterministic mid-run failure cannot be produced over HTTP (every write the ladder makes is a valid
+  single-field update), so `ladderFault()` reads a JSON file from the **OS temp directory** naming a
+  programme and a term. It is DOUBLE-gated: (1) `NODE_ENV === "production"` returns null before any
+  read, so a production build can never inject a fault whatever is on disk; (2) the fault comes from
+  a FILE, never from the request — no header, body or query parameter can reach it — and the file
+  names the EXACT programme id, so in practice it can only ever be the throwaway programme the
+  verifier made. The file is not a build input and lives outside the app. Its effect (500 + structured
+  body + audit) is **PROVEN** by the run; its production inertness rests on the `NODE_ENV` guard and
+  the absence of any request input, and was **not** executed against a production build.
+- **D-5d2-9 — unchanged surface.** No `db.ts`, `permissions.ts`, `nav.ts`, `college-routes.ts`,
+  `college-promotion.ts`, programs route, school promote route or class model change, and the
+  single-position route's behaviour is untouched (its own 5b checks still prove it). Every other
+  verifier keeps its count: `verify-college-terms` 8, `verify-college-gate` 3,
+  `verify-college-routes` 3, `verify-college-permissions` 7, `verify-college-enrollment` 40,
+  `verify-course-registrations` 50, `verify-registration-status` 9, `verify-nav-scope` 7,
+  `verify-tenant-isolation` 75, `verify-branch-isolation` 52, `verify-college-promotion-logic` 12,
+  `verify-promotion-rollover` 50 × 10 runs, `tsc` 0 errors.
+
+**Verification (5d-2).** `scripts/verify-college-promotion-api.mjs` grows **84 → 100** checks (16
+new): the SUCCESS audit row now carrying `status: "OK"` and the per-step breakdown; the injected
+mid-run failure returning HTTP 500 with `status: "PARTIAL"`, the completed term, the failed term and
+`remainingTerms`/`finishTerms`, plus an error string that names all three and points at the
+single-position route; the failure being audited; the completed step having really landed while the
+failed step and the untouched term wrote nothing; finishing with the single-position route and every
+student advancing EXACTLY once (no double-advance); and a 405-student ladder completing across more
+than one slice. The cleanup check now also fails if the fault file is left behind. The new route logic
+stays statically gated by `verify-college-routes.mjs` (11 route files / 24 handlers, unchanged). The
+page's error path remains covered by `tsc` and `next build`, **not** by the suite.

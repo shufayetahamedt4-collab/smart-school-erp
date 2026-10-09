@@ -46,8 +46,10 @@
  */
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import bcrypt from "bcryptjs";
 import { requireEmulator } from "./lib/guard.mjs";
 
@@ -74,6 +76,21 @@ if (!CRED.collegeAdmin || !CRED.collegeBranchAdmin || !CRED.collegeRegistrar || 
 
 initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID || undefined });
 const db = getFirestore();
+
+/**
+ * The fault-injection seam the ladder POST reads
+ * (`src/app/api/college-promotion/ladder/route.ts`, `ladderFault`).
+ *
+ * A deterministic mid-run failure is otherwise unreachable over HTTP — every write the
+ * ladder makes is a valid single-field update — so the failure is forced from a FILE in
+ * the OS temp directory that names the programme and the term. It is inert in production
+ * (`NODE_ENV === "production"` short-circuits) and can never be triggered by a request.
+ * This verifier plants it for one call and removes it immediately.
+ */
+const FAULT_FILE = join(tmpdir(), "smart-school-qa-ladder-fault.json");
+const injectFault = (programId, term, message = `qa-injected ladder fault (${M})`) =>
+  writeFileSync(FAULT_FILE, JSON.stringify({ programId, term, message }));
+const clearFault = () => rmSync(FAULT_FILE, { force: true });
 
 /* ------------------------------------------------------------ fixture ids */
 const COLLEGE = `${P}college`;
@@ -167,6 +184,31 @@ async function makeRegistration(tag, { studentId, programId, termNumber, status 
   });
   created.registrations.push(id);
   return id;
+}
+
+/**
+ * Create `count` raw cohort students in batched writes, tracked for cleanup.
+ *
+ * Used to prove a ladder whose single STEP needs MORE THAN ONE ≤400-op slice: with
+ * 405 students at one term the step cannot go out in a single batch, and the run must
+ * still complete with every student moved exactly one step.
+ */
+async function makeCohort(tag, count, { programId, termNumber, branchId = BRANCH_A }) {
+  const ids = [];
+  for (let i = 0; i < count; i++) ids.push(`${M}${tag}-${String(i).padStart(3, "0")}-${stamp}`);
+  for (let at = 0; at < ids.length; at += 400) {
+    const batch = db.batch();
+    for (const id of ids.slice(at, at + 400)) {
+      batch.set(db.collection("students").doc(id), {
+        id, schoolId: COLLEGE, branchId, name: `${M}Student ${tag} ${id}`,
+        admissionNo: `${M}ADM-${id}`, programId, termNumber, status: "ACTIVE", active: true,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    await batch.commit();
+  }
+  created.students.push(...ids);
+  return ids;
 }
 
 /** Read back the fields a promotion may change. */
@@ -628,6 +670,21 @@ console.log("\n### the whole-programme ladder — every cohort moves exactly one
   const regDoc = (await db.collection("courseRegistrations").doc(REG_L1).get()).data() || {};
   check("…registrations are untouched (D7 — still PENDING at term 1)", regDoc.status === "PENDING" && regDoc.termNumber === 1, `${regDoc.status}@${regDoc.termNumber}`);
 
+  // D-5d2-5 — the SUCCESS audit row now carries the per-step breakdown, so a run is
+  // reconstructable server-side and not only from the response body.
+  const okAudit = (await db.collection("auditLogs").where("entityId", "==", LAD).get()).docs
+    .map((d) => d.data())
+    .find((a) => a.action === "COLLEGE_PROMOTION" && a.details?.scope === "PROGRAMME_LADDER");
+  check(
+    "…the run wrote ONE audit row carrying status OK and the per-step breakdown (terms 1,2,3)",
+    okAudit?.details?.status === "OK" &&
+      Array.isArray(okAudit?.details?.steps) &&
+      okAudit.details.steps.length === 3 &&
+      okAudit.details.steps.map((s) => s.fromTermNumber).join(",") === "1,2,3" &&
+      okAudit.details.steps[2].graduated === 1,
+    `status=${okAudit?.details?.status} steps=${JSON.stringify(okAudit?.details?.steps || null)}`
+  );
+
   const after1 = await lar(LAD, collegeAdmin);
   const s1 = after1.data?.steps || [];
   check(
@@ -673,6 +730,129 @@ console.log("\n### the whole-programme ladder — every cohort moves exactly one
   );
 }
 
+/* ------------------------------------------- the ladder FAILS SAFELY (Phase 5d-2) */
+console.log("\n### the ladder fails safely — a partial run reports + audits, and finishing never double-advances");
+{
+  const lar = (id, cookie) => req(`/api/college-promotion/ladder?programId=${encodeURIComponent(id)}`, { cookie });
+  const ladderPost = (body, cookie) => post("/api/college-promotion/ladder", body, cookie);
+
+  // A fresh 3-term programme. The run walks DESCENDING, so term 3 COMPLETES, term 2
+  // FAILS (injected, before it writes) and term 1 is never ATTEMPTED — the report
+  // must name all three.
+  const FAILLAD = await makeProgram("faillad", 3, BRANCH_A);
+  check("the fail-safe programme was created (201)", !!FAILLAD, `${FAILLAD}`);
+
+  const f3 = await makeStudent("fail3", { programId: FAILLAD, termNumber: 3, branchId: BRANCH_A });
+  const f2 = await makeStudent("fail2", { programId: FAILLAD, termNumber: 2, branchId: BRANCH_A });
+  const f1 = await makeStudent("fail1", { programId: FAILLAD, termNumber: 1, branchId: BRANCH_A });
+
+  injectFault(FAILLAD, 2);
+  const partial = await ladderPost({ programId: FAILLAD }, collegeAdmin);
+  clearFault();
+
+  check("an injected mid-run failure answers HTTP 500 — not a crash, and not a 2xx", partial.status === 500, `HTTP ${partial.status}`);
+  check(
+    "…with the structured report: status PARTIAL and the COMPLETED step (term 3, 1 graduated)",
+    partial.data?.status === "PARTIAL" &&
+      (partial.data?.completed || []).length === 1 &&
+      partial.data.completed[0].fromTermNumber === 3 &&
+      partial.data.completed[0].graduated === 1,
+    `status=${partial.data?.status} completed=${JSON.stringify(partial.data?.completed || null)}`
+  );
+  check(
+    "…the FAILED step is named (term 2) and the terms never ATTEMPTED are listed (term 1) — plus the finish order",
+    partial.data?.failedStep?.fromTermNumber === 2 &&
+      Array.isArray(partial.data?.remainingTerms) && partial.data.remainingTerms.join(",") === "1" &&
+      (partial.data?.finishTerms || []).join(",") === "2,1",
+    `failed=${JSON.stringify(partial.data?.failedStep || null)} remaining=${JSON.stringify(partial.data?.remainingTerms)} finish=${JSON.stringify(partial.data?.finishTerms)}`
+  );
+  check(
+    "…the error text names the applied term, the failed term and the remaining term, and points at the single-position route",
+    /term 3/.test(partial.error || "") && /term 2/.test(partial.error || "") && /term 1/.test(partial.error || "") &&
+      /college-promotion/.test(partial.error || "") && /descending/.test(partial.error || ""),
+    `${partial.error}`
+  );
+  check(
+    "…the COMPLETED step really landed while the failed step and the untouched term wrote nothing",
+    (await readStudent(f3)).status === "ALUMNI" &&
+      (await readStudent(f2)).termNumber === 2 && (await readStudent(f2)).status === "ACTIVE" &&
+      (await readStudent(f1)).termNumber === 1 && (await readStudent(f1)).status === "ACTIVE",
+    `f3=${(await readStudent(f3)).status} f2=${(await readStudent(f2)).termNumber}/${(await readStudent(f2)).status} f1=${(await readStudent(f1)).termNumber}`
+  );
+
+  const partialAudit = (await db.collection("auditLogs").where("entityId", "==", FAILLAD).get()).docs
+    .map((d) => d.data())
+    .find((a) => a.action === "COLLEGE_PROMOTION" && a.details?.scope === "PROGRAMME_LADDER");
+  check(
+    "…and the FAILURE is audited (PROGRAMME_LADDER, status PARTIAL, the completed step and the remaining term recorded)",
+    partialAudit?.details?.status === "PARTIAL" &&
+      (partialAudit?.details?.completed || []).length === 1 &&
+      partialAudit.details.completed[0].fromTermNumber === 3 &&
+      (partialAudit?.details?.remainingTerms || []).join(",") === "1",
+    `audit=${JSON.stringify(partialAudit?.details || null)}`
+  );
+
+  // Finish with the SINGLE-POSITION route, DESCENDING — the failed term, then the
+  // not-attempted one. This must complete the ladder with every student moved EXACTLY
+  // once: nobody is advanced a second time (re-running the LADDER would do that).
+  const finish2 = await apply(FAILLAD, 2, collegeAdmin);
+  const finish1 = await apply(FAILLAD, 1, collegeAdmin);
+  check(
+    "the remaining terms finish cleanly with the single-position apply (term 2, then term 1)",
+    finish2.status === 200 && finish2.data?.promoted === 1 && finish1.status === 200 && finish1.data?.promoted === 1,
+    `term2=${finish2.status}/${finish2.data?.promoted} term1=${finish1.status}/${finish1.data?.promoted}`
+  );
+  check(
+    "…and EVERY student advanced EXACTLY once (f1→2, f2→3, f3 graduated once — NO double-advance)",
+    (await readStudent(f1)).termNumber === 2 && (await readStudent(f1)).status === "ACTIVE" &&
+      (await readStudent(f2)).termNumber === 3 && (await readStudent(f2)).status === "ACTIVE" &&
+      (await readStudent(f3)).status === "ALUMNI" && (await readStudent(f3)).termNumber === 3,
+    `f1=${(await readStudent(f1)).termNumber}/${(await readStudent(f1)).status} f2=${(await readStudent(f2)).termNumber}/${(await readStudent(f2)).status} f3=${(await readStudent(f3)).status}`
+  );
+  // Finishing the remaining terms with the single-position route completes the SAME
+  // single step, so every student now sits one term further: the plan is NOT empty.
+  // That is precisely why re-running the LADDER is forbidden — it would move the two
+  // students it already moved a SECOND time (the very double-advance the message warns
+  // about). Asserted positively: the plan names exactly those two students.
+  const donePlan = await lar(FAILLAD, collegeAdmin);
+  const doneIds = (donePlan.data?.steps || []).flatMap((s) => (s.rows || []).map((r) => r.studentId));
+  check(
+    "…the finished programme sits one step further for everyone, and the ladder's plan NAMES those two students (so a ladder re-run would double-advance them)",
+    donePlan.status === 200 && donePlan.data?.count === 2 && doneIds.length === 2 &&
+      doneIds.includes(f1) && doneIds.includes(f2),
+    `count=${donePlan.data?.count} ids=${JSON.stringify(doneIds)}`
+  );
+}
+
+/* --------------------------- the ladder at a size that needs MORE THAN ONE slice */
+console.log("\n### a ladder bigger than one ≤400-op batch still completes (no cap, no refusal)");
+{
+  const ladderPost = (body, cookie) => post("/api/college-promotion/ladder", body, cookie);
+  const BIGLAD = await makeProgram("biglad", 2, BRANCH_A);
+  check("the large 2-term programme was created (201)", !!BIGLAD, `${BIGLAD}`);
+
+  // 405 students at term 1 — one more than PROMOTION_BATCH, so that step MUST span two
+  // slices — plus one at term 2 (the graduating step).
+  const many = await makeCohort("big", 405, { programId: BIGLAD, termNumber: 1 });
+  const big2 = await makeStudent("big2", { programId: BIGLAD, termNumber: 2, branchId: BRANCH_A });
+  check("…with 405 students at term 1 and 1 at term 2", many.length === 405 && !!big2, `405 + ${big2 ? 1 : 0}`);
+
+  const bigRun = await ladderPost({ programId: BIGLAD }, collegeAdmin);
+  check(
+    "the run completes across more than one slice (405 advanced / 1 graduated / 0 failed)",
+    bigRun.status === 200 && bigRun.data?.promoted === 405 && bigRun.data?.graduated === 1 && bigRun.data?.failed === 0,
+    `HTTP ${bigRun.status} p=${bigRun.data?.promoted} g=${bigRun.data?.graduated} f=${bigRun.data?.failed}`
+  );
+  const bigRows = (await db.collection("students").where("programId", "==", BIGLAD).get()).docs.map((d) => d.data());
+  const onRollAt2 = bigRows.filter((s) => s.termNumber === 2 && s.status === "ACTIVE").length;
+  const alumni = bigRows.filter((s) => s.status === "ALUMNI").length;
+  check(
+    "…and every one of the 405 moved exactly one step (all ON-ROLL at term 2, only term-2's original graduates)",
+    bigRows.length === 406 && onRollAt2 === 405 && alumni === 1,
+    `rows=${bigRows.length} onRoll@2=${onRollAt2} alumni=${alumni}`
+  );
+}
+
 /* -------------------------------------------------------------------- cleanup */
 console.log("\n### cleanup");
 {
@@ -687,6 +867,8 @@ console.log("\n### cleanup");
     for (const d of snaps.docs) await d.ref.delete().catch(() => null);
   }
 
+  clearFault(); // the injected-fault file must never outlive this verifier
+
   const leftovers = [];
   for (const col of ["students", "programs", "courseRegistrations", "users"]) {
     const snap = await db.collection(col).where("__name__", ">=", M).where("__name__", "<=", M + "\uf8ff").get();
@@ -700,6 +882,11 @@ console.log("\n### cleanup");
     "every zzcp- row this verifier created is gone (students/programmes/registrations/users/audit)",
     leftovers.length === 0 && auditLeft === 0,
     `${leftovers.join(", ") || "no rows"} | audit=${auditLeft}`
+  );
+  check(
+    "…and the injected-fault file is gone (no test seam is left behind)",
+    !existsSync(FAULT_FILE),
+    FAULT_FILE
   );
 }
 

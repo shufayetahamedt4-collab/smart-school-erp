@@ -225,15 +225,16 @@ export default function CollegePromotionPage() {
    * server's report of the last apply stays on screen while the re-fetched (now
    * empty) preview renders beneath it.
    */
-  const loadPreview = useCallback(async (pid: string, term: number) => {
+  const loadPreview = useCallback(async (pid: string, term: number, opts: { silent?: boolean } = {}) => {
     if (!pid) return;
     setPreviewLoading(true);
-    setError("");
+    // A SILENT refresh (the ladder's failure path) must not clear the run's error.
+    if (!opts.silent) setError("");
     try {
       setPreview(await api<Preview>(`/api/college-promotion${qs({ programId: pid, fromTermNumber: term })}`));
     } catch (e: any) {
       setPreview(null);
-      setError(e?.message || "Could not load the preview");
+      if (!opts.silent) setError(e?.message || "Could not load the preview");
     } finally {
       setPreviewLoading(false);
     }
@@ -278,23 +279,29 @@ export default function CollegePromotionPage() {
   };
 
   /**
-   * Build the whole-programme plan (`GET /api/college-promotion/ladder`). It is
-   * read-only: it lists every term's original cohort and its single move, so an
-   * operator can review all steps before anything is written.
+   * Fetch the whole-programme plan (`GET /api/college-promotion/ladder`) and store
+   * it. It is read-only: it lists every term's original cohort and its single move,
+   * so an operator can review every step before anything is written. A SILENT refresh
+   * (the run's failure path) leaves the error the run just set on screen.
    */
-  const openLadder = async () => {
-    if (!programId) return;
-    setLadderOpen(true);
+  const loadLadderPlan = useCallback(async (pid: string, opts: { silent?: boolean } = {}) => {
+    if (!pid) return;
     setLadderLoading(true);
-    setError("");
+    if (!opts.silent) setError("");
     try {
-      setLadderPlan(await api<LadderPlan>(`/api/college-promotion/ladder${qs({ programId })}`));
+      setLadderPlan(await api<LadderPlan>(`/api/college-promotion/ladder${qs({ programId: pid })}`));
     } catch (e: any) {
       setLadderPlan(null);
-      setError(e?.message || "Could not build the ladder plan");
+      if (!opts.silent) setError(e?.message || "Could not build the ladder plan");
     } finally {
       setLadderLoading(false);
     }
+  }, []);
+
+  const openLadder = async () => {
+    if (!programId) return;
+    setLadderOpen(true);
+    await loadLadderPlan(programId);
   };
 
   /**
@@ -320,8 +327,17 @@ export default function CollegePromotionPage() {
       // Re-fetch the position preview: every cohort has moved off its term.
       await loadPreview(programId, fromTermNumber);
     } catch (e: any) {
+      // A partial run may have WRITTEN some steps, so the screen must never keep
+      // showing pre-run state. Close the modal, show the server's structured report
+      // (the applied steps, the failed step and the remaining terms) and re-fetch
+      // BOTH the plan and the position preview. The refresh is SILENT so that report
+      // stays on screen (§20).
       setLadderOpen(false);
       setError(e?.message || "The ladder could not be run");
+      await Promise.all([
+        loadLadderPlan(programId, { silent: true }),
+        loadPreview(programId, fromTermNumber, { silent: true }),
+      ]);
     } finally {
       setBusy(false);
     }
@@ -712,6 +728,9 @@ export default function CollegePromotionPage() {
             <p className="text-xs text-slate-400">
               Steps are applied from the final term backwards so each cohort moves exactly one step — the server decides
               that order. This cannot be undone from here.
+            </p>
+            <p className="text-[11px] font-semibold text-amber-600">
+              Run this one at a time: two runs at once can advance the same cohort twice (there is no run lock).
             </p>
 
             <div className="flex justify-end gap-2">

@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, requireCollege, audit, type SessionUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -60,10 +63,49 @@ import {
  *      slices, then ONE `audit` for the whole run, `invalidateStats` and
  *      `invalidateReferenceCache`.
  *
+ * Phase 5d-2 — the run FAILS SAFELY (docs/COLLEGE-DECISIONS.md §20). Each step is
+ * flushed at its END, never mid-step across a term boundary; a mid-run failure is
+ * caught and answered with a STRUCTURED 500 (the steps COMPLETED, the step that
+ * FAILED and the terms never ATTEMPTED) plus a best-effort audit row, so a partial
+ * run is neither silent nor invisible. The operator is told to finish the remaining
+ * terms with the idempotent single-position route (`POST /api/college-promotion`),
+ * DESCENDING — re-running the ladder would double-advance the steps that landed.
+ *
  * Guard order (identical to the 5b route):
  *   `getSession()` → target `schoolId` → `requireCollege({ schoolId })` →
  *   `can(role, "registration", "full")` → `writeGuard(schoolId)` (POST only).
  */
+
+/**
+ * TEST-ONLY fault injection for `scripts/verify-college-promotion-api.mjs` (§20, D-5d2-8).
+ *
+ * A deterministic mid-run failure is otherwise unreachable over HTTP: every write this
+ * route makes is a valid single-field update, so no request can make a step fail. The
+ * verifier therefore plants a JSON file naming a programme and a term, runs the ladder,
+ * and deletes the file; this helper turns that file into the failure. It is DOUBLE-gated
+ * so a NORMAL request can never reach it:
+ *
+ *   1. a production build returns null immediately (`NODE_ENV === "production"`), so the
+ *      switch is inert in production whatever happens to be on disk;
+ *   2. the fault comes from a FILE, never from the request — no header, body or query
+ *      parameter can trigger it — and the file names the EXACT programme id, which in
+ *      practice is only ever the throwaway programme the verifier created.
+ *
+ * The file lives in the OS temp directory (never inside the app), so it is not a build
+ * input and is not part of any deployment.
+ */
+function ladderFault(programId: string, term: number): string | null {
+  if (process.env.NODE_ENV === "production") return null;
+  try {
+    const spec = JSON.parse(readFileSync(join(tmpdir(), "smart-school-qa-ladder-fault.json"), "utf8"));
+    if (spec && spec.programId === programId && Number(spec.term) === term) {
+      return typeof spec.message === "string" && spec.message ? spec.message : "Injected ladder fault (test-only).";
+    }
+  } catch {
+    /* no fault file — the ordinary path */
+  }
+  return null;
+}
 
 /** The tallies a step and the whole plan carry (mirrors the 5b preview shape). */
 interface StepCounts {
@@ -151,7 +193,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-/** POST — run the whole ladder, DESCENDING, in ≤400-op slices. */
+/** POST — run the whole ladder, DESCENDING, flushing each step at its END (§20). */
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -172,67 +214,172 @@ export async function POST(req: NextRequest) {
   if (!resolved.ok) return NextResponse.json({ error: resolved.message }, { status: resolved.status });
   const { program, programId, termCount } = resolved;
 
-  const ops: any[] = [];
-  const flush = async () => {
-    while (ops.length) {
-      const slice = ops.splice(0, PROMOTION_BATCH);
-      await prisma.$transaction(slice);
-    }
-  };
-
+  // The steps that COMPLETED, in application order (descending). A step's ops are
+  // collected in its own array and flushed at its END, so a slice never spans two
+  // steps (D-5d2-2). A step that needs more than one ≤400-op slice is still
+  // recoverable: the single-position route is idempotent for that position (D2), so
+  // finishing a half-applied step with `POST /api/college-promotion` cannot advance
+  // anybody twice.
+  const results: any[] = [];
   let promoted = 0;
   let graduated = 0;
   // A cohort row always came from the store and therefore always has an id, so
   // this stays structurally 0 — it exists to mirror the 5b report.
   let failed = 0;
-  const results: any[] = [];
+  let wroteAnything = false;
+  let attemptedTerm: number | null = null;
+  let attemptedCount: number | null = null;
+  let failure: any = null;
 
-  // DESCENDING — see the header. Each step sees its ORIGINAL cohort because
-  // nothing has been moved into it yet, so every student moves exactly one step.
-  for (let term = termCount; term >= 1; term--) {
-    const ladder: Ladder = { program, programId, fromTermNumber: term, termCount };
-    const students = await readCohort(session, ladder);
-    const graduating = term === termCount;
-    const toTermNumber = graduating ? null : term + 1;
-
-    let stepPromoted = 0;
-    let stepGraduated = 0;
-    let stepFailed = 0;
-    for (const student of students) {
-      if (typeof student?.id !== "string" || !student.id) {
-        stepFailed += 1;
-        continue;
-      }
-      // D5/D7/D9 — the same single-field writes the 5b route makes.
-      const data: Record<string, any> = graduating ? { status: "ALUMNI" } : { termNumber: toTermNumber };
-      ops.push(prisma.student.update({ where: { id: student.id }, data }));
-      if (graduating) stepGraduated += 1;
-      else stepPromoted += 1;
-      if (ops.length >= PROMOTION_BATCH) await flush();
+  /** Send one step's ops as ≤PROMOTION_BATCH-op slices. Any committed slice counts
+   *  as a write, which is what distinguishes PARTIAL from FAILED in the report. */
+  const flushStep = async (ops: any[]) => {
+    while (ops.length) {
+      const slice = ops.splice(0, PROMOTION_BATCH);
+      await prisma.$transaction(slice);
+      wroteAnything = true;
     }
+  };
 
-    promoted += stepPromoted;
-    graduated += stepGraduated;
-    failed += stepFailed;
-    results.push({
-      fromTermNumber: term,
-      toTermNumber,
-      graduating,
-      count: students.length,
-      promoted: stepPromoted,
-      graduated: stepGraduated,
-      failed: stepFailed,
-    });
+  try {
+    // DESCENDING — see the header. Each step sees its ORIGINAL cohort because
+    // nothing has been moved into it yet, so every student moves exactly one step.
+    for (let term = termCount; term >= 1; term--) {
+      const ladder: Ladder = { program, programId, fromTermNumber: term, termCount };
+      attemptedTerm = term;
+      const students = await readCohort(session, ladder);
+      attemptedCount = students.length;
+      const graduating = term === termCount;
+      const toTermNumber = graduating ? null : term + 1;
+
+      // TEST-ONLY fault injection: thrown BEFORE this step writes, so a failed step
+      // is atomic (all-or-nothing) and the already-completed steps stay applied.
+      const fault = ladderFault(programId, term);
+      if (fault) throw new Error(fault);
+
+      const ops: any[] = [];
+      let stepPromoted = 0;
+      let stepGraduated = 0;
+      let stepFailed = 0;
+      for (const student of students) {
+        if (typeof student?.id !== "string" || !student.id) {
+          stepFailed += 1;
+          continue;
+        }
+        // D5/D7/D9 — the same single-field writes the 5b route makes.
+        const data: Record<string, any> = graduating ? { status: "ALUMNI" } : { termNumber: toTermNumber };
+        ops.push(prisma.student.update({ where: { id: student.id }, data }));
+        if (graduating) stepGraduated += 1;
+        else stepPromoted += 1;
+      }
+      await flushStep(ops); // the END of the step — never mid-step across terms
+
+      promoted += stepPromoted;
+      graduated += stepGraduated;
+      failed += stepFailed;
+      results.push({
+        fromTermNumber: term,
+        toTermNumber,
+        graduating,
+        count: students.length,
+        promoted: stepPromoted,
+        graduated: stepGraduated,
+        failed: stepFailed,
+      });
+    }
+  } catch (e) {
+    failure = e;
   }
-  await flush();
 
-  // ONE audit row for the whole run (D10) — the per-step report is in the body.
+  if (failure) {
+    // A PARTIAL run: report what landed, what failed and what was never attempted,
+    // and audit it, so the half-done ladder is neither silent nor invisible (§20).
+    const completed = results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber);
+    const remainingTerms: number[] = [];
+    const fromTerm = attemptedTerm === null ? termCount : attemptedTerm;
+    for (let t = fromTerm - 1; t >= 1; t--) remainingTerms.push(t);
+    // To finish safely: re-apply the FAILED term (idempotent, D2) and then every
+    // not-attempted term, all DESCENDING. Re-running the LADDER is forbidden here:
+    // the steps that landed have moved students into the next term, so a ladder
+    // re-run would advance them a SECOND time.
+    const finishTerms = attemptedTerm === null ? remainingTerms : [attemptedTerm, ...remainingTerms];
+    const status = wroteAnything ? "PARTIAL" : "FAILED";
+    const failedStep =
+      attemptedTerm === null
+        ? null
+        : {
+            fromTermNumber: attemptedTerm,
+            toTermNumber: attemptedTerm === termCount ? null : attemptedTerm + 1,
+            graduating: attemptedTerm === termCount,
+            count: attemptedCount,
+          };
+    const completedText = completed.length
+      ? completed.map((s) => `term ${s.fromTermNumber} (${s.promoted} advanced, ${s.graduated} graduated)`).join("; ")
+      : "none";
+    const remainingText = remainingTerms.length ? remainingTerms.map((t) => `term ${t}`).join(", ") : "none";
+    const finishText = finishTerms.map((t) => `term ${t}`).join(", then ");
+    const message =
+      `The ladder run stopped at term ${attemptedTerm ?? "?"}. Completed: ${completedText}. ` +
+      `Failed: term ${attemptedTerm ?? "?"}. Not attempted: ${remainingText}. ` +
+      `The completed terms are already written, so do NOT re-run the ladder (that would advance them again). ` +
+      `Finish the rest with the single-position apply (POST /api/college-promotion), descending: ${finishText}.`;
+
+    // Best effort — `audit()` already swallows its own failure, and this try/catch
+    // guarantees an audit problem can never mask the original write error.
+    try {
+      await audit("COLLEGE_PROMOTION", "program", programId, {
+        scope: "PROGRAMME_LADDER",
+        status,
+        termCount,
+        promoted,
+        graduated,
+        failed,
+        completed,
+        failedStep,
+        remainingTerms,
+        reason: String(failure?.message || failure),
+      });
+    } catch {
+      /* best effort: never mask the original error */
+    }
+    invalidateStats(schoolId, "students");
+    invalidateReferenceCache(schoolId);
+
+    return NextResponse.json(
+      {
+        error: message,
+        data: {
+          programId,
+          termCount,
+          status,
+          promoted,
+          graduated,
+          failed,
+          completed,
+          failedStep,
+          remainingTerms,
+          finishTerms,
+          reason: String(failure?.message || failure),
+        },
+      },
+      // 500, NOT 207: the run did not complete and left a partial write behind. The
+      // shared client treats every 2xx (207 included) as success — it returns only
+      // `body.data` and never throws — so a 207 would silently take the UI's success
+      // path and hide the failure. 500 keeps it on the error path, and `error`
+      // carries the whole report.
+      { status: 500 }
+    );
+  }
+
+  // ONE audit row for the whole run (D10) — now carrying the per-step breakdown.
   await audit("COLLEGE_PROMOTION", "program", programId, {
     scope: "PROGRAMME_LADDER",
+    status: "OK",
     termCount,
     promoted,
     graduated,
     failed,
+    steps: results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber),
   });
   invalidateStats(schoolId, "students");
   invalidateReferenceCache(schoolId);
