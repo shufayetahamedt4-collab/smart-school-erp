@@ -16,6 +16,7 @@ import {
   LADDER_RUN_IN_PROGRESS_MESSAGE,
   claimProgrammeRun,
   finaliseProgrammeRun,
+  readProgrammeRunBlock,
   type Ladder,
 } from "@/lib/college-promotion-server";
 
@@ -88,6 +89,17 @@ import {
  * moment as a ladder run is still possible — the lease serialises whole-programme
  * runs against each other, not against that. The GET plan is unaffected and the
  * structured-500 contract is unchanged.
+ *
+ * Phase 6-pre 3 — A FAILED RUN BLOCKS THE LADDER UNTIL IT IS FINISHED (§21). A run
+ * that threw midway recorded what it completed and what it did NOT (`finishTerms`:
+ * the failed term plus the terms never attempted). While that work list is outstanding
+ * a re-run is refused with 409 — re-running the ladder would advance the steps that
+ * already landed a second time — and the refusal names the outstanding terms and the
+ * single-position route that finishes them, DESCENDING. The block lifts when the
+ * SINGLE-POSITION route has applied those terms (it strikes each one off the row), so
+ * it is decided by the route's own writes and never inferred from a student's term
+ * number, which the finishing walk re-fills. A clean `OK` run records an empty list
+ * and never blocks, and the GET plan exposes the state additively (`data.runBlock`).
  *
  * Guard order (identical to the 5b route):
  *   `getSession()` → target `schoolId` → `requireCollege({ schoolId })` →
@@ -200,6 +212,11 @@ export async function GET(req: NextRequest) {
     counts.pendingRegistrations += preview.counts.pendingRegistrations;
   }
 
+  // Phase 6-pre 3 — ADDITIVE: whether a re-run would be refused, and why. The
+  // operator must be able to see the blocked state BEFORE pressing Run, and the step
+  // list above is unchanged, so an existing reader of this plan sees the same plan.
+  const runBlock = await readProgrammeRunBlock(schoolId, programId);
+
   return NextResponse.json({
     data: {
       program: { id: (program as any).id, name: (program as any).name },
@@ -207,6 +224,7 @@ export async function GET(req: NextRequest) {
       steps,
       count: steps.reduce((n, s) => n + s.count, 0),
       counts,
+      runBlock,
     },
   });
 }
@@ -231,6 +249,31 @@ export async function POST(req: NextRequest) {
   const resolved = await resolveRun(body?.programId, session);
   if (!resolved.ok) return NextResponse.json({ error: resolved.message }, { status: resolved.status });
   const { program, programId, termCount } = resolved;
+
+  // ---- Phase 6-pre 3: no re-run while the LAST run is unfinished (docs §21) ---
+  // A run that failed midway left a work list on its row (`finishTerms`). Re-running
+  // the LADDER would advance the steps that already landed a second time, so the
+  // refusal lists the outstanding terms and names the single-position route instead.
+  // Checked BEFORE the claim, so a blocked request takes no lease and writes nothing;
+  // and the check cannot be fooled by a race, because the release and the PARTIAL
+  // status are the SAME write, so a row this read sees as free is a row whose status
+  // is already settled. Placed after every authorization step: a 403 must never learn
+  // anything about a programme's run state.
+  const block = await readProgrammeRunBlock(schoolId, programId);
+  if (block.blocked) {
+    return NextResponse.json(
+      {
+        error: block.message,
+        data: {
+          status: block.status,
+          finishTerms: block.finishTerms,
+          remainingTerms: block.remainingTerms,
+          stoppedAtTermNumber: block.stoppedAtTermNumber,
+        },
+      },
+      { status: 409 }
+    );
+  }
 
   // ---- Phase 6-pre 2: ONE whole-programme run at a time (docs §21) ----------
   // The claim is ATOMIC (`prisma.$claim`: a real Firestore transaction, read then
@@ -273,6 +316,7 @@ export async function POST(req: NextRequest) {
   // release — never by the response, whose shape is unchanged.
   let runCompleted: any[] = [];
   let runRemainingTerms: number[] = [];
+  let runFinishTerms: number[] = [];
   let runReason: string | null = null;
 
   /** Send one step's ops as ≤PROMOTION_BATCH-op slices. Any committed slice counts
@@ -398,6 +442,9 @@ export async function POST(req: NextRequest) {
       // shape changing at all.
       runCompleted = completed;
       runRemainingTerms = remainingTerms;
+      // The work list Phase 6-pre 3 refuses a re-run against and the single-position
+      // route strikes off, term by term (the failed term first).
+      runFinishTerms = finishTerms;
       runReason = String(failure?.message || failure);
 
       return NextResponse.json(
@@ -459,6 +506,7 @@ export async function POST(req: NextRequest) {
         ? runCompleted
         : results.slice().sort((a, b) => a.fromTermNumber - b.fromTermNumber),
       remainingTerms: failure ? runRemainingTerms : [],
+      finishTerms: failure ? runFinishTerms : [],
       reason: runReason,
     });
   }

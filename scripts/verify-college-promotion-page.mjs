@@ -70,6 +70,9 @@ const {
   applyDisabled,
   applyBlocked,
   ladderRunDisabled,
+  ladderBlocked,
+  ladderBlockTerms,
+  ladderBlockNote,
   previewLadderDisabled,
   ladderRunButtonLabel,
   applyButtonLabel,
@@ -185,6 +188,8 @@ console.log("\n2. the page CONSUMES the module — and the moved literals are go
     "confirmSummary",
     "classIdBannerText",
     "emptyCohortTitle",
+    "ladderBlocked",
+    "ladderBlockNote",
     "LADDER_RUN_WARNING",
     "LADDER_FAILURE_REFRESH",
     "PENDING_TOOLTIP",
@@ -200,6 +205,11 @@ console.log("\n2. the page CONSUMES the module — and the moved literals are go
     "Nobody is at term",
     "will graduate",
     "Graduated ${res.graduated}",
+    // Phase 6-pre 3 — the blocked-run sentence and its rule must come from the module.
+    // (The page's own prose may DISCUSS the state; what must not be duplicated is the
+    // sentence itself, which is why the exact opening clause is pinned.)
+    "Finish it with the single-position apply",
+    "The last ladder run for this programme did not finish",
   ];
   const leaked = forbidden.filter((f) => pageSource.includes(f));
   if (grouped.some(([token]) => !pageSource.includes(token))) {
@@ -337,6 +347,18 @@ console.log("\n6. the disabled predicates and handler guards — a truth table e
       [2, false, false],
     ]) {
       if (ladderRunDisabled({ count, busy }) !== want) problem = `ladderRunDisabled(${count}, ${busy}) should be ${want}`;
+    }
+  }
+  // Phase 6-pre 3 — a BLOCKED ladder disables/refuses the run whatever else is true.
+  if (!problem) {
+    for (const [count, busy, blocked, want] of [
+      [5, false, true, true],
+      [0, false, true, true],
+      [5, true, true, true],
+      [5, false, false, false],
+    ]) {
+      if (ladderRunDisabled({ count, busy, blocked }) !== want)
+        problem = `ladderRunDisabled({count:${count}, busy:${busy}, blocked:${blocked}}) should be ${want}`;
     }
   }
   if (!problem) {
@@ -494,6 +516,49 @@ console.log("\n13. purity — frozen inputs, deterministic output, nothing mutat
   else if (registrationSurface) bad("purity", "the module names a write/registration call — it must not touch the store");
   else if (sessionSurface) bad("purity", "the module names a session dimension — the ladder is session-independent (D9)");
   else ok("frozen inputs are accepted twice with deep-equal output, and no store/session surface exists");
+}
+
+/* ------------------------------------------------------------------------ 14 */
+
+console.log("\n14. the BLOCKED ladder — the refusal the page states before it can happen (6-pre 3)");
+{
+  const fallback = (status, terms) =>
+    `The last ladder run for this programme did not finish (${status}). Finish it with the single-position apply, descending: ${terms}.`;
+  const cases = [
+    // The server's own sentence WINS when it is there — the screen and the 409 agree.
+    [{ runBlock: { blocked: true, status: "PARTIAL", finishTerms: [2, 1], message: "SERVER SENTENCE" } }, true, "SERVER SENTENCE"],
+    // …and the module can explain it alone, with the terms DESCENDING.
+    [{ runBlock: { blocked: true, status: "FAILED", finishTerms: [3, 2, 1] } }, true, fallback("FAILED", "term 3, then term 2, then term 1")],
+    [{ runBlock: { blocked: true, status: "PARTIAL" } }, true, fallback("PARTIAL", "the remaining terms")],
+    // Never blocked: a clean run, no plan, an older server, a stringy "true".
+    [{ runBlock: { blocked: false, status: "OK", finishTerms: [] } }, false, null],
+    [{}, false, null],
+    [null, false, null],
+    [undefined, false, null],
+    [{ runBlock: { blocked: "true", status: "PARTIAL", finishTerms: [1] } }, false, null],
+  ];
+  let problem = null;
+  for (const [plan, wantBlocked, wantNote] of cases) {
+    const gotBlocked = ladderBlocked(plan);
+    const gotNote = ladderBlockNote(plan);
+    if (gotBlocked !== wantBlocked) {
+      problem = `ladderBlocked(${JSON.stringify(plan)}) = ${gotBlocked}, expected ${wantBlocked}`;
+      break;
+    }
+    if (gotNote !== wantNote) {
+      problem = `ladderBlockNote(${JSON.stringify(plan)}) = ${JSON.stringify(gotNote)}, expected ${JSON.stringify(wantNote)}`;
+      break;
+    }
+  }
+  if (!problem) {
+    const desc = ladderBlockTerms({ runBlock: { finishTerms: [1, 3, 2] } });
+    if (JSON.stringify(desc) !== JSON.stringify([3, 2, 1])) problem = `ladderBlockTerms did not sort descending: ${JSON.stringify(desc)}`;
+    else if (JSON.stringify(ladderBlockTerms({ runBlock: { finishTerms: ["2", null, 1] } })) !== JSON.stringify([1]))
+      problem = "ladderBlockTerms did not drop its non-number entries";
+    else if (JSON.stringify(ladderBlockTerms({})) !== JSON.stringify([])) problem = "a plan without a block did not read as no terms";
+  }
+  if (problem) bad("blocked", problem);
+  else ok(`${cases.length} plans: the server's sentence wins, the module's fallback names the terms descending, and only blocked === true blocks`);
 }
 
 /* ---------------------------------------------------------------------- end */

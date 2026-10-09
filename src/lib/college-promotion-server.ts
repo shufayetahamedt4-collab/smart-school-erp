@@ -143,12 +143,15 @@ export async function claimProgrammeRun(input: {
  * Called from the run's `finally`, on SUCCESS and on FAILURE alike, so a lease can
  * never outlive its run. It ALWAYS clears `expiresAtMs`, which is what makes the
  * lease released rather than merely re-stamped: the moment a run ends, the next
- * run is allowed (Phase 6-pre 2 deliberately blocks nothing after the fact).
+ * run is allowed — unless this run FAILED, in which case Phase 6-pre 3 refuses the
+ * next LADDER run until the recorded work list has been applied.
  *
  * `status` is `"OK"` for a completed run and `"PARTIAL"` / `"FAILED"` for a run
- * that threw — the distinction `wroteAnything` already makes in the response. The
- * failure fields are RECORDED here for the later rule that will refuse a re-run
- * after a partial run (§21, commit 3); nothing reads them yet.
+ * that threw — the distinction `wroteAnything` already makes in the response.
+ *
+ * For a failure it also records `finishTerms`, the work list Phase 6-pre 3 refuses a
+ * ladder re-run against and that the SINGLE-POSITION route strikes off, one term at a
+ * time, as each is applied (`markProgrammeTermFinished`).
  *
  * Best effort by design: finalising must never mask the run's own response. A
  * failure to write the row is swallowed (the run's real answer is already built).
@@ -159,6 +162,8 @@ export async function finaliseProgrammeRun(input: {
   status: "OK" | "PARTIAL" | "FAILED";
   completed?: any[];
   remainingTerms?: number[];
+  /** The terms that still have to be applied, DESCENDING (Phase 6-pre 3). */
+  finishTerms?: number[];
   reason?: string | null;
 }): Promise<void> {
   try {
@@ -169,10 +174,15 @@ export async function finaliseProgrammeRun(input: {
         finishedAt: new Date().toISOString(),
         completed: input.completed ?? [],
         remainingTerms: input.remainingTerms ?? [],
+        // The failed term PLUS the terms never attempted, DESCENDING: the work list
+        // the single-position route strikes off, one term at a time (6-pre 3). Empty
+        // for a clean run, which is what makes an OK run never block.
+        finishTerms: input.finishTerms ?? [],
         reason: input.reason ?? null,
         // RELEASED: the lease is over whatever the outcome, so the next run may
-        // claim it. (Phase 6-pre 3 will add the refusal for a PARTIAL/FAILED
-        // last run; the release itself stays unconditional.)
+        // claim it. The release itself stays unconditional — what a FAILED run
+        // additionally changes is that a ladder RE-RUN is refused until the
+        // recorded work list is finished (Phase 6-pre 3, `readProgrammeRunBlock`).
         expiresAtMs: 0,
         // WHEN it was released. A claim that asked BEFORE this instant was asking
         // while this run was in flight, and is refused as a concurrent run rather
@@ -183,6 +193,150 @@ export async function finaliseProgrammeRun(input: {
     });
   } catch {
     /* best effort: never mask the run's own answer */
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Phase 6-pre 3 — a re-run is refused until the work the FAILED run left is done
+ * ------------------------------------------------------------------------- */
+
+/** How the ladder's last run ended, and what is still outstanding (if anything). */
+export interface ProgrammeRunBlock {
+  /** True when the LAST run for this programme is unfinished AND has work left. */
+  blocked: boolean;
+  /** The last run's status: `"OK"` / `"PARTIAL"` / `"FAILED"`, or null when it
+   *  has never run. (The row's `IN_PROGRESS` is a LIVE lease, not a block — the
+   *  claim refuses that with its own message.) */
+  status: string | null;
+  /** The terms still to apply, DESCENDING (the failed term first). */
+  finishTerms: number[];
+  /** The terms the run never attempted, DESCENDING (the row's own record). */
+  remainingTerms: number[];
+  /** The term the run STOPPED at: the first (highest) term still to apply. */
+  stoppedAtTermNumber: number | null;
+  /** The operator-facing refusal, or null when nothing is blocked. */
+  message: string | null;
+}
+
+/** The refusal sentence for a failed run's work list. One builder, so the route
+ *  and the row can never disagree about which terms are outstanding. */
+export function ladderRunBlockedMessage(input: {
+  status: string | null;
+  finishTerms: number[];
+}): string {
+  const terms = input.finishTerms.map((t) => `term ${t}`).join(", then ");
+  return (
+    `The last ladder run for this programme did not finish (${input.status}, stopped at term ${input.finishTerms[0]}), ` +
+    `so the ladder is refused: re-running it would advance the steps that already landed a SECOND time. ` +
+    `Finish it with the single-position apply (POST /api/college-promotion), descending: ${terms}.`
+  );
+}
+
+/**
+ * Read the programme's last run and decide whether a LADDER re-run is refused
+ * (Phase 6-pre 3).
+ *
+ * The block is deliberately narrow, and the two halves of it are read from the same
+ * row the failed run wrote:
+ *
+ *   • only `PARTIAL` / `FAILED` blocks. A clean `OK` run never does (the page's and
+ *     the API verifier's run-after-run behaviour is unchanged);
+ *   • only while there is WORK LEFT. `finishTerms` is the work list the run recorded
+ *     (its failed term plus the terms it never attempted), and the SINGLE-POSITION
+ *     route strikes each term off as it applies it (`markProgrammeTermFinished`), so
+ *     the block lifts exactly when the outstanding terms have actually been applied —
+ *     proved from the row's own writes, never inferred from a student's term number
+ *     (which the finishing walk re-fills, so a term number cannot tell the two apart).
+ *
+ * Reading cannot change the answer: this is a read of a row whose ONLY writers are the
+ * ladder's claim/finalise and that strike-off. Between this read and the claim, a
+ * concurrent run is refused by the lease, so a `PARTIAL` row can never be seen as free:
+ * the release and the `PARTIAL` status are written in the SAME update.
+ */
+export async function readProgrammeRunBlock(
+  schoolId: string,
+  programId: string
+): Promise<ProgrammeRunBlock> {
+  const nothing: ProgrammeRunBlock = {
+    blocked: false,
+    status: null,
+    finishTerms: [],
+    remainingTerms: [],
+    stoppedAtTermNumber: null,
+    message: null,
+  };
+  try {
+    const row: any = await prisma.promotionRun.findFirst({
+      where: { id: promotionRunId(schoolId, programId) },
+    });
+    if (!row) return nothing;
+    const status = typeof row.status === "string" ? row.status : null;
+    const nums = (v: unknown) =>
+      (Array.isArray(v) ? v : []).filter((t): t is number => typeof t === "number").sort((a, b) => b - a);
+    const finishTerms = nums(row.finishTerms);
+    const remainingTerms = nums(row.remainingTerms);
+    const unfinished = status === "PARTIAL" || status === "FAILED";
+    if (!unfinished || finishTerms.length === 0) {
+      return { ...nothing, status, finishTerms, remainingTerms };
+    }
+    return {
+      blocked: true,
+      status,
+      finishTerms,
+      remainingTerms,
+      stoppedAtTermNumber: finishTerms[0],
+      message: ladderRunBlockedMessage({ status, finishTerms }),
+    };
+  } catch {
+    // Fail OPEN, deliberately: this is a guard on top of the run, and a read error
+    // must not turn a working ladder into a 500. The lease still serialises runs.
+    return nothing;
+  }
+}
+
+/**
+ * Strike one term off the failed run's work list, because the SINGLE-POSITION route
+ * has just applied it (Phase 6-pre 3).
+ *
+ * This is how the block LIFTS: the operator finishes the ladder with
+ * `POST /api/college-promotion` descending, and each successful apply removes its
+ * own term. When the list is empty the row is marked `OK` (with `resolvedAt` and
+ * `resolvedBy` for the record), and the ladder is allowed again.
+ *
+ * It changes NOTHING about that route: it is called after the apply has already
+ * written and audited, it reads a row only the ladder writes, it touches only a row
+ * whose status is `PARTIAL` / `FAILED`, and it swallows every error — so the route's
+ * behaviour, its audit and its response are exactly as before. A term that is not on
+ * the list (a re-apply, or a term that never failed) is a no-op.
+ */
+export async function markProgrammeTermFinished(input: {
+  schoolId: string;
+  programId: string;
+  termNumber: number;
+}): Promise<void> {
+  try {
+    const id = promotionRunId(input.schoolId, input.programId);
+    const row: any = await prisma.promotionRun.findFirst({ where: { id } });
+    if (!row) return;
+    if (row.status !== "PARTIAL" && row.status !== "FAILED") return;
+    const finishTerms = (Array.isArray(row.finishTerms) ? row.finishTerms : []).filter(
+      (t: unknown): t is number => typeof t === "number"
+    );
+    if (!finishTerms.includes(input.termNumber)) return;
+    const left = finishTerms.filter((t: number) => t !== input.termNumber).sort((a: number, b: number) => b - a);
+    await prisma.promotionRun.update({
+      where: { id },
+      data: left.length
+        ? { finishTerms: left }
+        : {
+            finishTerms: [],
+            status: "OK",
+            resolvedAt: new Date().toISOString(),
+            resolvedBy: "SINGLE_POSITION",
+          },
+    });
+  } catch {
+    /* best effort: the apply's own answer is already built and must not change */
   }
 }
 

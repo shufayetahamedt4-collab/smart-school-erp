@@ -33,6 +33,8 @@ import {
   classIdBannerText,
   confirmSummary,
   emptyCohortTitle,
+  ladderBlockNote,
+  ladderBlocked,
   ladderGraduateText,
   ladderRunButtonLabel,
   ladderRunDisabled,
@@ -86,6 +88,13 @@ import {
  * only then is the POST issued. While it is in flight the button is disabled (no
  * double-submit), and the server's own report is shown before the preview is
  * re-fetched — which is now empty, because the cohort moved off the term.
+ *
+ * The whole-ladder modal also states the SERVER's refusal before it can happen (Phase
+ * 6-pre 3): the plan carries `runBlock` (additive), and when the last run for the
+ * programme did not finish the modal shows why and disables Run — the server would
+ * answer 409, because re-running the ladder would advance the steps that already
+ * landed a second time. The way out (finish the outstanding terms with the
+ * single-position apply, descending) is named in that same sentence.
  */
 
 /** The programme fields the picker needs (from `GET /api/programs`). */
@@ -155,6 +164,16 @@ interface LadderPlan {
   steps: LadderStep[];
   count: number;
   counts: { advance: number; graduate: number; classIdWarnings: number; pendingRegistrations: number };
+  /** Phase 6-pre 3 (ADDITIVE) — whether a re-run is refused, and why. Optional: a
+   *  plan from an older server simply has no block, and the page behaves as before. */
+  runBlock?: {
+    blocked?: boolean;
+    status?: string | null;
+    finishTerms?: number[];
+    remainingTerms?: number[];
+    stoppedAtTermNumber?: number | null;
+    message?: string | null;
+  };
 }
 
 /** `POST /api/college-promotion/ladder` — the run's report, one entry per step. */
@@ -340,7 +359,8 @@ export default function CollegePromotionPage() {
    */
   const runLadder = async () => {
     if (!ladderPlan) return;
-    if (ladderRunDisabled({ count: ladderPlan.count, busy })) return;
+    // The same rule as the button, so the modal cannot be bypassed into a refusal.
+    if (ladderRunDisabled({ count: ladderPlan.count, busy, blocked: ladderBlocked(ladderPlan) })) return;
     setBusy(true);
     setError("");
     try {
@@ -379,6 +399,10 @@ export default function CollegePromotionPage() {
 
   const nameOf = (studentId: string) => students.get(studentId)?.name || "—";
   const admissionOf = (studentId: string) => students.get(studentId)?.admissionNo || "";
+
+  // Phase 6-pre 3 — why the ladder is refused, if it is. The module owns the sentence
+  // (the server's own when it is there), so the modal and the 409 cannot disagree.
+  const ladderBlockNoteText = ladderBlockNote(ladderPlan);
 
   /* -------------------------------------------------------------- gating UI */
 
@@ -764,6 +788,10 @@ export default function CollegePromotionPage() {
             </p>
             <p className="text-[11px] font-semibold text-amber-600">{LADDER_RUN_WARNING}</p>
 
+            {/* Phase 6-pre 3 — the last run for this programme did not finish, so the
+                server will refuse a re-run. Say so BEFORE the operator presses Run. */}
+            {ladderBlockNoteText && <ErrorNote message={ladderBlockNoteText} />}
+
             <div className="flex justify-end gap-2">
               <button className="btn btn-secondary" onClick={() => setLadderOpen(false)} disabled={busy}>
                 Cancel
@@ -771,7 +799,7 @@ export default function CollegePromotionPage() {
               <button
                 className="btn btn-primary"
                 onClick={runLadder}
-                disabled={ladderRunDisabled({ count: ladderPlan.count, busy })}
+                disabled={ladderRunDisabled({ count: ladderPlan.count, busy, blocked: ladderBlocked(ladderPlan) })}
               >
                 {ladderRunButtonLabel(ladderPlan.count, busy)}
               </button>

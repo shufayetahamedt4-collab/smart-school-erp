@@ -883,8 +883,8 @@ Phase 5 is finished and pushed (`a770a03`). Four items were still open. Phase 6-
 that are code, in **three separate commits**, and defers the fourth:
 
 1. **6-pre 1 (commit 1)** — the promotion page's view logic extracted and verified **offline**.
-2. **6-pre 2 (this commit)** — an atomic per-programme LEASE on the whole-programme ladder (concurrency).
-3. **6-pre 3** — refuse a ladder re-run while the last run for the programme is PARTIAL/FAILED.
+2. **6-pre 2 (commit 2)** — an atomic per-programme LEASE on the whole-programme ladder (concurrency).
+3. **6-pre 3 (this commit)** — refuse a ladder re-run while the last run for the programme is PARTIAL/FAILED.
 - **Item 4 is DEFERRED** — `retain` (hold a student at the same term) and the fail/unfinished-course
   rule. The fail half waits for a results/grades phase: no college marks exist today, and college
   marks are locked to separate collections (D6, D-3-6). Nothing in 6-pre builds it.
@@ -980,3 +980,50 @@ existing count is identical to the parent (`5847f26`), measured BOTH ways (paren
 course-registrations 50, registration-status 9, tenant 75, branch 52, college-gate 3,
 college-permissions 7, college-routes 3, nav-scope 7, college-terms 8, promotion-logic 12,
 promotion-api 100, page 13, rollover 50 × 10 runs. `tsc` 0 errors; `next build` 164/164.
+
+### 6-pre 3 — a failed run blocks the ladder until it is finished
+
+- **D-6pre-11 — the failed run's WORK LIST is the rule, and it is recorded, never
+  inferred.** The row already carried `completed[]` and `remainingTerms[]`; it now also
+  carries `finishTerms[]` — the FAILED term plus the terms never attempted, DESCENDING (the
+  documented finishing order). The ladder refuses a re-run while the programme's last run is
+  `PARTIAL`/`FAILED` AND that list is non-empty: **409**, naming the outstanding terms and
+  telling the operator to finish with the single-position route, descending. The decision comes
+  from the row's own writes and deliberately NOT from a student's `termNumber`: the finishing
+  walk RE-FILLS the terms below it (apply term 1 and students sit at term 2 again), so a term
+  number cannot tell "not finished" from "finished and refilled".
+- **D-6pre-12 — the single-position route strikes off the term it applied, and THAT is how the
+  block lifts.** After a successful apply, `markProgrammeTermFinished` removes that term from
+  the row's `finishTerms`; when the list empties the row becomes `OK` (`resolvedAt`,
+  `resolvedBy: "SINGLE_POSITION"`) and the ladder is allowed again. It changes NOTHING about
+  that route: it runs after the apply has written and audited, it only ever touches a row whose
+  status is `PARTIAL`/`FAILED`, only a term that is actually on the list (a re-apply is a
+  no-op), and it swallows every error — the route's behaviour, audit and response stay
+  byte-for-byte as before. **PROVEN**: after a forced failure the ladder is 409 with zero
+  writes; applying the failed term strikes it off and the block STANDS; applying the last
+  outstanding term unblocks it, and every student ends advanced exactly once.
+- **D-6pre-13 — the block is checked AFTER authorization and BEFORE the lease.** An
+  unauthorized caller still gets its 403 (it must never learn a programme's run state), a
+  blocked request takes no lease and writes nothing, and the check cannot be fooled by a race:
+  the lease release and the `PARTIAL` status are the SAME update, so a row this read sees as
+  free is a row whose status is already settled.
+- **D-6pre-14 — only PARTIAL/FAILED blocks, and only while work is outstanding.** A clean `OK`
+  run records an empty list, so run-after-run is unchanged (the run-#2 checks in
+  `verify-college-promotion-api.mjs` and the lease verifier pass untouched). The GET plan
+  exposes the state ADDITIVELY (`data.runBlock`: `blocked`, `status`, `finishTerms`,
+  `remainingTerms`, `stoppedAtTermNumber`, `message`), and the page shows that sentence and
+  disables Run through the 6-pre-1 module (`ladderBlocked`, `ladderBlockTerms`,
+  `ladderBlockNote`, plus a `blocked` input on `ladderRunDisabled`) — the modal states the
+  refusal BEFORE it can happen, instead of letting the operator press Run into a 409.
+
+**Verification (6-pre 3).** No `db.ts` change at all (the stage-2 row already had room).
+`scripts/verify-college-promotion-lease.mjs` grows **40 → 54 checks**: the plan exposes the
+block, a re-run is a 409 with zero writes, an unauthorized caller is 403 rather than told the
+state, another programme is unaffected, and the recovery strikes the terms off one at a time and
+unblocks — with every student advanced exactly once. `scripts/verify-college-promotion-page.mjs`
+grows **13 → 14** (the note's wording, the terms descending, and `blocked === true` as the only
+lock, plus the page consuming it). Every OTHER count is identical to the parent (`74bf386`),
+which was measured on that tree by its own verification run: enrollment 40, course-registrations
+50, registration-status 9, tenant 75, branch 52, college-gate 3, college-permissions 7,
+college-routes 3, nav-scope 7, college-terms 8, promotion-logic 12, promotion-api **100**,
+rollover 50 × 10 runs. `tsc` 0 errors; `next build` 164/164.

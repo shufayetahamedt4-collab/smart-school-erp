@@ -32,6 +32,11 @@
  *     still moves every student exactly once;
  *   • two TRULY CONCURRENT runs (both fired without awaiting) give exactly ONE 200
  *     and ONE 409, and every student advanced EXACTLY once;
+ *   • after a PARTIAL run the ladder is REFUSED (409, zero writes) with the
+ *     outstanding terms named, an unauthorized caller still gets 403, another
+ *     programme is unaffected, and finishing those terms with the single-position
+ *     route strikes them off and UNBLOCKS the ladder — with every student advanced
+ *     exactly once (Phase 6-pre 3);
  *   • cleanup leaves no `zzls-` row and no `promotionRuns` row for its programmes.
  *
  * The ladder's tenant/branch isolation checks deliberately stay in
@@ -340,6 +345,9 @@ console.log("\n### an EXPIRED lease is TAKEN OVER (a crashed run cannot wedge a 
   check("…and that row is released again after the takeover", row?.expiresAtMs === 0 && row?.status === "OK", `expiresAtMs=${row?.expiresAtMs} status=${row?.status}`);
 }
 
+/** The unauthorized caller section 4 creates, reused by section 7 (403 IS NOT a block). */
+let acctCookie = null;
+
 /* ------------------------------------------------------------------ section 4 */
 console.log("\n### an authorization refusal takes NO lease (the claim is after every guard)");
 {
@@ -352,6 +360,7 @@ console.log("\n### an authorization refusal takes NO lease (the claim is after e
   });
   created.users.push(acctUserId);
   const accountant = await login(acctEmail, "zzls-Pass-12345");
+  acctCookie = accountant;
 
   const forbidden = await ladderPost(PROG_GUARD, accountant);
   check("an ACCOUNTANT (no `registration` action) is refused 403", forbidden.status === 403, `HTTP ${forbidden.status}`);
@@ -457,6 +466,120 @@ console.log("\n### two TRULY CONCURRENT runs: exactly one 200, one 409, and ONE 
   );
   const afterRace = await ladderPost(PROG_RACE, collegeAdmin);
   check("…and a later run is allowed (200)", afterRace.status === 200, `HTTP ${afterRace.status} ${afterRace.error || ""}`);
+}
+
+/* ------------------------------------------------------------------ section 7 */
+console.log("\n### a PARTIAL run BLOCKS the ladder until the outstanding terms are applied");
+{
+  // A fresh 3-term programme: term 3 completes, term 2 FAILS (injected, before it
+  // writes) and term 1 is never attempted — so the run owes terms 2 and 1.
+  const PROG_BLOCK = await makeProgram("block", 3);
+  check("a third programme was created for the blocked-run proof", !!PROG_BLOCK, PROG_BLOCK || "none");
+  const B1 = await makeStudent("block-1", { programId: PROG_BLOCK, termNumber: 1 });
+  const B2 = await makeStudent("block-2", { programId: PROG_BLOCK, termNumber: 2 });
+  const B3 = await makeStudent("block-3", { programId: PROG_BLOCK, termNumber: 3 });
+
+  injectFault(PROG_BLOCK, 2);
+  const partial = await ladderPost(PROG_BLOCK, collegeAdmin);
+  clearFault();
+  check(
+    "the injected failure is still the structured 500, with the work list to finish",
+    partial.status === 500 && partial.data?.status === "PARTIAL" && (partial.data?.finishTerms || []).join(",") === "2,1",
+    `HTTP ${partial.status} status=${partial.data?.status} finish=${JSON.stringify(partial.data?.finishTerms || null)}`
+  );
+  const blockRow = await runRow(PROG_BLOCK);
+  check(
+    "…and the ROW records that work list — the single source the refusal is decided from",
+    blockRow?.status === "PARTIAL" && (blockRow?.finishTerms || []).join(",") === "2,1" && blockRow?.expiresAtMs === 0,
+    `status=${blockRow?.status} finish=${JSON.stringify(blockRow?.finishTerms || null)}`
+  );
+
+  const plan = await req(`/api/college-promotion/ladder?programId=${encodeURIComponent(PROG_BLOCK)}`, { cookie: collegeAdmin });
+  check(
+    "the GET plan is unchanged AND exposes the block (additive `runBlock`)",
+    plan.status === 200 &&
+      (plan.data?.steps || []).length === 3 &&
+      plan.data?.runBlock?.blocked === true &&
+      (plan.data?.runBlock?.finishTerms || []).join(",") === "2,1" &&
+      plan.data?.runBlock?.stoppedAtTermNumber === 2,
+    `HTTP ${plan.status} steps=${(plan.data?.steps || []).length} runBlock=${JSON.stringify(plan.data?.runBlock || null)}`
+  );
+
+  const beforeStudents = await snapshot([B1, B2, B3]);
+  const beforeCounts = await tenantDocCounts();
+  const refused = await ladderPost(PROG_BLOCK, collegeAdmin);
+  check("a ladder RE-RUN after a partial run is 409 (not 200, not 500)", refused.status === 409, `HTTP ${refused.status} ${refused.error || ""}`);
+  check(
+    "…naming the outstanding terms DESCENDING and the route that finishes them (no re-run)",
+    /term 2/.test(String(refused.error || "")) &&
+      /term 1/.test(String(refused.error || "")) &&
+      /descending/.test(String(refused.error || "")) &&
+      /college-promotion/.test(String(refused.error || "")) &&
+      refused.data?.stoppedAtTermNumber === 2 &&
+      (refused.data?.finishTerms || []).join(",") === "2,1",
+    `${JSON.stringify(refused.error)} / ${JSON.stringify(refused.data || null)}`
+  );
+  check(
+    "…and NOTHING moved and NOTHING was created or destroyed (zero writes)",
+    sameSnapshot(beforeStudents, await snapshot([B1, B2, B3]), [B1, B2, B3]) && sameCounts(beforeCounts, await tenantDocCounts()),
+    `${JSON.stringify(beforeCounts)}`
+  );
+  const stillBlocked = await runRow(PROG_BLOCK);
+  check(
+    "…and the refused run left the row EXACTLY as the failed run wrote it",
+    stillBlocked?.status === "PARTIAL" && (stillBlocked?.finishTerms || []).join(",") === "2,1",
+    `status=${stillBlocked?.status} finish=${JSON.stringify(stillBlocked?.finishTerms || null)}`
+  );
+
+  // PER PROGRAMME: another programme of the same school is not blocked by it.
+  const okPlan = await req(`/api/college-promotion/ladder?programId=${encodeURIComponent(PROG_OK)}`, { cookie: collegeAdmin });
+  check(
+    "the block is PER PROGRAMME: a programme whose last run completed is not blocked",
+    okPlan.status === 200 && okPlan.data?.runBlock?.blocked === false,
+    `HTTP ${okPlan.status} runBlock=${JSON.stringify(okPlan.data?.runBlock || null)}`
+  );
+  // AUTHORIZATION FIRST: an unauthorized caller must not learn the block exists.
+  const forbidden = await ladderPost(PROG_BLOCK, acctCookie);
+  check(
+    "…and an UNauthorized caller gets 403, not the 409 that would reveal the programme's state",
+    forbidden.status === 403,
+    `HTTP ${forbidden.status} ${forbidden.error || ""}`
+  );
+
+  // The DOCUMENTED way out: the single-position route, DESCENDING. Each apply
+  // strikes its own term off the work list, and the LAST one unblocks the ladder.
+  const applyTerm = (term) => post("/api/college-promotion", { programId: PROG_BLOCK, fromTermNumber: term }, collegeAdmin);
+  const t2 = await applyTerm(2);
+  const midRow = await runRow(PROG_BLOCK);
+  check(
+    "applying the FAILED term strikes it off the work list (2,1 → 1) and leaves the block standing",
+    t2.status === 200 && (midRow?.finishTerms || []).join(",") === "1" && midRow?.status === "PARTIAL",
+    `HTTP ${t2.status} finish=${JSON.stringify(midRow?.finishTerms || null)} status=${midRow?.status}`
+  );
+  const t1 = await applyTerm(1);
+  const doneRow = await runRow(PROG_BLOCK);
+  check(
+    "applying the LAST outstanding term UNBLOCKS it (empty work list, status OK, resolved by the single-position route)",
+    t1.status === 200 &&
+      (doneRow?.finishTerms || []).length === 0 &&
+      doneRow?.status === "OK" &&
+      doneRow?.resolvedBy === "SINGLE_POSITION",
+    `HTTP ${t1.status} status=${doneRow?.status} finish=${JSON.stringify(doneRow?.finishTerms || null)} by=${doneRow?.resolvedBy}`
+  );
+  check(
+    "…and every student advanced EXACTLY once through the recovery (1→2, 2→3, 3→ALUMNI)",
+    (await readStudent(B1)).termNumber === 2 &&
+      (await readStudent(B2)).termNumber === 3 &&
+      (await readStudent(B3)).status === "ALUMNI",
+    `b1=${(await readStudent(B1)).termNumber} b2=${(await readStudent(B2)).termNumber} b3=${(await readStudent(B3)).status}`
+  );
+  const afterPlan = await req(`/api/college-promotion/ladder?programId=${encodeURIComponent(PROG_BLOCK)}`, { cookie: collegeAdmin });
+  const afterRun = await ladderPost(PROG_BLOCK, collegeAdmin);
+  check(
+    "…and the plan reports NOT blocked, so a ladder run is allowed again (200) — lifted by FINISHING, not by waiting",
+    afterPlan.data?.runBlock?.blocked === false && afterRun.status === 200,
+    `blocked=${afterPlan.data?.runBlock?.blocked} HTTP ${afterRun.status}`
+  );
 }
 
 /* -------------------------------------------------------------------- cleanup */

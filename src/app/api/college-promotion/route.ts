@@ -7,6 +7,7 @@ import { invalidateStats } from "@/lib/stats-cache";
 import { buildCollegePromotionPreview } from "@/lib/college-promotion";
 import {
   PROMOTION_BATCH,
+  markProgrammeTermFinished,
   readCohort,
   readPendingCounts,
   resolveLadder,
@@ -69,6 +70,13 @@ import {
  * The whole-programme run (every term in one request) is the SIBLING route
  * `/api/college-promotion/ladder` (Phase 5d, docs §19); this file keeps its
  * single-position contract exactly as 5b shipped it.
+ *
+ * Phase 6-pre 3 adds ONE side-record to the POST: after a successful apply, the term
+ * just applied is struck off the ladder's failed-run work list
+ * (`markProgrammeTermFinished`), which is how the ladder's refusal lifts once the
+ * remaining terms have actually been applied. It is best effort, it happens after
+ * the apply has written and audited, and it reads and writes only the ladder's own
+ * row — **the route's behaviour, its audit and its response are unchanged.**
  */
 
 /** GET — the preview for one (programme, term) position. Reads only. */
@@ -181,6 +189,15 @@ export async function POST(req: NextRequest) {
   });
   invalidateStats(schoolId, "students");
   invalidateReferenceCache(schoolId);
+  // Phase 6-pre 3: this term is now DONE, so strike it off the ladder's failed-run
+  // work list (a no-op unless a ladder run for this programme is unfinished, and a
+  // no-op if this term is not on that list). Best effort by design: it is a record
+  // ABOUT the apply, so it must never change the apply's own answer.
+  await markProgrammeTermFinished({
+    schoolId,
+    programId: ladder.programId,
+    termNumber: ladder.fromTermNumber,
+  });
 
   return NextResponse.json({
     data: {

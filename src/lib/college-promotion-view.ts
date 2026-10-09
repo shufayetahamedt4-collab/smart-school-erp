@@ -123,14 +123,18 @@ export function applyBlocked(input: { count: number; busy: boolean }): boolean {
 }
 
 /**
- * The ladder run button AND its handler: disabled/refused while busy or when the
- * plan holds nobody. The handler checks `ladderPlan` for null itself.
+ * The ladder run button AND its handler: disabled/refused while busy, when the plan
+ * holds nobody, or when the server reports the programme BLOCKED (Phase 6-pre 3 —
+ * the last run did not finish). The handler checks `ladderPlan` for null itself.
  *
- * This is the same expression as `applyBlocked` by intent — both mean "this run
- * cannot go" — and the page verifier asserts the two agree so they cannot drift.
+ * Without `blocked` this is the same expression as `applyBlocked` by intent — both
+ * mean "this run cannot go" — and the page verifier asserts the two agree so they
+ * cannot drift. `blocked` is optional so that agreement stays checkable, and it is
+ * only the ladder that can be blocked (the single-position route is the way OUT of a
+ * blocked programme, so it is never locked by this).
  */
-export function ladderRunDisabled(input: { count: number; busy: boolean }): boolean {
-  return input.busy || input.count === 0;
+export function ladderRunDisabled(input: { count: number; busy: boolean; blocked?: boolean }): boolean {
+  return input.busy || input.count === 0 || input.blocked === true;
 }
 
 /** "Preview full ladder" needs a programme and an idle page. */
@@ -303,3 +307,61 @@ export const LADDER_FAILURE_REFRESH = ["ladderPlan", "preview"] as const;
  * the operator loses the server's structured report (D-5d2-5).
  */
 export const LADDER_FAILURE_REFRESH_IS_SILENT = true;
+
+/* ----------------------------------------------------------------------------
+ * Phase 6-pre 3 — a ladder re-run the server REFUSES, and why.
+ * -------------------------------------------------------------------------- */
+
+/** The plan's run state, exactly as `GET /api/college-promotion/ladder` reports it
+ *  (additive field, Phase 6-pre 3). Unknown-typed on purpose: the page must not
+ *  crash on a response from a server that does not carry it yet. */
+export interface PlanRunBlock {
+  blocked?: unknown;
+  status?: unknown;
+  finishTerms?: unknown;
+  remainingTerms?: unknown;
+  stoppedAtTermNumber?: unknown;
+  message?: unknown;
+}
+
+/**
+ * Is the ladder refused because the LAST run for this programme did not finish?
+ *
+ * Strictly `=== true`: anything else (a missing field, a string, a stale server) is
+ * "not blocked", so a plan without the field behaves exactly as before.
+ */
+export function ladderBlocked(plan: { runBlock?: PlanRunBlock } | null | undefined): boolean {
+  return plan?.runBlock?.blocked === true;
+}
+
+/**
+ * The terms the unfinished run still owes, DESCENDING (the failed term first) — the
+ * order the single-position apply must finish them in. A missing or malformed list
+ * reads as none, never as a guess.
+ */
+export function ladderBlockTerms(plan: { runBlock?: PlanRunBlock } | null | undefined): number[] {
+  const terms = plan?.runBlock?.finishTerms;
+  return Array.isArray(terms)
+    ? terms.filter((t): t is number => typeof t === "number").sort((a, b) => b - a)
+    : [];
+}
+
+/**
+ * The note the run modal shows INSTEAD of letting the operator press Run and be
+ * refused: why the ladder is blocked, and how to finish it.
+ *
+ * The SERVER's own sentence wins when it is present (it names the failed term and the
+ * route that finishes it, so the screen and the refusal can never disagree), and the
+ * fallback below — the module's wording, pinned by the verifier — makes an empty
+ * explanation impossible. Returns null when nothing is blocked.
+ */
+export function ladderBlockNote(plan: { runBlock?: PlanRunBlock } | null | undefined): string | null {
+  if (!ladderBlocked(plan)) return null;
+  const message = plan?.runBlock?.message;
+  if (typeof message === "string" && message) return message;
+  const status = typeof plan?.runBlock?.status === "string" ? plan.runBlock.status : "PARTIAL";
+  const terms = ladderBlockTerms(plan)
+    .map((t) => `term ${t}`)
+    .join(", then ");
+  return `The last ladder run for this programme did not finish (${status}). Finish it with the single-position apply, descending: ${terms || "the remaining terms"}.`;
+}
