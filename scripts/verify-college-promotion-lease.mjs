@@ -174,6 +174,8 @@ const ladderPost = (programId, cookie) => post("/api/college-promotion/ladder", 
 const collegeAdmin = await login("zz-iso-college-admin@test.local", CRED.collegeAdmin);
 /** The fixture's BRANCH_ADMIN, scoped to BRANCH_A — used to prove BRANCH confinement. */
 const collegeBranchAdmin = await login("zz-iso-college-br-admin@test.local", CRED.collegeBranchAdmin);
+/** The fixture's REGISTRAR — the role Phase 6-pre 6 keeps for the run but not the give-up. */
+const collegeRegistrar = await login("zz-iso-college-registrar@test.local", CRED.collegeRegistrar);
 
 const stamp = Date.now();
 
@@ -988,6 +990,71 @@ console.log("\n### the audited ABANDON hatch — same guards, one audit row, no 
     "…and that refusal left the branch-B row exactly as the completed run wrote it",
     branchRowAfter?.status === "OK" && branchRowAfter?.resolvedBy === undefined,
     `status=${branchRowAfter?.status} by=${branchRowAfter?.resolvedBy} b1=${(await readStudent(B1)).termNumber}`
+  );
+}
+
+/* --------------------------------------------------------------- section 13b */
+console.log("\n### the ABANDON hatch is ADMIN-only — a REGISTRAR keeps the run, not the give-up (6-pre 6)");
+{
+  const REASON = "QA 6-pre 6: a registrar may not give up on this run, but an admin may";
+  // An EMPTY 3-term programme, so the injected fault kills the FIRST attempted step and
+  // the work list is the whole ladder (3,2,1) — nothing has to be moved to prove the gate.
+  const PROG_ROLE = await makeProgram("abrole", 3);
+  injectFault(PROG_ROLE, 3);
+  const roleRun = await ladderPost(PROG_ROLE, collegeAdmin);
+  clearFault();
+  check(
+    "a FAILED run (the whole ladder owed, 3,2,1) was produced for the role gate",
+    roleRun.status === 500 && roleRun.data?.status === "FAILED" && (roleRun.data?.finishTerms || []).join(",") === "3,2,1",
+    `HTTP ${roleRun.status} status=${roleRun.data?.status} finish=${JSON.stringify(roleRun.data?.finishTerms || null)}`
+  );
+
+  const beforeRole = await tenantDocCounts();
+  const refusal = await abandonRun(PROG_ROLE, { reason: REASON }, collegeRegistrar);
+  const afterRole = await tenantDocCounts();
+  const row = await runRow(PROG_ROLE);
+  check(
+    "a REGISTRAR may run the ladder but may NOT abandon it → 403",
+    refusal.status === 403,
+    `HTTP ${refusal.status} ${refusal.error || ""}`
+  );
+  check(
+    "…and that refusal wrote NOTHING (doc counts identical) and left the run exactly as it was",
+    sameCounts(beforeRole, afterRole) &&
+      row?.status === "FAILED" &&
+      (row?.finishTerms || []).join(",") === "3,2,1" &&
+      !row?.resolvedBy,
+    `${JSON.stringify(afterRole)} status=${row?.status} finish=${JSON.stringify(row?.finishTerms || null)}`
+  );
+  const planRole = await req(`/api/college-promotion/ladder?programId=${encodeURIComponent(PROG_ROLE)}`, { cookie: collegeAdmin });
+  check(
+    "…and the block still stands (the 403 was not a silent state change)",
+    planRole.data?.runBlock?.blocked === true,
+    `blocked=${planRole.data?.runBlock?.blocked}`
+  );
+
+  const PROG_REG_RUN = await makeProgram("regrun", 2);
+  check(
+    "…and a REGISTRAR still RUNS the ladder (200) — only the give-up was restricted",
+    (await ladderPost(PROG_REG_RUN, collegeRegistrar)).status === 200
+  );
+
+  const schDone = await abandonRun(PROG_ROLE, { reason: REASON });
+  check(
+    "a SCHOOL_ADMIN still abandons the same run → 200 (ABANDONED)",
+    schDone.status === 200 && schDone.data?.status === "ABANDONED",
+    `HTTP ${schDone.status} ${JSON.stringify(schDone.data || null)}`
+  );
+
+  const PROG_ROLE_B = await makeProgram("abroleb", 3);
+  injectFault(PROG_ROLE_B, 3);
+  const bRun = await ladderPost(PROG_ROLE_B, collegeAdmin);
+  clearFault();
+  const brDone = await abandonRun(PROG_ROLE_B, { reason: REASON }, collegeBranchAdmin);
+  check(
+    "a BRANCH_ADMIN still abandons a run of its OWN branch → 200",
+    bRun.status === 500 && brDone.status === 200 && brDone.data?.status === "ABANDONED",
+    `run HTTP ${bRun.status} abandon HTTP ${brDone.status} ${brDone.error || ""}`
   );
 }
 

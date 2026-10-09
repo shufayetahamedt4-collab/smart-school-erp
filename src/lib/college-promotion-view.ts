@@ -439,6 +439,29 @@ export const ABANDON_WARNING =
 /** The reason length the SERVER enforces; the page only uses it to disable early. */
 export const ABANDON_REASON_MIN = 10;
 
+/**
+ * Phase 6-pre 6 — WHO may abandon. The hatch is an ADMIN act: a REGISTRAR may run the
+ * ladder, apply a position and mark an empty outstanding term finished, but giving up on
+ * a run — which leaves work permanently undone — is restricted to the school's
+ * administrators. `SUPER_ADMIN` is listed because `can()` grants it every module by its
+ * own short-circuit, so the behaviour is unchanged for that role.
+ *
+ * This list is the ONE source of truth for BOTH surfaces: the ladder route imports
+ * `canAbandon` and refuses with 403, and the page uses it to hide the control, so the
+ * screen and the refusal cannot drift apart. `scripts/verify-college-promotion-page.mjs`
+ * pins the predicate and that both the page AND the route use it.
+ */
+export const ABANDON_ROLES = ["SUPER_ADMIN", "SCHOOL_ADMIN", "BRANCH_ADMIN"] as const;
+
+/**
+ * May this role abandon a programme's unfinished run? Strictly a member of
+ * `ABANDON_ROLES`: anything else — a REGISTRAR, an ACCOUNTANT, a TEACHER, a GUARDIAN, a
+ * STUDENT, a missing/`null`/non-string role — may not.
+ */
+export function canAbandon(role: unknown): boolean {
+  return typeof role === "string" && (ABANDON_ROLES as readonly string[]).includes(role);
+}
+
 /** The abandon button: only while a run is BLOCKED, and never while a request is out. */
 export function abandonDisabled(input: {
   blocked: boolean;

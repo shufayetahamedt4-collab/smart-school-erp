@@ -8,6 +8,7 @@ import { can } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
 import { invalidateStats } from "@/lib/stats-cache";
 import { buildCollegePromotionPreview } from "@/lib/college-promotion";
+import { canAbandon } from "@/lib/college-promotion-view";
 import {
   PROMOTION_BATCH,
   abandonProgrammeRun,
@@ -121,6 +122,15 @@ import {
  * `finishTerms` as the record, moves NO student, and writes ONE `COLLEGE_PROMOTION`
  * audit row naming the reason and the outstanding terms. Same guards as the run, so a
  * 403 still learns nothing. An ABANDONED row is NOT a block.
+ *
+ * Phase 6-pre 6 — WHO MAY ABANDON (docs §22 D-6pre6-1). The hatch is an ADMIN act: only
+ * `SUPER_ADMIN`, `SCHOOL_ADMIN` and `BRANCH_ADMIN` may give up on a run (a BRANCH_ADMIN
+ * still only within its own branch, via `resolveRun`'s confinement). A REGISTRAR keeps
+ * everything else it had — run the ladder, apply one position, mark an empty term
+ * finished — but its abandon is a 403, checked FIRST in the arm so the refusal says
+ * nothing about the programme's run state. The list lives in
+ * `src/lib/college-promotion-view.ts` (`ABANDON_ROLES` / `canAbandon`), which the page
+ * also uses to hide the control, so the screen and this refusal cannot drift apart.
  *
  * Guard order (identical to the 5b route):
  *   `getSession()` → target `schoolId` → `requireCollege({ schoolId })` →
@@ -334,6 +344,12 @@ export async function POST(req: NextRequest) {
   // this path must not itself be refused. An ABANDONED row is not a block (only
   // PARTIAL/FAILED are), so the ladder is usable again the moment it lands.
   if (body?.abandonRun === true) {
+    // Phase 6-pre 6 — the ADMIN-only gate. Checked BEFORE the reason and before any
+    // read of the run row, so this 403 is byte-identical to the gate's own above and
+    // reveals nothing about the programme's state (§22 D-6pre6-1).
+    if (!canAbandon(session.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const problem = abandonReasonProblem(body?.reason);
     if (problem) return NextResponse.json({ error: problem }, { status: 400 });
     const reason = String(body.reason).trim();

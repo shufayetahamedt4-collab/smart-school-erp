@@ -34,6 +34,7 @@ import {
   abandonDisabled,
   abandonMessage,
   abandonSummary,
+  canAbandon,
   applyDisabled,
   applyResultMessage,
   classIdBannerText,
@@ -941,8 +942,11 @@ export default function CollegePromotionPage() {
             {ladderBlockNoteText && <ErrorNote message={ladderBlockNoteText} />}
 
             <div className="flex flex-wrap justify-end gap-2">
-              {/* Phase 6-pre 5 — the way out, offered ONLY while the block stands. */}
-              {ladderBlocked(ladderPlan) && (
+              {/* Phase 6-pre 5 — the way out, offered ONLY while the block stands.
+                  Phase 6-pre 6 — and ONLY to a role the server will accept: abandoning
+                  is an ADMIN act (the route answers 403 for anything else), so the
+                  control is hidden rather than offered and then refused. */}
+              {ladderBlocked(ladderPlan) && canAbandon(role) && (
                 <button
                   className="btn btn-secondary text-rose-600"
                   onClick={() => setAbandonOpen(true)}
@@ -967,8 +971,14 @@ export default function CollegePromotionPage() {
       </Modal>
 
       {/* Phase 6-pre 5 — the abandon confirmation. Blunt on purpose: it states what the
-          hatch does NOT do, and prefers finishing the outstanding terms. */}
-      <Modal open={abandonOpen} onClose={() => setAbandonOpen(false)} title="Abandon the unfinished run">
+          hatch does NOT do, and prefers finishing the outstanding terms.
+          Phase 6-pre 6 — gated by the same predicate as the button that opens it, so the
+          dialog cannot be reached by a role the server would refuse. */}
+      <Modal
+        open={abandonOpen && canAbandon(role)}
+        onClose={() => setAbandonOpen(false)}
+        title="Abandon the unfinished run"
+      >
         {ladderPlan && (
           <div className="space-y-4">
             <p className="text-sm font-semibold text-slate-700">

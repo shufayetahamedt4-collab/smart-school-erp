@@ -39,6 +39,7 @@ import { scopeWhere, canAccessBranch } from "@/lib/permissions";
 import { termCount } from "@/lib/college-terms";
 import { normalizeRegistrationStatus } from "@/lib/registration-status";
 import { normalizeTermNumber, type CollegeCohortStudent } from "@/lib/college-promotion";
+import { seamTtlMs, seamFailRead } from "@/lib/college-promotion-seam";
 
 /** The Firestore write-batch chunk the rest of the codebase uses (school ladder). */
 export const PROMOTION_BATCH = 400;
@@ -156,10 +157,17 @@ export async function claimProgrammeRun(
     ownerId?: string | null;
   },
   /** TEST-ONLY override of the lease window (a shorter one lets a verifier outlive a
-   *  renewal interval deterministically); unset in production. */
+   *  renewal interval deterministically); unset in production.
+   *
+   *  Phase 6-pre 6 — the option is INERT IN PRODUCTION HERE, not at the caller:
+   *  `seamTtlMs` returns `undefined` whenever `NODE_ENV === "production"`, whatever is
+   *  passed in, so a future caller cannot make this knob live by forwarding request
+   *  data. The guard is proved behaviourally in `verify-college-promotion-page.mjs`
+   *  (§22 D-6pre6-2/3). */
   options: { ttlMs?: number } = {}
 ): Promise<ProgrammeRunClaim> {
   const id = promotionRunId(input.schoolId, input.programId);
+  const ttlMs = seamTtlMs(options.ttlMs);
   // When THIS request began asking. The claim is refused if the row it finds was
   // released after this instant, because that means the row was still held while
   // this request was arriving: a second, CONCURRENT run — not a deliberate re-run
@@ -181,7 +189,7 @@ export async function claimProgrammeRun(
       completed: [],
       remainingTerms: [],
     },
-    { ttlMs: options.ttlMs ?? LADDER_LEASE_MS, attemptedAtMs }
+    { ttlMs: ttlMs ?? LADDER_LEASE_MS, attemptedAtMs }
   );
   return {
     id,
@@ -346,7 +354,12 @@ export async function readProgrammeRunBlock(
   schoolId: string,
   programId: string,
   /** TEST-ONLY (Phase 6-pre 4): force the unreadable case. Set ONLY from the temp-file
-   *  seam (`NODE_ENV`-gated, inert in production) and never from a request body. */
+   *  seam and never from a request body.
+   *
+   *  Phase 6-pre 6 — INERT IN PRODUCTION HERE, not at the caller: `seamFailRead` is
+   *  false whenever `NODE_ENV === "production"`, whatever is passed in, so this is the
+   *  last line of defence even if a caller forwards request data. Proved
+   *  behaviourally in `verify-college-promotion-page.mjs` (§22 D-6pre6-2/3). */
   options: { failRead?: boolean } = {}
 ): Promise<ProgrammeRunBlock> {
   const nothing: ProgrammeRunBlock = {
@@ -357,7 +370,7 @@ export async function readProgrammeRunBlock(
     stoppedAtTermNumber: null,
     message: null,
   };
-  if (options.failRead) throw new Error("qa-injected block read failure (test-only)");
+  if (seamFailRead(options.failRead)) throw new Error("qa-injected block read failure (test-only)");
   const row: any = await prisma.promotionRun.findFirst({
     where: { id: promotionRunId(schoolId, programId) },
   });

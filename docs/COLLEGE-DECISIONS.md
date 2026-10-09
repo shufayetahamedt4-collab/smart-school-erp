@@ -857,6 +857,14 @@ the cohorts that had already moved. 5d-2 fixes the failure path without changing
   verifier made. The file is not a build input and lives outside the app. Its effect (500 + structured
   body + audit) is **PROVEN** by the run; its production inertness rests on the `NODE_ENV` guard and
   the absence of any request input, and was **not** executed against a production build.
+
+  **NOTE ADDED 2026-10-09 (pre-push audit, §22 D-6pre6-4).** The last clause above no longer holds and
+  is kept as the record of what was true when it was written. Production inertness WAS executed: a
+  production build (`next build`, then `NODE_ENV=production` `next start`) against the local emulator,
+  with the seam file PLACED (`{failBlockRead: true, leaseTtlMs: 1}`), ran the real ladder over HTTP and
+  answered **200 with a measured lease window of 30 283 ms** (control with no file: 200 / 30 240 ms);
+  the SAME file against a dev server answered **503** (fail-closed), so the production result is not
+  vacuous.
 - **D-5d2-9 — unchanged surface.** No `db.ts`, `permissions.ts`, `nav.ts`, `college-routes.ts`,
   `college-promotion.ts`, programs route, school promote route or class model change, and the
   single-position route's behaviour is untouched (its own 5b checks still prove it). Every other
@@ -1036,7 +1044,7 @@ college-routes 3, nav-scope 7, college-terms 8, promotion-logic 12, promotion-ap
 rollover 50 × 10 runs. `tsc` 0 errors; `next build` 164/164.
 
 
-## 22. Phase 6-pre 4 / 6-pre 5 decisions (the lease made correct; the permanent-block wedges removed)
+## 22. Phase 6-pre 4 / 6-pre 5 / 6-pre 6 decisions (the lease made correct; the permanent-block wedges removed; the abandon hatch restricted)
 
 This section records the two fixes made after a **read-only review** of `5847f26`, `74bf386` and
 `d8e12a2`. The review found, and this section must not quietly lose, that as shipped at `d8e12a2`:
@@ -1046,6 +1054,9 @@ be taken over mid-flight; the block read **failed open**, so a store error let a
 a half-applied ladder; `finishTerms` could drop the top term when the run failed before attempting
 any step; an empty outstanding term could **wedge** a programme with no affordance on the page; and a
 programme shrink/delete left its run row behind. 6-pre 4 fixes the lease. 6-pre 5 removes the wedges.
+6-pre 6 is the small pre-push hardening: the abandon hatch is restricted to the administrators, and the
+two test-only knobs are made inert in production inside the functions that own them rather than at
+their callers.
 
 ### 6-pre 4 — the lease is renewed, owned and fail-closed
 
@@ -1105,6 +1116,13 @@ programme shrink/delete left its run row behind. 6-pre 4 fixes the lease. 6-pre 
   a request) gains `leaseTtlMs`, `noRenew`, `stepDelayMs`, `stealAfterSlice` and `failBlockRead`, so
   a short window, a slow run, a mid-run takeover and an unreadable block are all reachable
   deterministically over HTTP. It cannot be triggered by a user, and the verifier deletes the file.
+
+  **NOTE ADDED 2026-10-09 (pre-push audit, §22 D-6pre6-4).** "A production build ignores it" was
+  asserted here and, at that time, was **not** executed against a production build. It has now been
+  executed: with `leaseTtlMs: 1` and `failBlockRead: true` in the seam file, a production build
+  answered **200 with a 30 283 ms lease window** (the guard held, no 503), whereas the same file in dev
+  produced the fail-closed **503**. The audit also found that the two knobs' inertness rested on their
+  CALLERS rather than on the functions themselves; 6-pre 6 closes that (D-6pre6-2).
 - **D-6pre4-8 — what did NOT change.** The structured-500 contract (status codes, the `data` shape,
   the 500-not-207 reasoning), the single-position route (still deliberately unleased, still
   idempotent), the run-#2 semantics, and every school code path. `students/promote`, `classes`,
@@ -1250,3 +1268,100 @@ no `zzcp-` row left (the scan now covers both prefixes), no `promotionRuns` row 
 leased, and no seam file left. As in 6-pre 4, the page's own limits stand: a real browser test of the
 two new controls is still **NOT DONE** — the offline checks pin their decisions (eligibility, the
 reason minimum, the wording), not their rendering.
+
+### 6-pre 6 — the abandon hatch is admin-only; the test-only knobs are inert inside their functions
+
+A small hardening pass before the push. It closes the two items the pre-push audit left open
+(D-6pre6-4) and changes nothing else.
+
+- **D-6pre6-1 — WHO may abandon is now a decision in code: `SUPER_ADMIN`, `SCHOOL_ADMIN` and
+  `BRANCH_ADMIN`, and nobody else.** Until now the hatch took the run's own authorization
+  (`can(role, "registration", "full")`), which the matrix grants to a **REGISTRAR** as well — so a
+  REGISTRAR could give up on a run. Giving up is not the same act as running: it leaves work
+  permanently undone, so it is restricted to the school's administrators. The allow-list lives in
+  `src/lib/college-promotion-view.ts` (`ABANDON_ROLES`, `canAbandon`) and is used by **both**
+  surfaces — the ladder route imports `canAbandon` and answers **403**, checked FIRST inside the arm
+  (before the reason and before any read of the run row, so the refusal is byte-identical to the
+  gate's own and reveals nothing about the programme), and the page uses the same predicate to HIDE
+  the control and to gate the confirmation dialog — so the screen and the refusal cannot drift
+  apart. One list, two surfaces: that is why it lives in the shared, dependency-free module rather
+  than being copied into the route. A BRANCH_ADMIN is still confined to its own branch by
+  `resolveRun`. **A REGISTRAR keeps everything else** — the ladder run, the single-position apply and
+  the mark-term-finished press are untouched, and `permissions.ts` is NOT changed (the matrix still
+  gives a REGISTRAR `registration: full`, which is what the RUN needs).
+- **D-6pre6-2 — the two TEST-ONLY knobs are inert in production INSIDE the functions that own them.**
+  The audit found `claimProgrammeRun`'s `options.ttlMs` and `readProgrammeRunBlock`'s
+  `options.failRead` were PUBLIC parameters on shared library functions whose inertness rested
+  ENTIRELY on their caller (the ladder route passes them from the `NODE_ENV`-gated `qaLeaseSeam()`),
+  so a future caller forwarding request data could have made a test knob live in production.
+  **Chosen: make them inert inside the functions**, not "move the seam" — a caller can no longer
+  enable either knob whatever it passes, and no test infrastructure moves into the shared library.
+  The guard is one dependency-free module, `src/lib/college-promotion-seam.ts` (`testSeamEnabled`,
+  `seamTtlMs`, `seamFailRead`): with `NODE_ENV === "production"` an override is IGNORED —
+  `seamTtlMs(anything)` reads as `undefined` (so the real `LADDER_LEASE_MS`, 30 s, is used) and
+  `seamFailRead(anything)` reads as `false`.
+- **D-6pre6-3 — the guard is PROVED BEHAVIOURALLY, not by inspection.**
+  `college-promotion-server.ts` imports the Firestore shim, so no verifier can import it; the guard
+  therefore lives in its own dependency-free module, which **`verify-college-promotion-page.mjs`**
+  (offline, no emulator) imports and RUNS: with `NODE_ENV === "production"` — passed explicitly AND
+  set in the real environment — the short-TTL and forced-read-failure overrides are ignored, while
+  the dev/test behaviour is unchanged (`seamTtlMs(1, "development") === 1`,
+  `seamFailRead(true, "development") === true`), and the odd inputs (`0`, negative, a string, an
+  absent TTL, a stringy `true`) all read as "no override". The production path is ALSO covered end to
+  end by D-6pre6-4.
+- **D-6pre6-4 — the audit that prompted this pass, and its evidence.** Read-only, on `609e4b9`,
+  against the emulator: a production build (`next build`, then `NODE_ENV=production` `next start`) with
+  the seam file PLACED (`{failBlockRead: true, leaseTtlMs: 1}`) ran the real ladder over HTTP and
+  answered **200 with a measured lease window of 30 283 ms** (control, no file: 200 / 30 240 ms); the
+  SAME file against a dev server answered **503** (fail-closed) — so the production result is not
+  vacuous. The same audit found the two unguarded parameters (fixed here) and the stale gitignored
+  scratch files (`scripts/_tmp-*.mjs`, removed before this commit and NEVER committed — they are
+  ignored by `.gitignore:73`). It also confirmed that no seam is reachable from a header, body, query
+  parameter or environment variable: the only trigger is a JSON file in the OS temp directory.
+- **D-6pre6-5 — what did NOT change.** `permissions.ts`, `nav.ts`, `college-routes.ts`, `db.ts`,
+  `students/promote`, `classes`, `college-promotion.ts`, the single-position route, the isolation
+  harnesses and every school code path. The run, the apply and the mark-term-finished press are
+  behaviourally identical for every role; only the abandon is restricted. The seam's effect in
+  dev/tests is unchanged, so the lease verifier's own checks — including the mid-run takeover and the
+  fail-closed 503 — still pass.
+
+**Verification (6-pre 6).** Measured BOTH ways in one session, the baseline being `609e4b9` itself
+(restored through `git stash`) and the working tree for the after-run. Environment: the local
+Firestore emulator only (`npm run dev:emulator`, `FIRESTORE_EMULATOR_HOST=127.0.0.1:8080` and
+`FIREBASE_PROJECT_ID=demo-ss-test` printed before the run), a **sentinel round-trip** first
+(write → read → delete, `write+read=true deleted=true`), the seed AND the isolation fixture created,
+the `zzcp-/zzls-/zziso-` leftover scan run BEFORE the baseline (**0 stray rows** removed; the
+fixture's own `zziso-` rows kept), the app RESTARTED after the edit, and `next build` run LAST with
+dev stopped first. Every run individually:
+
+| suite | baseline `609e4b9` | after 6-pre 6 | expected |
+|---|---|---|---|
+| `verify-college-enrollment` | 40 | 40 | 40 |
+| `verify-course-registrations` | 50 | 50 | 50 |
+| `verify-registration-status` | 9 | 9 | 9 |
+| `verify-college-gate` | 3 | 3 | 3 |
+| `verify-college-permissions` | 7 | 7 | 7 |
+| `verify-college-routes` | 3 | 3 | 3 |
+| `verify-nav-scope` | 7 | 7 | 7 |
+| `verify-college-terms` | 8 | 8 | 8 |
+| `verify-tenant-isolation` | 75 | 75 | 75 |
+| `verify-branch-isolation` | 52 | 52 | 52 |
+| `verify-college-promotion-logic` | 12 | 12 | 12 |
+| `verify-college-promotion-api` | 100 | 100 | 100 |
+| `verify-college-promotion-page` | 16 | **18** | grows (the 2 new offline checks) |
+| `verify-college-promotion-lease` | 106 | **113** | grows (the 7 new HTTP checks) |
+| `verify-promotion-rollover` ×10 | 50/0 ×10 | 50/0 ×10 | 50 pass, 0 fail each |
+| `npm run typecheck` | 0 errors | 0 errors | 0 |
+| `npm run build` | — | `✓ Generating static pages (164/164)` | 164 |
+
+`verify-college-promotion-page.mjs` grows **16 → 18** (the abandon role gate, and the behavioural
+production-guard run) and `verify-college-promotion-lease.mjs` **106 → 113** (7 new checks). **No
+existing verifier needed an actor changed**: the pre-existing abandon refusal check already used an
+**ACCOUNTANT** (still 403), so no check anywhere was using a REGISTRAR to abandon — the REGISTRAR
+case is NEW (403 with zero writes, proved by a tenant document-count bracket, and the same registrar
+still running the ladder 200). All the new checks pass: REGISTRAR 403 + ZERO writes with the row left
+`FAILED/3,2,1` and the block still standing; a REGISTRAR still running the ladder (200); SCHOOL_ADMIN
+and BRANCH_ADMIN still abandoning (200 each); and the seam ignored under `NODE_ENV=production`.
+
+The build output contains no new warnings — the only two are the pre-existing `jose` Edge-Runtime
+notices for `middleware.ts`'s import trace.

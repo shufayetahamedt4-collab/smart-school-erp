@@ -99,6 +99,8 @@ const {
   abandonMessage,
   ABANDON_WARNING,
   ABANDON_REASON_MIN,
+  ABANDON_ROLES,
+  canAbandon,
 } = await import(MODULE_URL.href);
 
 /**
@@ -215,6 +217,8 @@ console.log("\n2. the page CONSUMES the module — and the moved literals are go
     "ABANDON_WARNING",
     "ABANDON_REASON_MIN",
     "ladderBlockTerms",
+    // Phase 6-pre 6 — the abandon role gate, used to HIDE the control.
+    "canAbandon",
   ];
   const missing = mustCall.filter((n) => !pageSource.includes(n));
   // The literals the module now owns. If any of these is back in the page, the
@@ -689,6 +693,82 @@ console.log("\n16. the ABANDON hatch — only while blocked, only with a real re
   }
   if (problem) bad("abandon", problem);
   else ok(`${cases.length} states: the hatch is offered only while a block stands and never without a long-enough reason, and its wording is blunt and true`);
+}
+
+/* ------------------------------------------------------------------------ 17 */
+
+console.log("\n17. WHO may abandon — the page hides it and the route refuses it (6-pre 6)");
+{
+  const allowed = ["SUPER_ADMIN", "SCHOOL_ADMIN", "BRANCH_ADMIN"];
+  const refused = ["REGISTRAR", "ACCOUNTANT", "TEACHER", "LIBRARIAN", "FRONT_DESK", "GUARDIAN", "STUDENT"];
+  const odd = [undefined, null, "", 0, {}, ["SCHOOL_ADMIN"], { role: "SCHOOL_ADMIN" }];
+  let problem = null;
+  for (const r of allowed) if (!problem && canAbandon(r) !== true) problem = `canAbandon(${JSON.stringify(r)}) = false, expected true`;
+  for (const r of refused) if (!problem && canAbandon(r) !== false) problem = `canAbandon(${JSON.stringify(r)}) = true, expected false`;
+  for (const r of odd)
+    if (!problem && canAbandon(r) !== false)
+      problem = `canAbandon(${JSON.stringify(r)}) = true, expected false for a non-role input`;
+  if (!problem && !/ABANDON_ROLES/.test(code)) problem = "ABANDON_ROLES is gone from the view module";
+  // The page must GATE the control, and the route must REFUSE with the same predicate,
+  // so the screen and the 403 cannot drift apart (one list, two surfaces).
+  if (!problem && !pageSource.includes("canAbandon"))
+    problem = "the page does not use canAbandon — the control is not gated";
+  if (!problem) {
+    const routeSource = readFileSync(new URL("../src/app/api/college-promotion/ladder/route.ts", import.meta.url), "utf8");
+    if (!/canAbandon\(session\.role\)/.test(routeSource))
+      problem = "the ladder route no longer refuses an abandon with canAbandon(session.role)";
+    else if (!/from "@\/lib\/college-promotion-view"/.test(routeSource))
+      problem = "the ladder route does not import canAbandon from the shared view module";
+  }
+  if (problem) bad("abandon-roles", problem);
+  else
+    ok(
+      `${allowed.length} admin role(s) may abandon, ${refused.length} other roles and ${odd.length} non-role input(s) may not, ` +
+        `and BOTH the page and the ladder route use the one shared predicate`
+    );
+}
+
+/* ------------------------------------------------------------------------ 18 */
+
+console.log("\n18. the test-only seam is INERT in production, INSIDE the functions (6-pre 6)");
+{
+  const SEAM_URL = new URL("../src/lib/college-promotion-seam.ts", import.meta.url);
+  const { testSeamEnabled, seamTtlMs, seamFailRead } = await import(SEAM_URL.href);
+  let problem = null;
+  // The production answer, whatever the caller passes.
+  if (seamTtlMs(1, "production") !== undefined) problem = `seamTtlMs(1, "production") = ${seamTtlMs(1, "production")}, expected undefined`;
+  else if (seamTtlMs(5000, "production") !== undefined) problem = "a long override still applied in production";
+  else if (seamTtlMs(1, "development") !== 1) problem = "the dev override stopped working";
+  else if (seamTtlMs(0, "development") !== undefined) problem = "a zero TTL must not be a valid override";
+  else if (seamTtlMs(-5, "development") !== undefined) problem = "a negative TTL must not be a valid override";
+  else if (seamTtlMs("1", "development") !== undefined) problem = "a string TTL must not be a valid override";
+  else if (seamTtlMs(undefined, "development") !== undefined) problem = "an absent TTL must read as no override";
+  else if (seamFailRead(true, "production") !== false) problem = "seamFailRead(true, production) must be false";
+  else if (seamFailRead(true, "development") !== true) problem = "the dev read-failure override stopped working";
+  else if (seamFailRead(false, "development") !== false) problem = "seamFailRead(false) must be false";
+  else if (seamFailRead("true", "development") !== false) problem = "a stringy true must not enable the seam";
+  else if (testSeamEnabled("production") !== false || testSeamEnabled("development") !== true || testSeamEnabled(undefined) !== true)
+    problem = "testSeamEnabled is wrong for production/development/undefined";
+  // …and the REAL environment path: with NODE_ENV=production in force, the DEFAULT
+  // argument must ignore the override. Restored immediately, so no later check — and
+  // no other verifier — is affected.
+  if (!problem) {
+    const saved = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      if (seamTtlMs(1) !== undefined || seamFailRead(true) !== false)
+        problem = "with NODE_ENV=production in the environment, the default argument still honoured the override";
+    } finally {
+      if (saved === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = saved;
+    }
+  }
+  if (problem) bad("seam-guard", problem);
+  else
+    ok(
+      "with NODE_ENV=production the short-TTL and forced-read-failure knobs are ignored — explicitly AND via the real " +
+        "environment — while the dev/test behaviour is unchanged"
+    );
 }
 
 /* ---------------------------------------------------------------------- end */
