@@ -272,6 +272,14 @@ next step were "semester = extended class".
 | **7** | College fee basis (the delta's Phase 6). |
 | **8a/8b/8c** | College dashboard / reports / import (the delta's Phase 7a/7b/7c). |
 
+**CORRECTION ADDED 2026-10-11 (Phase 7 preflight, owner's answer Q1 — §24.9). The table above is a
+snapshot and is NOT rewritten; what changed is recorded here.** Since it was written: **Phase 8 is the
+college per-course attendance work** (beginning with `8-pre`, the course↔teacher link) and the trio the
+table lists as **8a/8b/8c** is now **9a/9b/9c**. Only **unstarted** work was renumbered, so no phase
+changed meaning, and the delta's own `Order:` line (`0 → M → 1 → … → 6 → 7a → 7b → 7c`) is superseded
+the same way. The current order is **7 (fees: 7-pre → 7-pre-2 → 7a–7f) → 8 (attendance: 8-pre →
+ca-1–ca-6) → 9a → 9b → 9c**.
+
 The delta's phase numbers are kept where the scope is unchanged and renumbered only where the scope
 moved, so no phase silently changes meaning.
 
@@ -1740,3 +1748,409 @@ term publish” deliberately out of v1 (23.6).
 is needed **for the first college customer**. It is listed first after v1 either way, and D-6-18 means
 the answer costs no caller changes.
 
+## 24. Phase 7 preflight decisions (college fees) and the per-course attendance proposal
+
+**Owner ruling (2026-10-11), binding.** Fee heads, fee structures, discounts/waivers/scholarships and
+payment rules are decided by **each institution (its admin)**; nothing is hardcoded and no preset is
+privileged. Our job is to make setting them up easy. A school and a college are often onboarded
+together, so **the school half's fee behaviour must not change at all**.
+
+This section is a **preflight**: it records the shape of the work and the reuse inventory read from the
+shipped code at `9c1f96d`. **No Phase 7 code exists yet**, and nothing here is built.
+
+### 24.1 What the school side already has, and what is genuinely new
+
+Read from the tree (every path below was opened, not recalled):
+
+| Piece | Where | Reused for college how |
+|---|---|---|
+| Fee heads the admin owns — `name`, `bucket` (TUITION / ADMISSION / EXAM / TRANSPORT / HOSTEL / LIBRARY_FINE / LATE_FEE / OTHER), `frequency` (WEEKLY / MONTHLY / TERM / YEARLY / ONE_TIME), `optional`, `active`, `dueDay`, `note` | `feeCategory` in `src/lib/db.ts`; `src/app/api/fee-categories/route.ts` (GET/POST/PATCH/DELETE, `feePayment:full`, branch visibility, `writeGuard`, audit, 404 on a foreign row) | **The whole shape, and it is the model to copy.** A college head is the same row minus the class pricing: `amounts` is `{classId: amount}` and a college has no classes to price. |
+| Billing on demand, idempotent | `POST /api/fees/generate` — bills a head across classes for a period; `generatedFeeId` makes `(student, head, period)` ONE row; `dryRun` preview; the period shape is validated against the head's `frequency` | **The whole mechanism** (dryRun, the deterministic-id idempotence, the cadence-vs-period guard). Only the *cohort* changes: college bills a programme × term from the student's enrolment + approved registrations, not a class list. |
+| The money row | `fee` — `{schoolId, studentId, branchId, title, amount, paidAmount, status, feeType, dueDate, note}` | **Shape only.** The school `fee` row is read by the Fees page, the guardian portal, the dashboard/stats and `verify-fees-totals`; college charges must not appear on school screens, so the charge row is college-specific (24.4). |
+| Payment confirmation + the central ledger | `confirmPayment()` and `postToLedger()` in `src/lib/ledger.ts` (`kind` FEE / PAYMENT / DISCOUNT / LATE_FEE / EXPENSE; `status` PENDING / CONFIRMED / FAILED; `receiptNo`), `applyLateFees()` (idempotent), `ledgerForStudent` / `ledgerForSchool` | **The ledger is shared, not duplicated.** `postToLedger` is already generic (`feeId` nullable + a `meta` object), so a college payment can post to the SAME ledger. New is only the college charge's own confirmation helper and its own receipt sequence (D-7-12). |
+| Payment methods + webhooks | `src/lib/payments.ts` (CASH instant, BANK reconcile, BKASH/NAGAD/ROCKET/CARD gateway stubs), `/api/payments`, `/api/payments/webhook/[provider]` (idempotent via `refAlreadyProcessed`), the `paymentIntent` collection | **Reused unchanged.** A college pays through the same intent/webhook machine. |
+| Payment channels (where the money is sent) | `feeSetting.channels` + `src/lib/fee-channels.ts` (MOBILE / BANK / CASH, methods list, numbers, bank fields) | **The shape is reused, the storage is not:** `feeSetting` is the school's doc (`fs_<schoolId>`, "Monthly Fee / Admission Fee") and §2 of the delta rules "**Do not extend it at all**". A college's channels live in the college config (D-7-3). |
+| Discounts | the `discounts` collection + propose/approve in the admission flow (accountant proposes, admin approves) + the ledger `DISCOUNT` kind | **The flow and the ledger kind**, applied to a college charge set (D-7-13). |
+| Late fees | `applyLateFees()` (idempotent) | Reused. |
+| Reminders | `/api/fees/reminders` (push + SMS) — an authenticated POST that **nothing in the repo calls**: no CI workflow exists (`.github/workflows` is absent) and neither `netlify.toml` nor `firebase.json` declares a scheduler | Reused; v1 has no guardian-facing college fee view, so its college use is staff-driven (24.6). |
+| Print | `/print/admission-receipt/[id]`, `/print/invoice/[id]`, and the `PrintActions` component | **The pattern**, not the pages: a college needs its own statement and receipt reading college rows (D-7-17). |
+| Fee templates (`feeTemplate` + items) | `src/app/api/fee-templates/route.ts` | Reused only if a college wants a named bundle; v1 does not need it (24.6). |
+| Money-safety contract | `scripts/verify-fees-totals.mjs` — **15 checks**: every money field finite, paid + due === billed row for row, `/api/stats` agrees with the list, the ledger stays finite, the page is served | **The contract to extend to college rows, with the school run kept at 15/15 (7e).** |
+| Route guard | `COLLEGE_API_SEGMENTS` + `scripts/verify-college-routes.mjs` | The new college fee segment is added **in the same change that creates its directory** (§8 D-A). |
+| Read-access precedent | `src/lib/college-results-access.ts` (6d-fix): admin-level roles + REGISTRAR, stated once, consumed by routes and pages | **The pattern for D-7-18 — and it is mandatory here; see the finding below.** |
+
+**The finding that decides the access design.** The obvious gate for fees is the existing `feePayment`
+module, and it is **not safe for college**: `src/lib/permissions.ts` grants it to **GUARDIAN
+(`view` + `pay`)** and **STUDENT (`view`)** alongside SCHOOL_ADMIN / BRANCH_ADMIN / ACCOUNTANT
+(`full`), REGISTRAR (`view`) and SUPER_ADMIN (`billing`). Reusing it as the college fee gate would hand
+every parent and every student the college's billing surface — exactly the hole
+`college-results-access.ts` was created to close for results. College fees therefore get their own
+explicit allow-list module (D-7-18).
+
+**Genuinely new (nothing above covers it):**
+
+1. **A college charge definition** — heads priced per **programme × term**, not per class (the delta's
+   §2 `feeCategories` advice assumes the two modes price the same kind of thing; see D-7-15).
+2. **A college charge row** derived from enrolment + approved course registrations.
+3. **Mode-aware enrolment billing.** `enrollStudent` → `createStudentFees` (`src/lib/enroll.ts:175-227`)
+   raises the school's `feeSetting` defaults (Admission Fee + Monthly Fee) for ANY student, including
+   one being enrolled with `programId`/`termNumber` (`src/app/api/students/route.ts:112-158`,
+   `/api/admissions/intake`, `/api/import/students/commit`, `src/lib/admission.ts`). A college
+   enrolment must not raise "Monthly Fee" out of a school document. **The fix has its own step
+   (7-pre-2) with its own risk note and its own required evidence — see §24.7.**
+4. **Discount/waiver arithmetic over a derived charge set**, and its application.
+5. **A college fee statement and receipt**, and the access rule that goes with them.
+
+### 24.2 (a) Fee heads — per tenant, priced where the money is decided
+
+- **D-7-1 — college fee heads are their OWN collection (`collegeFeeHead`), not `feeCategory` rows with
+  a `mode` field.** Three reasons, in order: (i) a college head is not priced per class, so the
+  `{classId: amount}` map has nothing to hold; (ii) `feeCategory` is read by the school structure
+  screen and the school billing run, and a `mode` field there would put a new filter on every existing
+  read just to keep the school half identical; (iii) the project's locked precedent for college data is
+  a **separate collection** (D-3-6, D-4a-0, D-6-17) — the school spine is not extended. No `mode` field
+  is added anywhere; `feeCategory` and `feeSetting` stay untouched by this phase.
+- **D-7-2 — the head's shape is the school's, minus the pricing:** `name`, `bucket` (the same eight
+  values, so the ledger's accounting lines do not multiply), `frequency` (the same five cadences),
+  `optional`, `active`, `dueDay`, `note`, plus `branchId` (inherited exactly like every other college
+  row). The **amount** lives in the structure (24.3), not on the head: the same head costs different
+  money in different programmes and terms.
+- **D-7-3 — the college's channels live in a college row: `collegeFeeConfig`** (`schoolId`, `channels`
+  — the same `PaymentChannel` shape from `fee-channels.ts` — `paymentNote`, and a currency label).
+  `feeSetting` is **not** extended and is **not read for college** (the delta's §2 ruling), and the
+  wizard already skips its fee step for a tenant with no school half
+  (`wizardStepKeys` → `if (schoolHalf) keys.push("fees")`).
+- **D-7-4 — presets are institution-neutral starting points and the admin's own edit always wins**
+  (the D-6-3 rule, restated): a small list (e.g. *College — HSC / National*, *College — University
+  (per term)*, *College — credit-based* if D-7-8 is ever built, *Custom*) that drops an **editable
+  copy** into the editor. No preset is applied behind the admin's back and none is privileged.
+- **D-7-5 — validation is the school's, restated in the new module:** a name is required and bounded,
+  `bucket`/`frequency` fall back rather than throw, `dueDay` is clamped 1..28, an inactive head cannot
+  be billed, and a head that has ever been billed cannot be deleted — the school's own rule ("fees
+  already billed keep their own title/amount, so deleting the category never rewrites history").
+
+### 24.3 (b) Fee structure — per programme × term
+
+- **D-7-6 — the structure is `collegeFeeStructure`: one row per `(programId, termNumber, headId)`**
+  with an `amount`, a `required` flag and a `note`. A term's total for a programme is the sum of its
+  rows; a student's term bill is those rows for the student's own programme and term. The term number
+  is bounded by the programme's own `durationYears`/`termSystem`, through the same
+  `isValidTermNumber` the transcript uses (`src/lib/college-terms.ts`).
+- **D-7-7 — the structure stores what ONE billing event charges, and the head's `frequency` decides how
+  many events a term produces.** A `MONTHLY` head inside a 6-month term bills six times unless the
+  admin marks it `TERM`; a `TERM` head bills once; `YEARLY` bills once per year. This keeps one
+  currency of meaning — **one row = one charge** — which is exactly what the school's `generate`
+  writes, so the idempotence rule and the dry-run preview carry over unchanged.
+- **D-7-8 — per-credit-hour pricing: NOT in v1, with the reason recorded.** `course.creditHours` is
+  **optional and stores `null`** for exactly the programmes a college starts with (the seed creates
+  "HSC Science", `degreeLevel: "HSC"`), and the CGPA module already carries the "no course in the set
+  carries credits → fall back" rule (D-6-11). A credit basis is therefore **impossible for an HSC
+  college** and only meaningful for honours/masters. v1 prices a term flat. If the owner wants it, it
+  becomes a per-head `basis: FLAT | PER_CREDIT` added **inside** the one pricing function (the D-6-18
+  pattern), with a refusal that says so when a student's registered courses carry no credits.
+  **Owner's answer (2026-10-11, Q2): NOT in v1, and the `FLAT | PER_CREDIT` hook stays.** The hook is
+  what makes it cheap later (the D-6-18 pattern), and the refusal above is what keeps it honest while
+  it is off. If the first college customer charges per credit, it moves to the front of the queue.
+- **D-7-9 — the structure is versioned by the term, not by time; the money is frozen when it is
+  billed.** Changing a term's row changes what an **unbilled** term will charge and what the statement
+  shows for it, and it must **never** rewrite a charge already raised: the charge row carries its own
+  `title` and `amount` (D-7-11). This is the "derived for the plan, stored for the money" split — the
+  honest opposite of the transcript's derived-on-read trade-off (D-6-12), because money, unlike a
+  grade, is a legal record.
+
+### 24.4 (c) How a student gets charged, and how the money is recorded
+
+- **D-7-10 — a charge is DERIVED from the student's enrolment and approved registrations, never typed
+  by hand.** The source is the same machine that makes a course gradable and billable:
+  `students.programId` + `students.termNumber` (the Phase 4a college identity) and the **APPROVED**
+  `courseRegistration` rows for that term (the one status machine, `src/lib/registration-status.ts` —
+  a PENDING or REJECTED registration bills nothing). `POST /api/college-fees/generate` takes a
+  programme + term and, for each on-roll student in it, writes one charge per structure row; `dryRun`
+  previews the exact rows and writes nothing; a `(student, head, term, sequence)` deterministic id
+  makes a re-run **top up** the students who arrived late instead of double-charging (the school's
+  `generatedFeeId` rule).
+- **D-7-11 — the charge row is `collegeFee`:** `{schoolId, branchId, studentId, programId, termNumber,
+  headId, headName, title, amount, paidAmount, status, dueDate, sequence, billedAt, actorId}`. It
+  carries its own `title` and `amount` (D-7-9), `paidAmount` is written **explicitly as 0** — the
+  school's hard-won rule, which exists because a missing `paidAmount` once made every money total in
+  the app read ৳0 and is now locked by `verify-fees-totals` — and every money field leaves the API as a
+  finite number.
+- **D-7-12 — a payment on a college charge posts to the SAME central ledger.** A small
+  `confirmCollegePayment()` in the ledger module mirrors `confirmPayment()`: clamps the charge to its
+  billed amount, refuses over-payment, appends ONE `PAYMENT` entry (`feeId: null`,
+  `meta: { collegeFeeId, programId, termNumber }`), sets `paidAmount`/`status`, and returns a receipt
+  number from a **college receipt sequence** (school and college receipt numbers must not interleave).
+  Methods and webhooks are the school's. **Owner's answer (2026-10-11, Q3): SHARE the ledger, with ONE
+  BINDING CONDITION — the two modes' money must never mix in a read.** On a BOTH tenant, school-mode
+  fee totals and reports must never include college rows, college-mode must never include school rows,
+  and a BOTH tenant sees its two halves **separately**, each in its own mode. This is a requirement, not
+  a hope: **7e owes explicit checks for it** — the school-mode totals, the school-mode fee list and
+  `/api/stats`' fee payload are identical with and without college charges present; no college row
+  appears in any school-mode read and no school row in any college-mode read; and a BOTH tenant's two
+  halves each show only their own money. Sharing also keeps PRD §10.1's "all money flows through here"
+  true and means one set of accounting reports.
+- **D-7-13 — discounts and waivers reuse the school's propose/approve flow and the ledger's `DISCOUNT`
+  kind, with one additive shape: a college award targets the CHARGE SET it discounts.** Two forms,
+  both admin-set: a **percentage of a term's charges** (the common case) and a **fixed amount per
+  head** (a lab-fee waiver). The award records who proposed and who approved it, it reduces
+  `collegeFee.amount` **only** for charges raised after it takes effect (never a rewrite of paid
+  history), and it appends the `DISCOUNT` ledger entry so the ledger and the statement agree.
+  **Owner's answer (2026-10-11, Q5): both shapes are in v1** — a percentage of a term's charges and a
+  fixed amount per head.
+- **D-7-14 — dues are a first-class read and they are finite.** A student's college dues = Σ(amount −
+  paidAmount) over their charge rows, always a finite number; `status` uses the school's vocabulary
+  (UNPAID / PARTIAL / PAID) **derived** from those two fields, never stored independently of them.
+  `applyLateFees()` is reused if the owner wants late fees; **overdue is a read, not a scheduled job,
+  in v1** — the school's reminder runner is an authenticated POST that nothing schedules, and v1
+  adds no scheduler.
+- **D-7-15 — CORRECTION to `docs/COLLEGE-PLAN-DELTA.md` §2, recorded deliberately.** Its
+  `feeCategories` row says "**YES (filter only)** … filter the returned list by the mode's class set;
+  add an optional `mode` field only if a category must be exclusive to one mode". That cannot express
+  college pricing: a school prices a **class set**, a college prices a **programme term**, and no
+  filter over `{classId: amount}` produces a programme-term price. The delta's `feeSetting` row
+  ("**Do not extend it at all**") stands and is followed (D-7-3).
+
+### 24.5 (d) Screens, print pages, and who may read or write them
+
+- **D-7-16 — v1 screens**, in the school's layout language: a **Fee heads** screen (the college
+  counterpart of `/dashboard/fees/structure`), a **Fee structure** screen (programme ▸ term ▸ heads ×
+  amount with a live term total), a **Dues** screen (per programme/term, with the generate dry-run →
+  commit flow), and a **College fee config** panel (channels + note). **One** nav entry behind
+  `requires:"COLLEGE"` — the frozen school nav stays deep-equal (`verify-nav-scope`).
+- **D-7-17 — v1 print pages:** `/print/college-fee-statement/[studentId]` (a student's charges, dues
+  and payments for a term or the whole programme) and a receipt for one confirmed payment. Both are
+  server-rendered from live rows exactly like `report-card` / `marksheet` / `college-transcript`, both
+  print the institution's own name and the head labels the admin chose, and both print enough to be
+  honest about *which* structure billed them (the structure's effective date), so a reprint cannot
+  silently disagree with the paper a family already holds.
+- **D-7-18 — access: ONE allow-list module, `college-fees-access.ts`, in the shape of
+  `college-results-access.ts`.** v1 **write** = the admin-level roles and the ACCOUNTANT (the owner's
+  "admin-level and accounts roles"); v1 **read** = the same set, with REGISTRAR read-only (today's
+  `feePayment: view` for a registrar, and the results precedent's read rule). **GUARDIAN, STUDENT and
+  TEACHER are refused in v1** (owner ruling), which is precisely why `feePayment` cannot be the gate
+  (24.1's finding). Every college fee route runs `requireCollege` **first**, then the allow-list, then
+  tenant/branch scoping, then 404 on a foreign row — the results routes' guard order — and it must pass
+  the same **role probe on a production build** before 7f. **Owner's answer (2026-10-11, Q4):
+  staff-only v1 confirmed** — the guardian (per child) and student views are post-v1, so the college fee
+  screens are not offered to them even where the school's own `feePayment` module would admit them.
+- **D-7-19 — the school's fee surfaces are untouched.** `/dashboard/fees`,
+  `/dashboard/fees/structure`, `/dashboard/fees/payments`, `/dashboard/ledger`, `/parent/fees`,
+  `/api/fees*`, `/api/fee-categories`, `/api/fees/generate`, `/api/fee-templates`, `feeSetting` and
+  `verify-fees-totals` keep their behaviour and their counts. The only school-side change 7a–7f may
+  make is **7-pre** below, which removes a write that should never have happened for a college-only
+  tenant.
+
+### 24.6 (e) What stays OUT of version 1 (deliberately small)
+
+- **No guardian/student/teacher college fee view or payment** (D-7-18). Post-v1: a **per-child
+  guardian fee view and pay flow** (the school already ships both, so it is a wiring job once the owner
+  says so) and a **per-course teacher view**, which additionally needs the course↔teacher link that
+  **does not exist today** (24.8). **Owner's answer (2026-10-11, Q8): that link is `8-pre`, the first
+  step of Phase 8 — built as part of this work, not deferred.**
+- **No per-credit-hour basis** (D-7-8) and **no per-course pricing** — the charge unit is
+  programme × term × head.
+- **No separate college money ledger** unless the owner rules for one (Q3).
+- **No invoices / PDF archival, no bulk statements, no email delivery, no dunning automation** — the
+  school's machinery is POST-driven and v1 keeps it that way.
+- **No standing scholarships** in v1 — a lifecycle object (eligibility, review, revocation) that a
+  per-term percentage covers in the common case. **Owner's answer (2026-10-11, Q6): none in v1**; it is
+  the first post-v1 fee item if a customer asks.
+- **No change to the promotion ladder, the transcript or the results API.** A college charge is a new
+  collection nothing else reads, and a failed course still never gates a promotion (§23.9 Q6 stands).
+- **No `feeSetting` extension, no `feeCategory` change, and no college money on the `fee` row**
+  (D-7-1, D-7-3, D-7-19).
+
+### 24.7 (f) The build order, 7a..7f, in the repository's usual rhythm
+
+- **7-pre — the small open-item fixes, first (each was already recorded on the open-items list).**
+  1. **`POST /api/schools` must not write `feeSetting` for a college-only tenant.** It raises a
+     school-shaped `feeSetting` (Monthly Fee 1500 / Admission Fee 5000) for **every** new tenant, a
+     COLLEGE included (`src/app/api/schools/route.ts:96-101`), while the wizard's own fee step is
+     already skipped for a tenant with no school half (`wizardStepKeys` → `if (schoolHalf)`). This is
+     the prerequisite that keeps "a college never has school fee defaults" true rather than
+     aspirational.
+  2. **The wizard's success screen must name the tenant correctly** — it says "school" for every
+     tenant; for **COLLEGE** it must say **"college"**, and for **BOTH** it must say **"institution"**.
+     The copy is already pinned offline by `verify-onboarding-seed` (**78**) / `verify-onboarding-type`
+     (**38**), so the change is proved where it lives.
+  3. **The college sidebar's leftover school items are NOT part of 7-pre** — they are handled in **7d**,
+     with the new college nav entry: one edit to the same registry, one snapshot re-record.
+
+  Evidence for 7-pre: the onboarding and schools verifiers re-run to identical counts, the two offline
+  seed/type verifiers above unchanged, and the rendered wizard copy compared before/after.
+- **7-pre-2 — mode-aware enrolment billing: the step with the sharpest edge, so it gets its own risk
+  note and its own evidence.** `enrollStudent` → `createStudentFees` (`src/lib/enroll.ts:175-227`)
+  raises the school's `feeSetting` defaults (Admission Fee + Monthly Fee) for ANY student it is asked to
+  bill, and a college student is enrolled through the **same** call sites
+  (`src/app/api/students/route.ts:112-158`, `/api/admissions/intake`, `/api/import/students/commit`,
+  `src/lib/admission.ts`). **RISK, stated plainly: this is SCHOOL code on the school's money path.**
+  A careless mode test here stops billing school students, or starts billing a college student a
+  school's monthly fee — and both are money failures that no existing suite would notice on its own.
+  **BINDING REQUIREMENT: the step must prove that no school behaviour changed, with every baseline
+  recorded BEFORE the change** — `verify-fees-totals` (**15**), `verify-enroll-paths` (**18**),
+  `verify-admission-intake` (**53 from a clean state**), `scripts/qa-phase23.mjs` (**36 / 0**), and a
+  **rendered-text before/after comparison of a school fee receipt and a school invoice** (the two print
+  pages that carry a school's money to a family), so the school's paper comes out identical. New checks
+  for the college path are ADDITIONS to those suites, never edits of them. **The rule itself:** the
+  decision is taken from the **enrolment** — an enrolment carrying the college identity
+  (`programId`/`termNumber`, Phase 4a) is a college enrolment and raises no school default — and the
+  **target tenant's `institutionType` is the cross-check** that keeps it honest when a caller forgets
+  the identity: a COLLEGE tenant can never raise school default fees, and a SCHOOL tenant's behaviour is
+  byte-identical to today. A `BOTH` tenant keeps today's behaviour on its school half and only a
+  college enrolment skips it.
+
+- **7a — pure logic first.** `src/lib/college-fees.ts`: head and structure validation, the preset
+  table (D-7-4), the cadence→billing-events rule (D-7-7), term totals, per-student charge derivation
+  from `(programId, termNumber)` + APPROVED registrations, the deterministic charge id, the
+  discount/waiver arithmetic (percent and fixed), and the finite-money/dues normalisation. Verifier
+  `scripts/verify-college-fees-logic.mjs`, **offline — no DB, no server, no network** — in the shape of
+  `verify-college-results.mjs`: every preset validates, every cadence bills the right number of times, a
+  student with no approved registration bills nothing for course-based heads, a `null` `creditHours`
+  cannot produce a NaN, junk and empty inputs fall back.
+- **7b — data layer.** `collegeFeeHead`, `collegeFeeStructure`, `collegeFee`, `collegeFeeConfig` in
+  `COLS`/`RELS` + prisma accessors, and the new segment added to `COLLEGE_API_SEGMENTS` **in the same
+  change that creates the directory** (D-A). Evidence: `verify-college-routes` still passes (a listed
+  segment with no directory fails it by design) plus a `verify-college-fees-data` in the
+  `verify-college-results-data` shape.
+- **7c — API.** Heads CRUD, structure CRUD, `POST /api/college-fees/generate` (dryRun + idempotent),
+  the payment route (`confirmCollegePayment` → the shared ledger), the discount route and the dues
+  read. Every handler `requireCollege` first, then the allow-list; the full 403/400/404 matrix; a
+  document-count bracket around every refusal so "writes nothing" is counted rather than assumed (the
+  §17 Q2 pattern); `writeGuard` on mutations. Evidence: a new
+  `scripts/verify-college-fees-api.mjs` (HTTP).
+- **7d — pages + nav.** The screens of D-7-16, the print pages of D-7-17, **one** nav entry behind
+  `requires:"COLLEGE"`, **plus the open item that a COLLEGE tenant's sidebar still lists school items**
+  — the same registry edit and the same snapshot re-record, which is exactly why 7-pre leaves it here —
+  and the page logic proved offline where it can be (the
+  `verify-college-promotion-page.mjs` pattern). Evidence: `verify-nav-scope` against the recorded
+  snapshot (non-college nav deep-equal), the offline page verifier, and screenshots.
+- **7e — isolation + regression proof, baselines recorded first.** `scripts/isolation-fixture.mjs`
+  gains the four new collections in its `owned` prefix-sweep; `verify-tenant-isolation` and
+  `verify-branch-isolation` are re-run **baseline first** with every new assertion an **addition**; the
+  COLLEGE gate is asserted explicitly (a SCHOOL tenant gets 403 with zero data); **the Q3 mode-mixing
+  condition is proved here with its own checks** — school-mode fee totals, the school-mode fee list and
+  `/api/stats`' fee payload are identical with and without college charges present, no college row
+  appears in any school-mode read, no school row in any college-mode read, and a BOTH tenant's two
+  halves each show only their own money (this is the condition D-7-12 makes binding, so it is asserted
+  rather than assumed); and the untouched-by-Phase-7 harnesses are re-run to **identical counts** —
+  **`verify-fees-totals` 15/15**,
+  `verify-grading`, `verify-mode-foundation`, `verify-course-registrations`, `qa-phase23`,
+  `qa-certificates` — plus `next build` with its page count recorded.
+- **7f — the finished record**, in the §22 / §23.7.1 shape: the counts table (before / after / why),
+  `tsc` 0 errors, and an explicit statement of anything that could not run.
+
+### 24.8 Per-course attendance — the proposal (a separate phase, after fees)
+
+**What exists today, read from the tree.** Attendance is the school's, and it is **one row per pupil
+per day**: the document id is derived (`a_<studentId>_<dateKey>`, `src/lib/db.ts:258`, `:294`) and the
+row is upserted on the `(studentId, date)` key (`:256`), carrying `classId`, `sectionId`, `status`,
+`remark`, `markedById` and the student's `branchId`. `GET /api/attendance` **requires `classId` + a
+date** and returns that class's register (SCHOOL_ADMIN / BRANCH_ADMIN / TEACHER only); `POST` upserts
+one row per student for that date inside a transaction, audits `ATTENDANCE_SAVE`, invalidates the stats
+and reference caches, and notifies a guardian the **first** time their child is absent that day
+(`notifyGuardianOfStudent`, fire-and-forget). The status vocabulary is **PRESENT / ABSENT / LATE /
+LEAVE** (with `UNMARKED` as the client's "no row" placeholder). So the school register is exactly
+"one class × one day × every pupil".
+
+**Why it cannot be reused.** A college register is "one **course session** × the students **registered**
+for that course". That is a different key: the school's unique key has no course in it, and every read
+and write is addressed by `classId`/`sectionId` because the school's screen *is* a class register.
+D-3-6 (LOCKED) already states that per-course attendance must **never** be retrofitted onto that key.
+The college therefore gets its own collection and its own segment.
+
+- **D-CA-1 — a new collection `courseAttendance`, addressed by a derived id
+  `ca_<courseId>_<dateKey>_<slot>_<studentId>`.** The school's own trick — a deterministic document id,
+  because there is no unique index to lean on — is what makes the write idempotent. Fields: `schoolId`,
+  `branchId` (inherited like every college row), `courseId`, `programId`, `termNumber`, `sessionDate`,
+  `slot` (1..n, absent = 1 — Q7), `studentId`, `status`, `remark`, `markedById`, `registrationId`.
+  **Nothing on the school's `attendance` row or key changes.** (The `dateKey` helper is module-local in
+  `db.ts`; ca-2 either exports it or mirrors it, and the mirror is asserted against the original.)
+- **D-CA-2 — the roster is the APPROVED registrations for that course**, not a class list: the same
+  machine that makes a course gradable (Phase 6) and billable (24.4) decides who may be marked. The
+  route resolves the roster server-side, so a client-sent student list cannot widen it, and a row for a
+  student without an approved registration for that course is refused. This also gives the college a
+  real "who is in this course" answer for the first time.
+- **D-CA-3 — the status vocabulary and the notification path are reused verbatim**: the same
+  PRESENT / ABSENT / LATE / LEAVE values, and `notifyGuardianOfStudent` with the same "only on a NEW
+  absence today" rule so a corrected register never re-mails a family. The notification text names the
+  **course and the slot** instead of a class — the one place the two registers legitimately differ.
+- **D-CA-4 — a teacher cannot be given a course roster today: the course↔teacher link does not exist.**
+  Verified by search: no `teacherId` anywhere under `src/app/api/courses`, `src/app/api/course-registrations`
+  or `src/lib/college-*.ts`, and `programCourse` is `{schoolId, programId, courseId, termNumber,
+  requirement}` and nothing more. Two consequences to record: **v1 marking is staff-only** (admin-level
+  + the registrar's `view`, the results precedent), and both "a teacher marks their own course" and the
+  post-v1 "per-course teacher view of RESULTS" (§23.6) are blocked on the same missing link. A
+  course↔teacher assignment (a `courseTeacher` row, or a `programCourse.teacherId`) is a
+  **prerequisite of any teacher-facing college surface** — a small additive row of exactly the kind this
+  repository already knows how to add. **Owner's answer (2026-10-11, Q8): attendance marking is
+  staff-only FIRST, and that missing link becomes `8-pre` — the first step of Phase 8, not post-v1.**
+  It is therefore built BEFORE the markable register (ca-1..ca-3), and it is what makes any
+  teacher-facing college surface possible at all.
+- **D-CA-5 — what it reuses from the school, listed so nobody rebuilds it:** the deterministic-id
+  idempotence, the four status values, the `markedById` actor stamp, the `branchId` stamp, the
+  `notifyGuardianOfStudent` path, the `invalidateStats` / `invalidateReferenceCache` calls, and the
+  audit convention.
+- **D-CA-6 — where it sits in the order, and why: AFTER Phase 7, as its own phase, and BEFORE the
+  dashboard/reports/import trio (8a/8b/8c).** Three reasons: (i) fees are the commercial blocker — a
+  college that cannot bill cannot be sold; attendance is not; (ii) attendance is the **riskiest**
+  remaining model change (a new per-session spine plus a permission question with no existing
+  ownership link), so it lands alone with its own baseline-first isolation proof rather than riding
+  along with dashboards; (iii) the dashboards/report phase is far more useful once attendance exists to
+  report on. **Label recommendation:** make it **Phase 8 (college per-course attendance)** and renumber
+  the not-yet-started trio to **9a/9b/9c** — renumbering only **unstarted** work changes no meaning, and
+  the §10 table would say so. **Owner's answer (2026-10-11, Q1): exactly that — attendance is Phase 8,
+  directly after Phase 7 (fees), and the dashboard / reports / import trio is renumbered
+  9a / 9b / 9c.** §10 carries a dated correction for the renumber, and the delta's own `Order:` line
+  (`… → 7a → 7b → 7c`) is superseded by it; only unstarted work moved, so no phase changed meaning.
+- **D-CA-7 — its own build order, in the same rhythm, once approved: `8-pre` first (the course↔teacher
+  link, Q8 — it precedes the markable register, not follows it) → ca-0 the attendance allow-list module
+  (`college-attendance-access.ts`, the results pattern) → ca-1 pure logic + offline
+  verifier (the roster rule, the id, the slot, the new-absence rule, the four statuses) · ca-2 data
+  layer (`courseAttendance` in `COLS`/`RELS` + the new segment in `COLLEGE_API_SEGMENTS`) · ca-3 API
+  (roster read, session save, per-student history; `requireCollege` first, the allow-list, counted
+  refusals) · ca-4 pages + nav (a course register with a date and slot picker, one college nav entry,
+  the nav snapshot unchanged) · ca-5 isolation + regression, baselines first, and the school's own
+  attendance paths re-run to identical counts · ca-6 the finished record. Size: **medium** — smaller
+  than 6a–6f in code, comparable in risk, because it is the first college data a **teacher** would ever
+  touch.
+
+### 24.9 The owner's answers (2026-10-11) — all eight ANSWERED
+
+Everything an institution sets for itself — heads, prices, cadences, discounts, waivers, channels — was
+never a question for the owner (that is the binding ruling). The eight that carried a product
+consequence are answered below, and each answer is now the decision cited in the last column, so
+nothing here is still open on our side.
+
+| # | Question | Owner's answer | Where it landed |
+|---|---|---|---|
+| **Q1** | The order and label for per-course attendance | **Attendance is Phase 8, directly after Phase 7 (fees); the dashboard / reports / import trio is renumbered 9a / 9b / 9c.** | D-CA-6, and §10's dated correction |
+| **Q2** | Does the first college customer need **per-credit-hour** pricing in v1? | **NOT in v1.** Keep the `basis: FLAT \| PER_CREDIT` hook. **If the first college customer charges per credit, this moves to the front of the queue.** | D-7-8, §24.7 |
+| **Q3** | College money: the **shared central ledger**, or a separate college spine? | **Shared ledger — with one binding condition: the two modes' money must never mix in a read.** School-mode totals and reports must never include college rows, college-mode must never include school rows, and a BOTH tenant shows both modes separately. **7e must prove it with checks.** | D-7-12, 7e |
+| **Q4** | v1 access | **Staff-only in v1** — admin-level + ACCOUNTANT write, REGISTRAR read; guardian and student views are post-v1. | D-7-18, §24.6 |
+| **Q5** | Discount / waiver shapes | **Both** — a percentage of a term's charges and a fixed amount per head. | D-7-13 |
+| **Q6** | Standing scholarships in v1 | **No.** First post-v1 fee item if a customer asks. | §24.6 |
+| **Q7** | Attendance session slot | **Yes** — `slot` 1..n in the key, absent = 1. | D-CA-1 |
+| **Q8** | Who marks attendance, and the missing course↔teacher link | **Attendance marking is staff-only first, and the missing course↔teacher link becomes `8-pre` — the FIRST step of Phase 8, not post-v1.** | D-CA-4, D-CA-7, §24.6 |
+
+**Two things the answers changed in the order.** (i) **Phase 8 now begins with `8-pre`**, the
+course↔teacher link, because both the teacher-facing attendance half and the post-v1 per-course teacher
+result view (§23.6) need it; building the register first would mean rebuilding the roster question
+later. (ii) **The dashboard / reports / import trio is now 9a / 9b / 9c** — recorded as a dated
+correction to §10's phase table (the table itself is left as written, and only unstarted work moved, so
+no phase changed meaning).
+
+### 24.10 What this preflight could NOT prove
+
+- **Nothing here was run:** no server, no emulator, no build. Every claim above is a read of the tree
+  at `9c1f96d` (file reads and targeted searches) or a count already recorded in a verifier run.
+- **The new verifier counts do not exist yet.** 7-pre/7-pre-2 and 7a–7f owe them, with the school
+  baselines recorded **before** their additions: `verify-fees-totals` **15**, `verify-enroll-paths`
+  **18**, `verify-admission-intake` **53 from a clean state**, `qa-phase23` **36 / 0**,
+  `verify-nav-scope` 8, `verify-tenant-isolation` 97, `verify-branch-isolation` 65. Phase 8's `8-pre`
+  and ca-1..ca-6 owe theirs in the same shape.
+- Whether a BOTH tenant's **stats / dashboard payloads** need a mode dimension **for fee money** is
+  **NOT PROVEN** here: the delta's §2 flags the stats cache as mode-sensitive and it is still
+  un-dimensioned today. The v1 college fee screens of D-7-16 do not read `/api/stats`, so 7a–7f do not
+  depend on the answer — **8a (the college dashboard) does.**
+- ~~Q1–Q8 are open~~ — **all eight were answered on 2026-10-11 (§24.9) and are decisions now.** What
+  stays unproven is only the code they imply, which 7-pre/7-pre-2, 7a–7f and Phase 8 have to earn.
