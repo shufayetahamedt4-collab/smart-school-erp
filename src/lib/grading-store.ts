@@ -33,6 +33,40 @@ export async function loadScheme(schoolId: string | null | undefined, mode?: Mod
   return coerceScheme((row as any)?.value ?? null);
 }
 
+/**
+ * Everything a caller may ask about WHICH scheme grades a student (D-6-18).
+ *
+ * `mode` is optional exactly as in `loadScheme`: omitted means "resolve the
+ * tenant's active mode". `programId` is accepted so the contract is already in
+ * place, but **v1 ignores it** — one scheme per tenant (D-6-19).
+ */
+export interface SchemeResolutionRequest {
+  schoolId: string | null | undefined;
+  mode?: Mode | null;
+  /** Reserved for the per-programme scale override (D-6-19); ignored in v1. */
+  programId?: string | null;
+}
+
+/**
+ * The ONE scheme-resolution point (D-6-18).
+ *
+ * Every caller that needs the scheme **for grading or printing** goes through
+ * this function instead of reading `loadScheme`/`schemeKey` directly, so the
+ * later per-programme scale override (D-6-19 — a college running HSC 5.00 and
+ * honours 4.00 at once) lands as a change *inside* this function, with no caller,
+ * print route or API contract touched.
+ *
+ * v1 is deliberately one scheme per tenant: any `programId` is ignored and the
+ * answer is the tenant's mode-scoped scheme from `loadScheme`. `schemeKey` and
+ * `loadScheme` themselves are unchanged.
+ */
+export async function resolveSchemeFor({ schoolId, mode, programId }: SchemeResolutionRequest): Promise<GradingScheme> {
+  // v1: one scheme per tenant (D-6-19). The argument is part of the fixed
+  // contract so the override can be added here later without changing callers.
+  void programId;
+  return loadScheme(schoolId, mode);
+}
+
 export async function saveScheme(schoolId: string, scheme: GradingScheme, mode?: Mode | null): Promise<void> {
   const m = mode === undefined ? await resolveActiveMode(schoolId) : mode;
   const key = schemeKey(schoolId, m);

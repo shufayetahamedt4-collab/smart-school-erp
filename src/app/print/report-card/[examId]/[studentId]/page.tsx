@@ -209,7 +209,8 @@ export default async function ReportCardPage({ params }: { params: Promise<{ exa
                 <div key={band.grade} className="flex justify-between">
                   <span>{bandLabel(band)}</span>
                   <span className="font-bold text-slate-600">
-                    {band.grade} ({band.gpa.toFixed(2)})
+                    {band.grade}
+                    {band.gpa !== undefined ? ` (${band.gpa.toFixed(2)})` : ""}
                   </span>
                 </div>
               ))}

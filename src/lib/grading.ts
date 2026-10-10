@@ -21,8 +21,14 @@ export interface GradeBand {
   grade: string;
   /** Lowest percentage that earns this band (0–100). */
   minPercent: number;
-  /** Grade point a subject with this grade earns (0–gpaScale). */
-  gpa: number;
+  /**
+   * Grade point a subject with this grade earns (0–gpaScale). **Optional** (a
+   * Phase 6 addition): a scheme with `showGpa: false` prints letters and/or
+   * percentages only, so its bands carry no point at all — the key is absent,
+   * never a printed `0.00` (docs/COLLEGE-DECISIONS.md D-6-2, D-6-16). Every
+   * existing scheme still sets it, so nothing changes for them.
+   */
+  gpa?: number;
   /** Optional note printed next to the band / used for teacher remarks. */
   remark?: string;
 }
@@ -36,6 +42,22 @@ export interface GradingScheme {
   passPercent: number;
   /** When true, a single failed subject caps the overall GPA at 0. */
   failCapsGpa: boolean;
+  /**
+   * Whether a GPA/point is shown at all (D-6-2). **Absent means `true`** — that
+   * absent-is-true rule is the whole backward-compatibility guarantee: every
+   * stored scheme, every existing preset and every verified value keeps grading,
+   * printing and validating exactly as before. Only an explicit `false` (letters
+   * or percentages only) relaxes a band's `gpa` (D-6-5) and suppresses the GPA
+   * columns (D-6-16).
+   */
+  showGpa?: boolean;
+  /**
+   * The tenant's retake rule, in the SAME document as the scheme (D-6-7).
+   * Absent means today's behaviour: no retakes are recorded and there is nothing
+   * to resolve. Phase 6 adds no second pass mark — a retake references the one
+   * `passPercent` above (D-6-10).
+   */
+  retake?: RetakeConfig;
   bands: GradeBand[];
 }
 
@@ -101,7 +123,135 @@ export const GRADING_PRESETS: { key: string; label: string; hint: string; scheme
       ],
     },
   },
+  {
+    key: "bd-university-4",
+    label: "University CGPA (4.00)",
+    hint: "A 80% → 4.00, B 65% → 3.25, C 50% → 2.00, D 40% → 1.00, F below — pass at 40%.",
+    scheme: {
+      name: "University 4.00",
+      gpaScale: 4,
+      passPercent: 40,
+      failCapsGpa: false,
+      bands: [
+        { grade: "A+", minPercent: 80, gpa: 4, remark: "Outstanding" },
+        { grade: "A", minPercent: 75, gpa: 3.75, remark: "Excellent" },
+        { grade: "A-", minPercent: 70, gpa: 3.5, remark: "Very good" },
+        { grade: "B+", minPercent: 65, gpa: 3.25, remark: "Good" },
+        { grade: "B", minPercent: 60, gpa: 3, remark: "Good" },
+        { grade: "B-", minPercent: 55, gpa: 2.75, remark: "Satisfactory" },
+        { grade: "C", minPercent: 50, gpa: 2, remark: "Satisfactory" },
+        { grade: "D", minPercent: 40, gpa: 1, remark: "Pass" },
+        { grade: "F", minPercent: 0, gpa: 0, remark: "Failed" },
+      ],
+    },
+  },
+  {
+    key: "eng-medium-letters",
+    label: "English-medium letters (no GPA)",
+    hint: "A* 90%, A 80%, B 70%, C 60%, D 50%, E 40% — pass at 40%. Letters only, no grade point.",
+    scheme: {
+      name: "Level letters",
+      gpaScale: 5,
+      passPercent: 40,
+      failCapsGpa: false,
+      showGpa: false,
+      bands: [
+        { grade: "A*", minPercent: 90, remark: "Top level" },
+        { grade: "A", minPercent: 80, remark: "Excellent" },
+        { grade: "B", minPercent: 70, remark: "Good" },
+        { grade: "C", minPercent: 60, remark: "Satisfactory" },
+        { grade: "D", minPercent: 50, remark: "Pass" },
+        { grade: "E", minPercent: 40, remark: "Pass" },
+        { grade: "F", minPercent: 0, remark: "Failed" },
+      ],
+    },
+  },
+  {
+    key: "percent-only",
+    label: "Percent only (no GPA, no letters)",
+    hint: "Marks print as a percentage; pass at 40%. No grade points at all.",
+    scheme: {
+      name: "Percent only",
+      gpaScale: 5,
+      passPercent: 40,
+      failCapsGpa: false,
+      showGpa: false,
+      bands: [
+        { grade: "P", minPercent: 40, remark: "Pass" },
+        { grade: "F", minPercent: 0, remark: "Failed" },
+      ],
+    },
+  },
 ];
+
+/* ------------------------------------------------ retake policy (D-6-7…D-6-10) */
+
+/**
+ * The four ways a tenant may treat a retaken course (D-6-8). The chosen policy
+ * never changes the STORED attempts — it decides only which value grades the
+ * course and what the transcript prints (a derived-on-read decision, D-6-12).
+ *
+ *   - `REPLACE` — the latest attempt is the course grade;
+ *   - `BEST`    — the highest attempt is the course grade;
+ *   - `BOTH`    — every attempt is reported, the LATEST is the effective one;
+ *   - `AVERAGE` — the mean of the attempts is the course grade.
+ */
+export const RETAKE_POLICIES = ["REPLACE", "BEST", "BOTH", "AVERAGE"] as const;
+
+export type RetakePolicy = (typeof RETAKE_POLICIES)[number];
+
+/** A tenant's retake rule, stored beside the scheme (D-6-7). */
+export interface RetakeConfig {
+  policy: RetakePolicy;
+  /** Attempts allowed BEYOND the first, or `null` for unlimited (D-6-9). */
+  maxRetakes: number | null;
+}
+
+/**
+ * What a scheme with no `retake` block means: today's behaviour — no retakes
+ * recorded (`maxRetakes` 0), and a single attempt, so the policy value is moot.
+ */
+export const DEFAULT_RETAKE: RetakeConfig = { policy: "REPLACE", maxRetakes: 0 };
+
+/** Is this exactly one of the four stored policies? */
+export function isRetakePolicy(value: unknown): value is RetakePolicy {
+  return typeof value === "string" && (RETAKE_POLICIES as readonly string[]).includes(value);
+}
+
+/**
+ * Validate a `retake` block coming from the client or from storage. `maxRetakes`
+ * is an integer in [0, 1000] or empty/null for unlimited (D-6-9); the limit is
+ * enforced when a retake is RECORDED (the API), never by deleting an attempt.
+ */
+export function validateRetakeConfig(
+  input: any
+): { ok: true; config: RetakeConfig } | { ok: false; error: string } {
+  if (!input || typeof input !== "object") return { ok: false, error: "Retake policy must be an object." };
+  const policy = input.policy;
+  if (!isRetakePolicy(policy)) return { ok: false, error: `Retake policy must be one of ${RETAKE_POLICIES.join(", ")}.` };
+  const raw = input.maxRetakes;
+  if (raw === undefined || raw === null || raw === "") return { ok: true, config: { policy, maxRetakes: null } };
+  const n = num(raw, 0, 1000);
+  if (n === null || !Number.isInteger(n)) {
+    return { ok: false, error: "Max retakes must be a whole number from 0 to 1000, or empty for unlimited." };
+  }
+  return { ok: true, config: { policy, maxRetakes: n } };
+}
+
+/**
+ * Read a stored/optional `retake` block leniently: anything unusable falls back
+ * to `DEFAULT_RETAKE` (no retakes), the same fail-safe convention `coerceScheme`
+ * uses for a broken scheme. Never throws.
+ */
+export function normalizeRetakeConfig(value: unknown): RetakeConfig {
+  const result = validateRetakeConfig(value);
+  return result.ok ? result.config : DEFAULT_RETAKE;
+}
+
+/** Does this scheme show a GPA/point at all? Absent means yes (D-6-2). */
+export function showsGpa(scheme: GradingScheme | null | undefined): boolean {
+  return scheme?.showGpa !== false;
+}
 
 /** One column of an exam's marks sheet: a subject and what it is marked out of. */
 export interface ExamColumn {
@@ -139,6 +289,9 @@ export function validateScheme(input: any): { ok: true; scheme: GradingScheme } 
   const passPercent = num(input.passPercent, 0, 100);
   if (passPercent === null) return { ok: false, error: "Pass mark must be a percentage between 0 and 100." };
 
+  // Absent means shown (D-6-2) — only an explicit `false` relaxes a band's gpa.
+  const showGpa = input.showGpa !== false;
+
   const rawBands = Array.isArray(input.bands) ? input.bands : [];
   if (rawBands.length < MIN_BANDS) return { ok: false, error: `Add at least ${MIN_BANDS} grade bands.` };
   if (rawBands.length > MAX_BANDS) return { ok: false, error: `At most ${MAX_BANDS} grade bands.` };
@@ -155,13 +308,22 @@ export function validateScheme(input: any): { ok: true; scheme: GradingScheme } 
     if (seen.has(minPercent)) return { ok: false, error: `Two bands start at ${minPercent}% — minimums must be unique.` };
     seen.add(minPercent);
 
-    const gpa = num(raw?.gpa, 0, gpaScale);
-    if (gpa === null) return { ok: false, error: `Band "${grade}" needs a GPA between 0 and ${gpaScale}.` };
+    // With `showGpa: false` a band may omit its point (D-6-5). When the scheme
+    // DOES show a GPA — or a no-GPA scheme still supplies a point — the value is
+    // validated against the scale exactly as before, so a scheme can never carry
+    // a point the printed transcript would show wrongly. No existing refusal is
+    // removed or reworded; the no-GPA relaxation is additive only.
+    const hasGpa = raw?.gpa !== undefined && raw?.gpa !== null && raw?.gpa !== "";
+    const gpa = showGpa || hasGpa ? num(raw?.gpa, 0, gpaScale) : null;
+    if (gpa === null && (showGpa || hasGpa)) {
+      return { ok: false, error: `Band "${grade}" needs a GPA between 0 and ${gpaScale}.` };
+    }
 
     const remark = String(raw?.remark ?? "").trim().slice(0, 120);
-    // Only carry the key when it has a value — Firestore rejects `undefined`,
-    // and an absent remark already means "no remark" everywhere that reads it.
-    const band: GradeBand = { grade, minPercent, gpa };
+    // Only carry a key when it has a value — Firestore rejects `undefined`, and
+    // an absent key already means "none" everywhere that reads it.
+    const band: GradeBand = { grade, minPercent };
+    if (gpa !== null) band.gpa = gpa;
     if (remark) band.remark = remark;
     bands.push(band);
   }
@@ -173,7 +335,17 @@ export function validateScheme(input: any): { ok: true; scheme: GradingScheme } 
   bands.sort((a, b) => b.minPercent - a.minPercent);
 
   const name = String(input.name ?? "").trim().slice(0, 80) || DEFAULT_SCHEME.name;
-  return { ok: true, scheme: { name, gpaScale, passPercent, failCapsGpa: !!input.failCapsGpa, bands } };
+  const scheme: GradingScheme = { name, gpaScale, passPercent, failCapsGpa: !!input.failCapsGpa, bands };
+  // Absent means shown, so only an explicit `false` is ever stored (D-6-2).
+  if (!showGpa) scheme.showGpa = false;
+  // The retake block rides in the same document (D-6-7); an absent block means
+  // "no retakes recorded", which is what every existing scheme already means.
+  if (input.retake !== undefined && input.retake !== null) {
+    const retake = validateRetakeConfig(input.retake);
+    if (!retake.ok) return { ok: false, error: retake.error };
+    scheme.retake = retake.config;
+  }
+  return { ok: true, scheme };
 }
 
 /**
@@ -213,7 +385,10 @@ export function gradeForScheme(scheme: GradingScheme, obtained: number, full: nu
   const band = bandForPercent(scheme, percent);
   return {
     grade: band.grade,
-    gpa: band.gpa,
+    // A no-GPA band omits its point; the school SubjectResult still carries a
+    // number so every existing caller is unchanged (only a no-GPA scheme, which
+    // is new, ever reaches the `?? 0`).
+    gpa: band.gpa ?? 0,
     remark: band.remark || "",
     percent: Math.round(percent * 100) / 100,
     pass: percent >= scheme.passPercent,

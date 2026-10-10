@@ -505,7 +505,9 @@ export default function GradingSchemeEditor({
               <div key={`${band.grade}-${i}`} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 text-center">
                 <div className="text-lg font-black text-slate-800">{band.grade}</div>
                 <div className="text-[11px] font-semibold text-slate-500">{bandLabel(band)}</div>
-                <div className="mt-1 text-xs font-bold text-indigo-600">{band.gpa.toFixed(2)} GPA</div>
+                {band.gpa !== undefined && (
+                  <div className="mt-1 text-xs font-bold text-indigo-600">{band.gpa.toFixed(2)} GPA</div>
+                )}
                 {band.remark && <div className="mt-0.5 text-[10px] text-slate-400">{band.remark}</div>}
               </div>
             ))}

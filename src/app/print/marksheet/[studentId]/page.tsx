@@ -466,7 +466,9 @@ export default async function MarksheetPage({ params }: { params: Promise<{ stud
                   <span className="shrink-0">
                     <span className="font-bold text-slate-600">{band.grade}</span> {bandLabel(band)}
                   </span>
-                  <span className="shrink-0 font-bold text-slate-600">{band.gpa.toFixed(2)}</span>
+                  {band.gpa !== undefined && (
+                    <span className="shrink-0 font-bold text-slate-600">{band.gpa.toFixed(2)}</span>
+                  )}
                   <span className="min-w-0 flex-1 truncate text-right text-slate-400">{band.remark || ""}</span>
                 </div>
               ))}
