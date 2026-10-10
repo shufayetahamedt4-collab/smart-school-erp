@@ -36,6 +36,11 @@
  *   7. WIRING + RUNTIME-DEPENDENCY-FREE. The route and the wizard page actually
  *      use this module and carry the tenant shape, and the module has no runtime
  *      import at all.
+ *   8. THE WIZARD'S CHROME. `wizardStepKeys` / `wizardSubmitLabel` /
+ *      `wizardAcceptsFees` — the step list (the profile step belongs to EVERY
+ *      shape: a COLLEGE tenant used to lose it and open on the Admin step with
+ *      Back dead), the submit label, and the rule that a tenant without a school
+ *      half is never given the school-shaped `feeSetting` defaults.
  *
  *   node scripts/verify-onboarding-seed.mjs
  */
@@ -81,6 +86,9 @@ const {
   seedTermCount,
   tenantHasCollege,
   tenantHasSchool,
+  wizardAcceptsFees,
+  wizardStepKeys,
+  wizardSubmitLabel,
 // Relative specifiers, not the absolute paths above: the default ESM loader only
 // accepts file:// URLs on Windows, and the other offline verifiers import the
 // libs the same way.
@@ -402,6 +410,144 @@ console.log("\n7. wiring and runtime-dependency-free");
   check("the wizard page offers the institution types", /INSTITUTION_TYPES/.test(page) && /INSTITUTION_TYPE_LABELS/.test(page));
   check("the wizard page has a college step", /stepKey === "college"/.test(page));
   check("the wizard page sends the college half", /collegeHalf && college \? \{ college \}/.test(page));
+}
+
+/* ------------------- 8. the wizard's steps, submit label and fee rule */
+
+console.log("\n8. the wizard's step table, submit label and fee rule follow the tenant shape");
+{
+  // The whole step table, for every shape and both modes. `profile` is FIRST for
+  // each of them: the defect this section exists to prevent was a COLLEGE tenant
+  // whose step list lost the profile step, so the wizard opened on the Admin step
+  // with Back disabled and the profile fields unreachable.
+  const EXPECTED_STEPS = {
+    SCHOOL: {
+      create: ["profile", "admin", "classes", "subjects", "fees"],
+      extend: ["profile", "classes", "subjects", "fees"],
+    },
+    COLLEGE: {
+      create: ["profile", "admin", "college"],
+      extend: ["profile", "college"],
+    },
+    BOTH: {
+      create: ["profile", "admin", "classes", "subjects", "college", "fees"],
+      extend: ["profile", "classes", "subjects", "college", "fees"],
+    },
+  };
+  const stepMismatch = [];
+  for (const [type, modes] of Object.entries(EXPECTED_STEPS)) {
+    for (const [mode, want] of Object.entries(modes)) {
+      const got = wizardStepKeys(type, mode === "extend");
+      if (JSON.stringify(got) !== JSON.stringify(want))
+        stepMismatch.push(`${type}/${mode} got ${JSON.stringify(got)} want ${JSON.stringify(want)}`);
+    }
+  }
+  check("every shape and mode gets exactly its step list, in order", stepMismatch.length === 0, stepMismatch.join(" | "));
+
+  const SHAPES = ["SCHOOL", "COLLEGE", "BOTH"];
+  const firstStepWrong = SHAPES.flatMap((t) => [true, false].map((ext) => ({ t, ext })))
+    .filter(({ t, ext }) => wizardStepKeys(t, ext)[0] !== "profile");
+  check(
+    "the profile step is present and FIRST for every shape, creating and extending",
+    firstStepWrong.length === 0,
+    firstStepWrong.map(({ t, ext }) => `${t}/${ext ? "extend" : "create"}`).join(", ")
+  );
+
+  const adminWrong = SHAPES.flatMap((t) => [true, false].map((ext) => ({ t, ext })))
+    .filter(({ t, ext }) => wizardStepKeys(t, ext).includes("admin") === ext);
+  check("the admin step is offered only while creating", adminWrong.length === 0, adminWrong.map(({ t, ext }) => `${t}/${ext ? "extend" : "create"}`).join(", "));
+
+  const dupes = SHAPES.flatMap((t) => [true, false].map((ext) => ({ t, ext })))
+    .filter(({ t, ext }) => new Set(wizardStepKeys(t, ext)).size !== wizardStepKeys(t, ext).length);
+  check("no step is repeated", dupes.length === 0, dupes.map(({ t }) => t).join(", "));
+
+  const schoolHalfMismatch = SHAPES.filter((t) => {
+    const has = wizardStepKeys(t, false).includes("fees");
+    return has !== tenantHasSchool(t) || wizardStepKeys(t, false).includes("classes") !== has;
+  });
+  check(
+    "the classes/subjects pair and the fees step appear exactly when the tenant has a school half",
+    schoolHalfMismatch.length === 0,
+    schoolHalfMismatch.join(", ")
+  );
+
+  const collegeHalfMismatch = SHAPES.filter((t) => wizardStepKeys(t, false).includes("college") !== tenantHasCollege(t));
+  check("the college step appears exactly when the tenant has a college half", collegeHalfMismatch.length === 0, collegeHalfMismatch.join(", "));
+
+  // The step list and the seed are two views of one decision table, so they must
+  // never disagree about which halves a shape has.
+  const seedDisagreement = SHAPES.filter((t) => {
+    const keys = wizardStepKeys(t, false);
+    const seed = defaultSeedFor(t);
+    return keys.includes("college") !== (seed.college !== null) || keys.includes("classes") !== seed.classes.length > 0;
+  });
+  check(
+    "the step list agrees with the default seed for every shape",
+    seedDisagreement.length === 0,
+    seedDisagreement.join(", ")
+  );
+
+  const JUNK = [undefined, null, "", " ", "college", "COLLEGE ", 7, true, {}, [], "constructor", "__proto__", "UNIVERSITY"];
+  const junkSteps = JUNK.filter((v) => JSON.stringify(wizardStepKeys(v, false)) !== JSON.stringify(EXPECTED_STEPS.SCHOOL.create));
+  check(
+    "an absent or unknown shape gets the SCHOOL steps (reads as SCHOOL)",
+    junkSteps.length === 0,
+    junkSteps.map((v) => JSON.stringify(v ?? `${v}`)).join(", ")
+  );
+
+  check(
+    "submit label: SCHOOL and COLLEGE are named for what they create",
+    wizardSubmitLabel("SCHOOL", false) === "Create school" && wizardSubmitLabel("COLLEGE", false) === "Create college",
+    `${wizardSubmitLabel("SCHOOL", false)} / ${wizardSubmitLabel("COLLEGE", false)}`
+  );
+  const bothLabel = wizardSubmitLabel("BOTH", false);
+  check(
+    "submit label: BOTH is neutral — it names neither half",
+    bothLabel !== "Create school" && bothLabel !== "Create college" && !/\b(school|college)\b/i.test(bothLabel) && bothLabel.trim().length > 0,
+    bothLabel
+  );
+  const extendLabels = SHAPES.map((t) => wizardSubmitLabel(t, true));
+  check(
+    "submit label: extend mode always saves (it creates nothing)",
+    extendLabels.every((l) => l === "Save setup") && !new Set(extendLabels).has(undefined),
+    JSON.stringify(extendLabels)
+  );
+  const junkLabels = JUNK.filter((v) => wizardSubmitLabel(v, false) !== "Create school");
+  check("submit label: an absent or unknown shape reads as SCHOOL", junkLabels.length === 0, junkLabels.map((v) => JSON.stringify(v ?? `${v}`)).join(", "));
+
+  check(
+    "wizardAcceptsFees: true for SCHOOL and BOTH, false for COLLEGE only",
+    wizardAcceptsFees("SCHOOL") === true && wizardAcceptsFees("BOTH") === true && wizardAcceptsFees("COLLEGE") === false,
+    JSON.stringify({ SCHOOL: wizardAcceptsFees("SCHOOL"), COLLEGE: wizardAcceptsFees("COLLEGE"), BOTH: wizardAcceptsFees("BOTH") })
+  );
+  const feeDrift = JUNK.concat(SHAPES).filter((v) => wizardAcceptsFees(v) !== tenantHasSchool(v));
+  check("wizardAcceptsFees agrees with tenantHasSchool for every probe (no drift)", feeDrift.length === 0, feeDrift.map((v) => JSON.stringify(v ?? `${v}`)).join(", "));
+  const feeStepDisagreement = SHAPES.filter((t) => wizardStepKeys(t, false).includes("fees") !== wizardAcceptsFees(t));
+  check(
+    "the fee step exists exactly when fees are accepted (no hidden fee write)",
+    feeStepDisagreement.length === 0,
+    feeStepDisagreement.join(", ")
+  );
+  const junkFees = JUNK.filter((v) => wizardAcceptsFees(v) !== true);
+  check("an absent or unknown shape still accepts fees (reads as SCHOOL)", junkFees.length === 0, junkFees.map((v) => JSON.stringify(v ?? `${v}`)).join(", "));
+
+  // ---- wiring: the page must USE the table, not re-derive it ----
+  const page = stripComments(read(PAGE_PATH));
+  const route = stripComments(read(ROUTE_PATH));
+  check("the wizard page builds its steps from wizardStepKeys", /wizardStepKeys\(/.test(page));
+  check(
+    "the wizard page carries no ad-hoc school-half step filter (the old defect)",
+    !/s\.key === "admin" \?/.test(page) && !/\? adminStepVisible :/.test(page)
+  );
+  check(
+    "the wizard page takes its submit label from wizardSubmitLabel (no hard-coded Create school)",
+    /wizardSubmitLabel\(/.test(page) && !/:\s*"Create school"/.test(page)
+  );
+  check("the wizard page gates the fees payload with wizardAcceptsFees", /wizardAcceptsFees\(institutionType\)/.test(page));
+  check(
+    "the route refuses school fee defaults for a tenant without a school half",
+    /hasSchool\(opts\.institutionType\) && \(monthlyFee > 0 \|\| admissionFee > 0\)/.test(route)
+  );
 }
 
 const total = passes + failures.length;

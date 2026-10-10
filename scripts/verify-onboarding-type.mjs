@@ -20,7 +20,11 @@
  *   6. refuses an invalid shape (400) and an invalid college block (400) WITHOUT
  *      half-creating a tenant;
  *   7. never lets a wizard request change an existing tenant's shape;
- *   8. cleans up everything it created.
+ *   8. stores the full profile payload the wizard posts for a COLLEGE tenant,
+ *      while refusing the school-shaped fee defaults it used to send behind the
+ *      (absent) fee step's back — and still applies them to a SCHOOL or BOTH
+ *      tenant;
+ *   9. cleans up everything it created.
  *
  *   SMOKE_PORT=3000 node scripts/verify-onboarding-type.mjs
  */
@@ -123,6 +127,7 @@ async function main() {
   /* ------------------------------------------------- 2. COLLEGE tenant */
   console.log("\n2. the wizard creates a COLLEGE tenant and seeds the college skeleton");
   let collegeSchoolId = null;
+  let collegeFullSchoolId = null;
   let collegeCookie = null;
   {
     // No classes / subjects / college keys at all: a new tenant must get the
@@ -197,6 +202,68 @@ async function main() {
     } else {
       fail("the curriculum maps every seeded course into term 1", "no programme id");
     }
+
+    /* ------------- the wizard's own chrome for a COLLEGE tenant: profile, no fees */
+    // What the wizard PAGE actually posts for a college: the school-profile
+    // fields the profile step collects, the shape, and — before this fix — a
+    // `fees` block too, even though a college never sees a fee step. The profile
+    // half must be reachable AND stored, and the school-shaped fee defaults must
+    // not land. (Which steps exist for which shape is the pure table asserted by
+    // verify-onboarding-seed.mjs §8; this is its HTTP-observable half.)
+    console.log("\n2b. a COLLEGE tenant keeps its profile half and gets no fee defaults");
+    const collegeFull = await wizardCreate(superCookie, "CollegeFull", {
+      school: {
+        name: `QA Type College Full ${RUN}`,
+        institutionType: "COLLEGE",
+        tagline: "Science for tomorrow",
+        address: "College Road 1, Dhaka",
+        phone: "+8801700000001",
+        email: "college-full@qatest.edu",
+        themeColor: "#0d9488",
+      },
+      fees: { monthlyFee: 1500, admissionFee: 5000 },
+    });
+    collegeFullSchoolId = collegeFull.data.schoolId ?? null;
+    check(
+      "the wizard creates a COLLEGE tenant from its full profile payload (201)",
+      collegeFull.status === 201 && !!collegeFullSchoolId,
+      `status ${collegeFull.status}: ${JSON.stringify(collegeFull.data).slice(0, 160)}`
+    );
+
+    const fullRead = await api(`/api/schools/${collegeFullSchoolId}`, { cookie: superCookie });
+    const fd = fullRead.json?.data ?? {};
+    check(
+      "every profile field the profile step collects is stored for the COLLEGE tenant",
+      fullRead.status === 200 &&
+        fd.name === `QA Type College Full ${RUN}` &&
+        fd.tagline === "Science for tomorrow" &&
+        fd.address === "College Road 1, Dhaka" &&
+        fd.phone === "+8801700000001" &&
+        fd.email === "college-full@qatest.edu" &&
+        fd.themeColor === "#0d9488" &&
+        fd.institutionType === "COLLEGE",
+      JSON.stringify({ name: fd.name, tagline: fd.tagline, address: fd.address, phone: fd.phone, email: fd.email, themeColor: fd.themeColor, institutionType: fd.institutionType })
+    );
+    check(
+      "the college tenant is still seeded with the college skeleton (its non-profile steps)",
+      collegeFull.data.departmentsCreated === 1 &&
+        collegeFull.data.programsCreated === 1 &&
+        collegeFull.data.coursesCreated === COLLEGE_DEFAULT_SKELETON.courses.length &&
+        collegeFull.data.classesCreated === 0 &&
+        collegeFull.data.subjectsCreated === 0,
+      JSON.stringify(collegeFull.data).slice(0, 220)
+    );
+    check(
+      "a fees block from the wizard is refused for a college-only tenant (no school fee defaults)",
+      collegeFull.data.fees === null && fd.feeSetting === null,
+      JSON.stringify({ postResponse: collegeFull.data.fees, stored: fd.feeSetting })
+    );
+    const fullSt = await api(`/api/onboarding?schoolId=${collegeFullSchoolId}`, { cookie: superCookie });
+    check(
+      "the college tenant's progress reports no fee settings",
+      fullSt.json?.data?.progress?.fees === false,
+      JSON.stringify(fullSt.json?.data?.progress)
+    );
   }
 
   /* ------------------------------------------------- 4. SCHOOL + BOTH tenants */
@@ -220,7 +287,10 @@ async function main() {
     const refused = await api("/api/departments", { cookie });
     check("a SCHOOL tenant is still refused by the college gate (403)", refused.status === 403, `status ${refused.status}`);
 
-    const both = await wizardCreate(superCookie, "Both", { school: { institutionType: "BOTH" } });
+    const both = await wizardCreate(superCookie, "Both", {
+      school: { institutionType: "BOTH" },
+      fees: { monthlyFee: 4321, admissionFee: 8765 },
+    });
     check(
       "a BOTH tenant is seeded with both halves, from the module's defaults",
       both.status === 201 &&
@@ -229,6 +299,24 @@ async function main() {
         both.data.departmentsCreated === 1 &&
         both.data.coursesCreated === COLLEGE_DEFAULT_SKELETON.courses.length,
       `status ${both.status}: ${JSON.stringify(both.data).slice(0, 220)}`
+    );
+    check(
+      "a BOTH tenant keeps the fee defaults (it has a school half)",
+      Number(both.data.fees?.monthlyFee) === 4321 && Number(both.data.fees?.admissionFee) === 8765,
+      JSON.stringify(both.data.fees)
+    );
+
+    // The submit label is chosen from the tenant's own shape, so the three shapes
+    // the label table names must be the three the wizard really stores. (The
+    // mapping shape → label itself is asserted in verify-onboarding-seed.mjs §8.)
+    const bothSt = await api(`/api/onboarding?schoolId=${both.data.schoolId}`, { cookie: superCookie });
+    const collegeSt = await api(`/api/onboarding?schoolId=${collegeFullSchoolId}`, { cookie: superCookie });
+    check(
+      "the wizard stores each of the three shapes its submit label is chosen from",
+      st.json?.data?.institutionType === "SCHOOL" &&
+        collegeSt.json?.data?.institutionType === "COLLEGE" &&
+        bothSt.json?.data?.institutionType === "BOTH",
+      JSON.stringify({ SCHOOL: st.json?.data?.institutionType, COLLEGE: collegeSt.json?.data?.institutionType, BOTH: bothSt.json?.data?.institutionType })
     );
   }
 

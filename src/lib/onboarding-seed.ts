@@ -31,6 +31,11 @@
  * says nothing about college fees: `feeSetting` stays the school-shaped default
  * it has always been (docs/COLLEGE-PLAN-DELTA.md §2 — "feeSetting … Do not
  * extend it at all").
+ *
+ * The wizard's own shape rules live here too (`wizardStepKeys`,
+ * `wizardSubmitLabel`, `wizardAcceptsFees`) — they are the same decision table
+ * applied to the wizard's chrome instead of its data, and keeping them beside the
+ * seed is what makes all three provable offline by the one verifier.
  */
 
 import type { InstitutionType } from "./institution";
@@ -71,6 +76,62 @@ export function tenantHasSchool(value: unknown): boolean {
 /** Does this tenant run a college? (Equivalent to `hasCollege(normalize…)`.) */
 export function tenantHasCollege(value: unknown): boolean {
   return TENANT_SHAPES[normalizeTenantType(value)].college;
+}
+
+/* ------------------------------------------------------- wizard step table */
+
+/** The onboarding wizard's step keys, in the page's own order. */
+export type WizardStepKey = "profile" | "admin" | "classes" | "subjects" | "college" | "fees";
+
+/**
+ * Which wizard steps a tenant of this shape gets.
+ *
+ * The wizard used to filter its step list with the school half for every key
+ * that was neither `admin` nor `college`, so a **COLLEGE** tenant lost the
+ * `profile` step with them: the wizard then opened on the Admin step with Back
+ * disabled and no way to reach the profile fields at all. The profile step
+ * belongs to the TENANT, not to its school half, so it is unconditional here.
+ *
+ * `admin` is the creating step (extend mode keeps the signed-in admin), the
+ * `classes`/`subjects` pair is the school half, `college` is the college half,
+ * and `fees` is school-shaped (see `wizardAcceptsFees`). Order matches the
+ * page's `STEPS`: profile → admin → classes → subjects → college → fees.
+ */
+export function wizardStepKeys(value: unknown, extendMode: boolean): WizardStepKey[] {
+  const schoolHalf = tenantHasSchool(value);
+  const keys: WizardStepKey[] = ["profile"];
+  if (!extendMode) keys.push("admin");
+  if (schoolHalf) keys.push("classes", "subjects");
+  if (tenantHasCollege(value)) keys.push("college");
+  if (schoolHalf) keys.push("fees");
+  return keys;
+}
+
+/**
+ * The wizard's final button. A tenant being created is named for what it is —
+ * "Create school" on a college tenant simply says the wrong thing — and a tenant
+ * with both halves gets the neutral label, because neither half is the whole
+ * tenant. Extend mode never creates anything, so it always saves.
+ */
+export function wizardSubmitLabel(value: unknown, extendMode: boolean): string {
+  if (extendMode) return "Save setup";
+  const type = normalizeTenantType(value);
+  return type === "SCHOOL" ? "Create school" : type === "COLLEGE" ? "Create college" : "Create institution";
+}
+
+/**
+ * May this tenant carry the school-shaped `feeSetting` defaults?
+ *
+ * `feeSetting` is one monthly + one admission default — school semantics, and
+ * docs/COLLEGE-PLAN-DELTA.md §2 keeps it school-only ("Do not extend it at
+ * all"). A college-only tenant therefore neither sees a fee step nor receives
+ * the rows, and every reader tolerates the absence: `GET /api/fees/settings`
+ * falls back to the app defaults, `admissionFeeDefaults` uses
+ * `?? APP_DEFAULT_…`, the fees page reads `settings?.monthlyFee`, and
+ * `enrollStudent` creates the row on demand.
+ */
+export function wizardAcceptsFees(value: unknown): boolean {
+  return tenantHasSchool(value);
 }
 
 /* ------------------------------------------------------------------ school */

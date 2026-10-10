@@ -339,10 +339,18 @@ async function applyWizardData(
   }
 
   // ---- 5. Fees -------------------------------------------------------------
+  // The fee defaults are school-shaped (one monthly + one admission figure), so
+  // they belong to the school half of a tenant only — `feeSetting` stays
+  // school-only by design (docs/COLLEGE-PLAN-DELTA.md §2). A college-only tenant
+  // neither shows a fee step nor receives the rows, however the caller asks: the
+  // wizard stopped sending them, and this gate is what makes the rule true for
+  // every other caller too. Nothing breaks without the row — `GET
+  // /api/fees/settings` falls back to the app defaults and `enrollStudent`
+  // creates it on demand.
   let fees: unknown = null;
   const monthlyFee = Number(body?.fees?.monthlyFee);
   const admissionFee = Number(body?.fees?.admissionFee);
-  if (monthlyFee > 0 || admissionFee > 0) {
+  if (hasSchool(opts.institutionType) && (monthlyFee > 0 || admissionFee > 0)) {
     fees = await prisma.feeSetting.upsert({
       where: { schoolId },
       update: {

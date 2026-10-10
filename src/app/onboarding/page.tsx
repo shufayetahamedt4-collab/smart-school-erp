@@ -20,10 +20,14 @@ import {
   DEGREE_LEVELS,
   TERM_SYSTEMS,
   cloneCollege,
+  wizardAcceptsFees,
+  wizardStepKeys,
+  wizardSubmitLabel,
   type DegreeLevel,
   type SeedCollege,
   type SeedTermSystem,
   type TenantSeed,
+  type WizardStepKey,
 } from "@/lib/onboarding-seed";
 
 /**
@@ -43,7 +47,7 @@ interface Status {
   defaults: TenantSeed;
 }
 
-const STEPS = [
+const STEPS: { key: WizardStepKey; label: string; icon: any }[] = [
   { key: "profile", label: "School", icon: School },
   { key: "admin", label: "Admin", icon: UserCog },
   { key: "classes", label: "Classes", icon: Layers },
@@ -131,12 +135,15 @@ export default function OnboardingPage() {
   const adminStepVisible = !extendMode;
   // Which halves this tenant has, and therefore which steps it needs: the admin
   // step only while creating, the school-half steps only for a school, and the
-  // college step only for a college.
+  // college step only for a college. The step list comes from the shared decision
+  // table (`wizardStepKeys`) rather than an ad-hoc filter here — the filter that
+  // used to live in this spot applied the school half to every key that was
+  // neither "admin" nor "college", which dropped the **profile** step for a
+  // COLLEGE tenant entirely.
   const schoolHalf = institutionType !== "COLLEGE";
   const collegeHalf = institutionType !== "SCHOOL";
-  const steps = STEPS.filter((s) =>
-    s.key === "admin" ? adminStepVisible : s.key === "college" ? collegeHalf : schoolHalf
-  );
+  const stepKeys = wizardStepKeys(institutionType, extendMode);
+  const steps = STEPS.filter((s) => stepKeys.includes(s.key));
   const lastStep = steps.length - 1;
   const stepKey = steps[Math.min(step, lastStep)]?.key ?? "profile";
 
@@ -180,7 +187,13 @@ export default function OnboardingPage() {
         // The college half is sent only for a tenant that actually runs a college;
         // omitted on a NEW tenant, the server applies the default seed.
         ...(collegeHalf && college ? { college } : {}),
-        fees: { monthlyFee: Number(fees.monthlyFee) || 0, admissionFee: Number(fees.admissionFee) || 0 },
+        // The fee defaults are school-shaped, so only a tenant with a school half
+        // is sent them — a college-only tenant has no fee step and must not be
+        // given school fee rows behind its back. The route enforces the same rule
+        // for any other caller (`applyWizardData`), so this is belt and braces.
+        ...(wizardAcceptsFees(institutionType)
+          ? { fees: { monthlyFee: Number(fees.monthlyFee) || 0, admissionFee: Number(fees.admissionFee) || 0 } }
+          : {}),
       };
       const res = await api<any>("/api/onboarding", { method: "POST", body: JSON.stringify(payload) });
       setDone(res);
@@ -507,7 +520,7 @@ export default function OnboardingPage() {
               <button className="btn btn-primary" onClick={() => setStep((s) => Math.min(lastStep, s + 1))} disabled={!canNext}>Continue <ArrowRight size={14} /></button>
             ) : (
               <button className="btn btn-primary" onClick={submit} disabled={busy || !school.name.trim()}>
-                <Check size={14} /> {busy ? "Setting up…" : extendMode ? "Save setup" : "Create school"}
+                <Check size={14} /> {busy ? "Setting up…" : wizardSubmitLabel(institutionType, extendMode)}
               </button>
             )}
           </div>
