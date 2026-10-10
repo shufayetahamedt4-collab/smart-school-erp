@@ -7,12 +7,12 @@ import { can } from "@/lib/permissions";
 import {
   type InstitutionType,
   allowedModes,
-  hasCollege,
   hasSchool,
   isInstitutionType,
   normalizeInstitutionType,
 } from "@/lib/institution";
 import { type SeedCollege, defaultSeedFor, resolveCollegeSeed } from "@/lib/onboarding-seed";
+import { collegeProgressCounts, seedCollegeSkeleton } from "@/lib/college-skeleton";
 
 /**
  * PRD §3.3 — Self-serve onboarding wizard.
@@ -63,18 +63,17 @@ export async function GET(req: NextRequest) {
   // The tenant's own shape decides what the wizard offers and seeds. An absent
   // value reads as SCHOOL, so every pre-existing tenant is unaffected.
   const institutionType: InstitutionType = normalizeInstitutionType((school as any).institutionType);
-  const collegeHalf = hasCollege(institutionType);
 
-  const [classes, subjects, feeSetting, setup, departments, programs, courses] = await Promise.all([
+  const [classes, subjects, feeSetting, setup, college] = await Promise.all([
     prisma.classRoom.count({ where: { schoolId } }),
     prisma.subject.count({ where: { schoolId } }),
     prisma.feeSetting.findUnique({ where: { schoolId } }),
     prisma.setting.findUnique({ where: { key: `school.${schoolId}.onboarded` } }),
-    // College counts are read only for a tenant that has a college half, so a
-    // school tenant pays no extra queries.
-    collegeHalf ? prisma.department.count({ where: { schoolId } }) : Promise.resolve(0),
-    collegeHalf ? prisma.program.count({ where: { schoolId } }) : Promise.resolve(0),
-    collegeHalf ? prisma.course.count({ where: { schoolId } }) : Promise.resolve(0),
+    // The college half's counts live behind the college-side helper, so this
+    // platform route names no college model and `scripts/verify-college-routes.mjs`
+    // check 3 stays strict and unexempted (docs/COLLEGE-DECISIONS.md D-4a-2,
+    // D-4b-11). A SCHOOL tenant still gets zeros and reads no college collection.
+    collegeProgressCounts(schoolId, institutionType),
   ]);
 
   return NextResponse.json({
@@ -92,7 +91,14 @@ export async function GET(req: NextRequest) {
       // What a tenant of THIS shape starts with: the wizard prefills from this, so
       // a college is offered a college skeleton instead of a school class ladder.
       defaults: defaultSeedFor(institutionType),
-      progress: { classes, subjects, fees: !!feeSetting, departments, programs, courses },
+      progress: {
+        classes,
+        subjects,
+        fees: !!feeSetting,
+        departments: college.departments,
+        programs: college.programs,
+        courses: college.courses,
+      },
     },
   });
 }
@@ -366,98 +372,24 @@ async function applyWizardData(
   }
 
   // ---- 4b. College half: department → programme → course catalogue ---------
-  // Only a tenant that actually runs a college gets these rows, and only a
-  // tenant with a school half gets classes and subjects (above). Both halves are
-  // the same default seed the wizard offers, so a tenant created here matches a
-  // tenant created by hand in the college pages. `branchId` is left null: the
-  // wizard's "Main Campus" branch is created after this call, and a branch-less
-  // catalogue is the shape the college pages and the isolation fixtures already
-  // cover.
-  let departmentsCreated = 0;
-  let programsCreated = 0;
-  let coursesCreated = 0;
-  let mappingsCreated = 0;
+  // Only a tenant whose own `institutionType` runs a college gets these rows; the
+  // helper creates the same default seed the wizard offers, so a tenant created
+  // here matches one created by hand in the college pages (`branchId` null until
+  // the wizard's "Main Campus" branch is created after this call).
+  // The writes themselves live in the college-side helper, so this platform route
+  // names no college model and `scripts/verify-college-routes.mjs` check 3 stays
+  // strict and unexempted (D-4a-2, D-4b-11). The helper re-checks the tenant's
+  // `institutionType`, so a school tenant can never receive college rows. The
+  // audit row stays here, where the route already records it, unchanged.
+  const { departmentsCreated, programsCreated, coursesCreated, mappingsCreated } = await seedCollegeSkeleton(
+    schoolId,
+    opts.institutionType,
+    opts.college
+  );
   if (opts.college) {
-    const spec = opts.college;
-    let department: any = await prisma.department.findFirst({
-      where: { schoolId, code: spec.department.code },
-    });
-    if (!department) {
-      department = await prisma.department.create({
-        data: {
-          schoolId,
-          name: spec.department.name,
-          code: spec.department.code,
-          branchId: null,
-          headStaffId: null,
-          description: null,
-          status: "ACTIVE",
-        },
-      });
-      departmentsCreated++;
-    }
-
-    let program: any = await prisma.program.findFirst({
-      where: { schoolId, code: spec.program.code },
-    });
-    if (!program) {
-      program = await prisma.program.create({
-        data: {
-          schoolId,
-          departmentId: department.id,
-          name: spec.program.name,
-          code: spec.program.code,
-          degreeLevel: spec.program.degreeLevel,
-          durationYears: spec.program.durationYears,
-          branchId: null,
-          status: "ACTIVE",
-          termSystem: spec.program.termSystem,
-        },
-      });
-      programsCreated++;
-    }
-
-    for (const c of spec.courses) {
-      let course: any = await prisma.course.findFirst({ where: { schoolId, code: c.code } });
-      if (!course) {
-        course = await prisma.course.create({
-          data: {
-            schoolId,
-            departmentId: department.id,
-            branchId: null,
-            code: c.code,
-            title: c.title,
-            creditHours: c.creditHours,
-            type: c.type,
-            status: "ACTIVE",
-          },
-        });
-        coursesCreated++;
-      }
-      const already = await prisma.programCourse.findFirst({
-        where: {
-          programId: program.id,
-          courseId: course.id,
-          termNumber: spec.mapCoursesToTerm,
-        },
-      });
-      if (!already) {
-        await prisma.programCourse.create({
-          data: {
-            schoolId,
-            programId: program.id,
-            courseId: course.id,
-            termNumber: spec.mapCoursesToTerm,
-            requirement: "REQUIRED",
-          },
-        });
-        mappingsCreated++;
-      }
-    }
-
     await audit("COLLEGE_SKELETON_SEEDED", "school", schoolId, {
-      department: spec.department.code,
-      program: spec.program.code,
+      department: opts.college.department.code,
+      program: opts.college.program.code,
       courses: coursesCreated,
       mappings: mappingsCreated,
     });
