@@ -300,3 +300,22 @@ verify run that was killed mid-flight** (its id, `st_imp…`, is an import-pipel
 the preview correctly recognised it as this roster's own earlier import). It is emulator test
 residue, not product behaviour: after deleting that one orphan document the suite is
 **117 passed / 0 failed**, twice in a row. No check was weakened, skipped or deleted.
+
+---
+
+## Superseded local-main commits
+
+Two commits on the local `main` line (`deploy/app-hosting`) are **superseded on this branch — do not
+re-apply them**: their effect is already here, written as equivalent changes rather than as the same
+patch, so cherry-picking either would duplicate a fix rather than restore one. Both are additionally in
+this branch's ancestry, so nothing is missing; this note exists so a later reader does not "restore"
+them by hand.
+
+- **`25547a0`** `fix(attendance): Section=All no longer sends sectionId=undefined; API normalizes legacy
+  param` (2026-09-20). Equivalent here: `queryId()` in `src/lib/utils.ts`, which reads the literal
+  `"undefined"` / `"null"` query values as "no filter", with `src/app/api/attendance/route.ts` reading
+  `sectionId` through it.
+- **`70d0176`** `fix(auth): /api/auth/me resolves the QR guardian synthetic session instead of 401`
+  (2026-09-20). Equivalent here: the QR synthetic-session branch at the top of
+  `src/app/api/auth/me/route.ts` (a signed session whose id is `qr-<studentId>` resolves to a read-only
+  identity built from the claims and the linked student, with no user-document lookup).
