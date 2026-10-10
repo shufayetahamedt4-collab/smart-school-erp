@@ -27,6 +27,14 @@ import { getFirestore } from "firebase-admin/firestore";
 import { readFileSync, existsSync } from "node:fs";
 import { requireEmulator } from "./lib/guard.mjs";
 
+import { installHostFetch } from "./lib/hostfetch.mjs";
+
+// Integration 5a — a `Host:` header on fetch is a fetch-spec forbidden name and
+// was silently dropped, so every host-scoped request below reached the hub.
+// Those requests now go through node:http, which delivers the header for real.
+// This changes request DELIVERY only: no assertion, expectation or fixture moved.
+installHostFetch();
+
 requireEmulator();
 
 const PORT = process.env.SMOKE_PORT || process.env.VERIFY_PORT || "3000";

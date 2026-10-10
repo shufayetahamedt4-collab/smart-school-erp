@@ -12,6 +12,14 @@
  */
 import { requireEmulator } from "./lib/guard.mjs";
 
+import { installHostFetch } from "./lib/hostfetch.mjs";
+
+// Integration 5a — a `Host:` header on fetch is a fetch-spec forbidden name and
+// was silently dropped, so every host-scoped request below reached the hub.
+// Those requests now go through node:http, which delivers the header for real.
+// This changes request DELIVERY only: no assertion, expectation or fixture moved.
+installHostFetch();
+
 requireEmulator();
 
 const PORT = Number(process.argv[2] || process.env.SMOKE_PORT || 3000);
