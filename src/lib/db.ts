@@ -166,6 +166,18 @@ const COLS: Record<string, string> = {
   // register any mapped course). Uniqueness of (studentId, courseId,
   // termNumber) among the non-REJECTED rows is enforced in-code by the route.
   courseRegistration: "courseRegistrations",
+  // ---- College support (Phase 6b) ----
+  // The college RESULT row: ONE attempt (1-based `attempt`) at ONE `course` in
+  // ONE `termNumber` of the student's programme (docs/COLLEGE-DECISIONS.md
+  // §23, D-6-17). This collection is deliberately SEPARATE from the school
+  // marks spine (`examMark` → `marks`): D-3-6 / D-4a-0 are LOCKED, so a college
+  // mark never touches `marks`, `subjects`, `exams` or the report card.
+  // An ordinary row with a random id (`create` falls back to `rand()`), exactly
+  // like `courseRegistration`: NO `idFor`/`idForCreate` entry, because the
+  // uniqueness rule — (studentId, courseId, termNumber, attempt) — is enforced
+  // in-code by the 6c route (which must REFUSE a duplicate with a reason and a
+  // counted bracket, not silently overwrite one via a derived id).
+  courseResult: "courseResults",
   // ---- College support (Phase 6-pre 2) ----
   // One row per (school, programme): the whole-programme ladder's LEASE, and the
   // record of its last run's outcome. The id is derived from the pair, so a
@@ -737,6 +749,19 @@ const RELS: Record<string, Record<string, Rel>> = {
     program: { to: "program", fk: "programId", kind: "one" },
     requestedBy: { to: "user", fk: "requestedById", kind: "one" },
     decidedBy: { to: "user", fk: "decidedById", kind: "one" },
+  },
+  // ---- College support (Phase 6b) ----
+  // A college result row. `branchId` and `programId` are STORED (not only
+  // reachable through the student/course) for the same reason a registration
+  // stores them: the store cannot join, and branch scoping (`scopeWhere`) plus
+  // `canAccessBranch` filter the row directly. `courseId`/`studentId` are the
+  // attempt's subjects; `termNumber` is the programme term it was sat in.
+  courseResult: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+    course: { to: "course", fk: "courseId", kind: "one" },
+    program: { to: "program", fk: "programId", kind: "one" },
   },
   twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
@@ -2257,6 +2282,13 @@ export const prisma = {
   programCourse: model("programCourse"),
   // ---- College support (Phase 4b) ----
   courseRegistration: model("courseRegistration"),
+  // ---- College support (Phase 6b) ----
+  // The college result row (D-6-17): the `courseResults` collection, addressed
+  // through the shim like every other model. Registered here in the same change
+  // as its COLS/RELS entries, so `prisma.courseResult` is the ONE way to reach
+  // it — and `scripts/verify-college-routes.mjs` now forbids that name outside a
+  // listed college segment.
+  courseResult: model("courseResult"),
   // ---- College support (Phase 6-pre 2) ----
   // The ladder's lease row, addressed through the shim like every other model
   // (read/update/delete). `$claim` is the one write that must be atomic.

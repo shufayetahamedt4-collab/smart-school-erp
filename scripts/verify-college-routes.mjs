@@ -133,8 +133,16 @@ const AFTER_GATE_TOKENS = [
   "resolveBranchId(",
 ];
 
-/** A college model access — forbidden outside a listed college segment. */
-const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course)\b/;
+/**
+ * A college model access — forbidden outside a listed college segment.
+ *
+ * Phase 6b added `courseResult` (the `courseResults` collection, D-6-17) to this
+ * list in the same change that registered the model, so the new college surface
+ * is covered by check 3 from the moment it exists — the alternative (leaving it
+ * out) would let a non-college route read college results unnoticed. `\b` keeps
+ * `course` from matching `courseResult`, so the name is listed in its own right.
+ */
+const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course|courseResult)\b/;
 
 let failures = 0;
 const ok = (msg) => console.log(`  ✅ ${msg}`);
