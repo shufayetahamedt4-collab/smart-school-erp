@@ -71,6 +71,10 @@ const {
   navLabelFor,
   normalizeInstitutionType,
 } = await import("../src/lib/institution.ts");
+// Phase 6d-fix: the v1 READ allow-list the college results API and both pages
+// apply. Check 8 asserts the sidebar cannot offer the results entry to a role the
+// API would refuse, so nav and API can never drift apart.
+const { COLLEGE_RESULTS_READ_ROLES } = await import("../src/lib/college-results-access.ts");
 
 const SNAPSHOT = JSON.parse(
   readFileSync(new URL("./nav-scope-snapshot.json", import.meta.url), "utf8")
@@ -81,12 +85,19 @@ const FROZEN_MOBILE_TABS = { TEACHER: 4 };
 
 /**
  * The college destinations (Phase 2e and 3d marked four; Phase 5c adds the
- * promotion page) that carry `requires: "COLLEGE"`, for exactly these three
- * roles. Check 1 asserts the marked set equals that product, so a stray marker
- * (or a missing one) fails loudly; checks 3, 4 and 6 use the same list as the
- * definition of "a college item".
+ * promotion page; Phase 6d adds the ONE results screen) that carry
+ * `requires: "COLLEGE"`, for exactly these three roles. Check 1 asserts the
+ * marked set equals that product, so a stray marker (or a missing one) fails
+ * loudly; checks 3, 4 and 6 use the same list as the definition of "a college
+ * item".
+ *
+ * Phase 6d appended `"/dashboard/college-results"` — the list grew, so the
+ * product grew with it (now 6 hrefs x 3 roles = 18 markers). Nothing here was
+ * relaxed: the school-output proof in checks 3 and 4 compares against the FROZEN
+ * pre-Phase-1 snapshot, which contains none of these hrefs, so a SCHOOL tenant's
+ * navigation is still asserted byte-identical for every role and mode.
  */
-const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses", "/dashboard/registration", "/dashboard/college-promotion"];
+const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses", "/dashboard/registration", "/dashboard/college-promotion", "/dashboard/college-results"];
 const COLLEGE_ROLES = ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR"];
 
 /** Can this tenant run a college at all? Absent/unknown values normalize to SCHOOL. */
@@ -415,6 +426,61 @@ console.log("\n7. the mobile helpers still derive from the registry (untouched)"
   }
   if (problem) bad("mobile helpers", problem);
   else ok("tabs + More still partition each role's own nav (TEACHER 4 + 10, everyone else 0 tabs)");
+}
+
+/* ------------------------------------------------------------------------ 8 */
+
+console.log("\n8. the results entry is offered ONLY to the roles v1 lets read it (6d-fix)");
+{
+  // The read allow-list is the API's own (src/lib/college-results-access.ts), so
+  // this check fails the moment the sidebar and the API disagree. SUPER_ADMIN is
+  // on the API list but has no /dashboard nav at all (its registry entry is the
+  // platform console), so it is expected to carry no college item.
+  const allowed = new Set(COLLEGE_RESULTS_READ_ROLES);
+  const DASHBOARD_ROLES = SNAPSHOT.roles;
+  const HREF = "/dashboard/college-results";
+  const carriers = DASHBOARD_ROLES.filter((role) => (NAVS[role] || []).some((i) => i.href === HREF));
+  const deniedRoles = ["TEACHER", "GUARDIAN", "STUDENT"];
+  let problem = null;
+
+  // Every carrier must be a role the API lets read …
+  const offenders = carriers.filter((role) => !allowed.has(role));
+  if (offenders.length) problem = `the sidebar offers ${HREF} to ${offenders.join(", ")}, which the v1 read rule denies`;
+  // … and no denied role may carry it, in any mode.
+  for (const role of deniedRoles) {
+    if (problem) break;
+    if (carriers.includes(role)) problem = `${role} carries ${HREF}`;
+    else {
+      for (const [type, mode] of [
+        ["COLLEGE", "COLLEGE"],
+        ["BOTH", "COLLEGE"],
+      ]) {
+        if (navForRole(role, type, mode).some((i) => i.href === HREF)) {
+          problem = `${role} ${type}/${mode} lists ${HREF}`;
+          break;
+        }
+      }
+    }
+  }
+  // The three college-facing roles must keep it — the screen is theirs.
+  if (!problem) {
+    for (const role of COLLEGE_ROLES) {
+      if (!carriers.includes(role)) {
+        problem = `${role} lost ${HREF}`;
+        break;
+      }
+    }
+  }
+  // A SUPER_ADMIN has no dashboard nav, so it must NOT carry it (never a gap:
+  // the platform console is its whole registry).
+  if (!problem && carriers.includes("SUPER_ADMIN")) problem = "SUPER_ADMIN carries a dashboard college item";
+
+  if (problem) bad("results entry", problem);
+  else
+    ok(
+      `${HREF} is carried by exactly ${carriers.join(", ")} — all on the v1 read allow-list ` +
+        `(${COLLEGE_RESULTS_READ_ROLES.join(", ")}); no TEACHER, GUARDIAN or STUDENT lists it in any mode`
+    );
 }
 
 /* ---------------------------------------------------------------------- end */
