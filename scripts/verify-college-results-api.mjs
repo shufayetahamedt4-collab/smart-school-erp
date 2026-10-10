@@ -23,6 +23,10 @@
  *   • a no-GPA scheme returns NO GPA at all, never a printed 0.00 (D-6-16);
  *   • the permission split (Q5, `attendanceMarks`): a REGISTRAR may read and may
  *     not write;
+ *   • the v1 READ allow-list (6d-fix, §23.6): a TEACHER, a GUARDIAN and a STUDENT
+ *     in the COLLEGE tenant are refused (403) on the list, on one row, and on a
+ *     transcript — their OWN and ANOTHER student's — while the admin-level roles
+ *     and the REGISTRAR still read; each probe signs in through its own portal;
  *   • and a DOCUMENT-COUNT BRACKET around every refusal, so "it wrote nothing" is
  *     COUNTED rather than assumed (§17 Q2's pattern).
  *
@@ -37,6 +41,8 @@
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { readFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { requireEmulator } from "./lib/guard.mjs";
 
 import { installHostFetch } from "./lib/hostfetch.mjs";
@@ -510,6 +516,127 @@ console.log("\n### the 403/400/404 matrix");
   await bracket("the permission refusal", before);
 }
 
+/* ------------------------------------- the v1 READ allow-list (Phase 6d-fix) */
+
+console.log("\n### the v1 read allow-list: TEACHER, GUARDIAN and STUDENT are refused, admin roles and REGISTRAR read (6d-fix, §23.6)");
+{
+  // The owner ruling narrows READS to the admin-level roles and the REGISTRAR.
+  // The probe uses REAL accounts in the COLLEGE tenant (C1), so the COLLEGE gate
+  // passes and only the read rule can be what refuses them — a SCHOOL fixture user
+  // would prove nothing, since `requireCollege` would 403 it anyway.
+  //
+  // The three users are written RAW here rather than added to
+  // scripts/isolation-fixture.mjs on purpose: the fixture is shared with the tenant
+  // and branch harrness, whose totals must stay EXACTLY as they are (92 and 60).
+  // Each run uses fresh, timestamped emails stored under the app's deterministic
+  // user id (`u_<sha1(email)>`), so a cold app reads the doc straight by id.
+  const PUB = `${P}col-res-a`; // a fixture row the admin genuinely holds
+  const OWN = `${P}col-stu-a`;
+  const OTHER = `${P}col-stu-b`;
+  const PW = "Probe@12345";
+  const sha1 = (s) => createHash("sha1").update(s).digest("hex");
+  const runId = `${Date.now().toString(36)}`;
+  const probeUsers = ["TEACHER", "GUARDIAN", "STUDENT"].map((role) => {
+    const email = `zziso-results-${role.toLowerCase()}+${runId}@test.local`;
+    return { role, email, id: `u_${sha1(email)}` };
+  });
+  for (const u of probeUsers) {
+    await db.collection("users").doc(u.id).set({
+      id: u.id, email: u.email, name: `ZZ Iso Results ${u.role}`, role: u.role,
+      schoolId: C1, active: true, passwordHash: bcrypt.hashSync(PW, 4), createdAt: new Date(),
+    });
+  }
+  await db.collection("students").doc(OWN).set({ userId: probeUsers[2].id, guardianUserId: probeUsers[1].id }, { merge: true });
+
+  // The three roles sign in through their OWN portals, whose hosts are not the
+  // staff console (`school.localhost` refuses a teacher by design), so the probe
+  // uses the host-agnostic loopback host, exactly as those portals do.
+  const APP_HOST = `127.0.0.1:${PORT}`;
+  const reqOn = async (host, path, opts = {}) => {
+    const res = await fetch(`${BASE}${path}`, {
+      ...opts,
+      headers: { Host: host, "Content-Type": "application/json", ...(opts.cookie ? { cookie: opts.cookie } : {}) },
+      signal: AbortSignal.timeout(60000),
+    });
+    const text = await res.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch { /* html */ }
+    return { status: res.status, body, data: body?.data ?? null, error: body?.error ?? null };
+  };
+  const sessions = {};
+  for (const u of probeUsers) {
+    const res = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { Host: APP_HOST, "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier: u.email, password: PW }),
+      signal: AbortSignal.timeout(60000),
+    });
+    sessions[u.role] = (res.headers.get("set-cookie") || "").split(";")[0];
+    if (res.status !== 200) check(`the probe ${u.role} can sign in (its own portal host)`, false, `HTTP ${res.status}`);
+  }
+
+  const before = await resultCount();
+  for (const u of probeUsers) {
+    const cookie = sessions[u.role];
+    const list = await reqOn(APP_HOST, "/api/course-results", { cookie });
+    check(`a ${u.role} CANNOT list results (403, no data)`, list.status === 403 && list.data === null, `HTTP ${list.status} data=${JSON.stringify(list.data)}`);
+    const one = await reqOn(APP_HOST, `/api/course-results/${PUB}`, { cookie });
+    check(`a ${u.role} CANNOT read one result (403)`, one.status === 403, `HTTP ${one.status}`);
+    const own = await reqOn(APP_HOST, `/api/course-results/students/${OWN}/transcript`, { cookie });
+    check(`a ${u.role} CANNOT read a transcript — even a student's own (403)`, own.status === 403, `HTTP ${own.status}`);
+    const other = await reqOn(APP_HOST, `/api/course-results/students/${OTHER}/transcript`, { cookie });
+    check(`a ${u.role} CANNOT read ANOTHER student's transcript (403)`, other.status === 403, `HTTP ${other.status} body=${JSON.stringify(other.data)?.slice(0, 60)}`);
+    const write = await reqOn(APP_HOST, "/api/course-results", {
+      cookie, method: "POST",
+      body: JSON.stringify({ studentId: OWN, courseId: `${P}col-course-a`, obtained: 10, fullMarks: 100 }),
+    });
+    // 403, NOT 409: the refusal is the permission, not the approval state of the row.
+    check(`a ${u.role}'s write stays refused by permission (403, not 409)`, write.status === 403, `HTTP ${write.status} ${JSON.stringify(write.error)}`);
+  }
+  await bracket("every denied-role read and write", before);
+
+  // The roles the ruling KEEPS must still read — on the staff console they use.
+  const adminOne = await req(`/api/course-results/${PUB}`, { cookie: collegeAdmin });
+  check("an ADMIN still reads one result (200)", adminOne.status === 200, `HTTP ${adminOne.status}`);
+  const adminT = await req(`/api/course-results/students/${OTHER}/transcript`, { cookie: collegeAdmin });
+  check("an ADMIN still reads a transcript (200)", adminT.status === 200, `HTTP ${adminT.status}`);
+  const regOne = await req(`/api/course-results/${PUB}`, { cookie: collegeRegistrar });
+  check("a REGISTRAR still reads one result (200)", regOne.status === 200, `HTTP ${regOne.status}`);
+  const regT = await req(`/api/course-results/students/${OWN}/transcript`, { cookie: collegeRegistrar });
+  check("a REGISTRAR still reads a transcript (200)", regT.status === 200, `HTTP ${regT.status}`);
+  const branchList = await req("/api/course-results", { cookie: collegeBranchAdmin });
+  check("a BRANCH admin still reads the list (200)", branchList.status === 200, `HTTP ${branchList.status}`);
+
+  // Remove the probe accounts (there is no route that creates a TEACHER/GUARDIAN/
+  // STUDENT login, so they are written with the ADMIN SDK).
+  for (const u of probeUsers) await db.collection("users").doc(u.id).delete().catch(() => null);
+
+  // CACHE-COHERENT TEARDOWN. A raw SDK delete is invisible to the app's read
+  // cache, so a stale user row would be served to whatever suite runs next — and
+  // an orphaned-user count is exactly what `verify-onboarding-monitor.mjs` asserts
+  // (observed: it failed 3 checks when this script ran before it in the same app
+  // process, and passed after a restart). An APP-MEDIATED write on the same tenant
+  // drops the reference memo AND this school's pulls (plus the un-attributable
+  // cross-school ones), so the next read sees the real world. A throwaway COURSE is
+  // the cheapest such write: it is created and removed through real routes, and a
+  // fresh course can always be deleted (no mapping, no registration).
+  const throwaway = await post(
+    "/api/courses",
+    { code: `ZZRES-${runId}`, title: "ZZ Results probe (throwaway)", departmentId: `${P}col-dept-a` },
+    collegeAdmin
+  );
+  check("the cache-coherence write created a throwaway course (201)", throwaway.status === 201, `HTTP ${throwaway.status} ${JSON.stringify(throwaway.error)}`);
+  const throwawayId = throwaway.data?.id || "";
+  const throwawayDelete = throwawayId
+    ? await req(`/api/courses/${throwawayId}`, { cookie: collegeAdmin, method: "DELETE" })
+    : { status: 0 };
+  check(
+    "…and removed it again through the app, leaving the tenant exactly as it was (200)",
+    throwawayDelete.status === 200,
+    `HTTP ${throwawayDelete.status}`
+  );
+}
+
 /* -------------------------------------------- DELETE an attempt (app-mediated) */
 
 console.log("\n### DELETE removes one attempt and the grade re-derives, with nothing re-entered");
@@ -587,7 +714,8 @@ console.log(
   failures
     ? `\n❌ ${failures} college-results-API failure(s) of ${checks} check(s)`
     : `\n✅ COLLEGE RESULTS API OK — ${checks} checks: the gate, the approval rule, the visible duplicate refusal, ` +
-        `maxRetakes, all four policies, derived-on-read re-grading, no-GPA, the permission split, and a document-count ` +
-        `bracket around every refusal`
+        `maxRetakes, all four policies, derived-on-read re-grading, no-GPA, the permission split, the v1 read ` +
+        `allow-list (TEACHER/GUARDIAN/STUDENT refused, admin + REGISTRAR read), and a document-count bracket ` +
+        `around every refusal`
 );
 process.exit(failures ? 1 : 0);

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, requireCollege } from "@/lib/auth";
-import { can, canAccessBranch } from "@/lib/permissions";
-import { buildStudentTranscript } from "@/lib/college-results-server";
+import { canAccessBranch } from "@/lib/permissions";
+import { buildStudentTranscript, requireCollegeResultsRead } from "@/lib/college-results-server";
 
 /**
  * College support (Phase 6c) — ONE student's derived transcript, READ.
@@ -28,7 +28,9 @@ import { buildStudentTranscript } from "@/lib/college-results-server";
  *   1. session                        → 401
  *   2. target tenant schoolId         → 400   (SUPER_ADMIN: resolved ?schoolId=; else session.schoolId)
  *   3. requireCollege(schoolId)       → 403   FIRST authorization check, on the TARGET tenant
- *   4. can(role, "attendanceMarks", …) → 403  (Q5: the grading-scheme module, reused)
+ *   4. READ access, the ONE shared rule (6d-fix) → 403 for a TEACHER/GUARDIAN/
+ *      STUDENT; only the admin-level roles and the REGISTRAR read (Q5's module is
+ *      narrowed by `college-results-access`)
  *   5. id present                     → 400
  *   6. load the student, row.schoolId === schoolId → else 404 (a foreign id is
  *      NOT FOUND — never a 403 oracle)
@@ -55,10 +57,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // 3. COLLEGE gate FIRST
   const gate = await requireCollege({ schoolId });
   if (gate) return gate;
-  // 4. permission
-  if (!can(session.role, "attendanceMarks", "view")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // 4. READ access — the ONE shared rule (6d-fix, §23.6): only the admin-level
+  //    roles and the REGISTRAR may read a transcript. A GUARDIAN and a TEACHER
+  //    hold `attendanceMarks` view but are refused here, and a STUDENT is refused
+  //    before its own-child scoping could ever be reached.
+  const denied = requireCollegeResultsRead(session);
+  if (denied) return denied;
   // 5. id
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 

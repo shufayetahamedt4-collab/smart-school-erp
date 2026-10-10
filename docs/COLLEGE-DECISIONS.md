@@ -1558,7 +1558,23 @@ The school side already ships a **per-tenant, admin-editable, mode-scoped** grad
   `marksheet` and `/api/grading-scheme`'s existing contract are untouched; the school's report card
   keeps printing exactly what `verify-grading.mjs` asserts today (`Pass mark 40%`, `GPA out of 5.00`).
 - **No new `ModuleKey`** in v1 (reuse `attendanceMarks`, which already gates the grading scheme — Q5).
-- **No parent/guardian transcript view**, no transcript on the parent portal.
+- **READ access is narrower than the module: an explicit allow-list (6d-fix, owner ruling
+  2026-10-10).** Every college results READ — `GET /api/course-results`, `GET
+  /api/course-results/[id]`, the transcript read and the transcript print page — is
+  allowed **only** to the admin-level roles and the REGISTRAR
+  (`SUPER_ADMIN`, `SCHOOL_ADMIN`, `BRANCH_ADMIN`, `REGISTRAR`). `TEACHER`, `GUARDIAN` and
+  `STUDENT` are **denied** (API 403; the print page renders no transcript; the nav entry
+  is not offered to them — it is marked only for the three college roles), and the rule is
+  stated **once** in `src/lib/college-results-access.ts`, consumed by the routes
+  (`requireCollegeResultsRead`) and by both pages (`canReadCollegeResults`). The reason: the
+  `attendanceMarks` module alone would admit a **guardian** (`view`) and a **teacher**
+  (`entry` implies `view`), and the line below says v1 has no parent/guardian transcript
+  view. **Writes are unchanged** (`attendanceMarks` full + `writeGuard`).
+- **No parent/guardian transcript view**, no transcript on the parent portal. **Post-v1 and
+  owner to decide:** a **per-child guardian view** (a parent reading only their own child's
+  transcript) and a **per-course teacher view** (a teacher reading only the courses they
+  teach), both deliberately out of v1 — neither has an ownership/course-enrolment link to
+  scope by yet.
 - **No credit transfer, no external board import, no grade-appeal workflow, no thesis/graduation
   statement, and no second programme per student** (`students.programId` is one programme today).
 - **No “freeze at term publish”, and the reason is recorded.** Sealing each term's grades when the
@@ -1587,7 +1603,7 @@ numbers, then prove every later difference is an addition).
 |---|---|---|
 | **6a** | **Pure logic first**: `src/lib/college-results.ts` (attempt resolution for the four policies, credit-weighted term GPA + cumulative CGPA, no-GPA handling, missing-credit fallback) and the additive `src/lib/grading.ts` changes (`showGpa`, presets, validation) | New **offline** verifier `scripts/verify-college-results.mjs`, in the shape of `verify-college-promotion-logic.mjs`/`verify-college-terms.mjs`: every preset validates, every policy resolves, weighting with/without credits, empty and junk inputs — **no DB, no server, no network** |
 | **6b** | **Data layer**: `courseResults` in `COLS`/`RELS`/prisma accessors **and** the new segment added to `COLLEGE_API_SEGMENTS` in the same change (§8 D-A) | `verify-college-routes.mjs` passes with the new segment (a listed segment with no directory fails the guard, by design); `verify-college-terms.mjs`-style key/shape proofs |
-| **6c** | **API**: `GET`/`POST /api/course-results` (+ retake recording) and the transcript read `GET /api/students/[id]/transcript`, each with `requireCollege({schoolId})` **first**, target-tenant scoping, 404 on a foreign row, 400 on a foreign id in a body, audit rows, `writeGuard` on mutations | New `scripts/verify-college-results-api.mjs` (HTTP): the 403/400/404 matrix, one bad attempt refused with a reason, `maxRetakes` enforced, a re-graded scheme changing the served CGPA with no re-entry, and a document-count bracket around every refusal so “writes nothing” is counted, not assumed (§17 Q2's pattern) |
+| **6c** | **API**: `GET`/`POST /api/course-results` (+ retake recording) and the transcript read `GET /api/course-results/students/[id]/transcript` (corrected in 6d — this row originally said `/api/students/[id]/transcript`, but `students` is a **frozen non-college segment**: the route guard fails any file under it that calls `requireCollege` or touches a college model, and a college read belongs in a college segment. The read keeps the doc's own tail and takes the new segment's prefix; no guard check was relaxed), each with `requireCollege({schoolId})` **first**, target-tenant scoping, 404 on a foreign row, 400 on a foreign id in a body, audit rows, `writeGuard` on mutations | New `scripts/verify-college-results-api.mjs` (HTTP): the 403/400/404 matrix, one bad attempt refused with a reason, `maxRetakes` enforced, a re-graded scheme changing the served CGPA with no re-entry, and a document-count bracket around every refusal so “writes nothing” is counted, not assumed (§17 Q2's pattern) |
 | **6d** | **Page(s) + nav**: the college results entry screen, the transcript print route, and **one** nav item behind `requires:"COLLEGE"`; the grading editor reused mode-scoped (D-6-1) | `verify-nav-scope.mjs` against the recorded `scripts/nav-scope-snapshot.json` (non-college nav **deep-equal unchanged**), the page's logic proved offline where it can be (`verify-college-promotion-page.mjs`'s pattern), and screenshots |
 | **6e** | **Isolation + regression proof with recorded baselines**: fixture and tenant/branch harness additions for the new rows (`isolation-fixture.mjs` gains `courseResults` in its `owned` prefix-sweep) | `verify-tenant-isolation` / `verify-branch-isolation` **baseline recorded first**, then re-run: every new assertion an **addition**, no existing assertion changed (the §11 D-3e pattern); the COLLEGE gate asserted explicitly (a SCHOOL tenant gets 403 with zero data); and the untouched-by-Phase-6 harnesses (`verify-grading`, `verify-mode-foundation`, `verify-course-registrations`, `qa-phase23`, `qa-certificates`) re-run to **identical counts**, plus `next build` with its page count recorded |
 | **6f** | **This section's “finished” record** | The counts table in the style of §22 (verifier, before, after, why), `tsc` 0 errors, and an explicit statement of anything that could not run |

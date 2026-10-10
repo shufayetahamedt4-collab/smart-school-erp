@@ -6,6 +6,7 @@ import { writeGuard } from "@/lib/subscription";
 import {
   finiteNumber,
   loadCollegeScheme,
+  requireCollegeResultsRead,
   retakeOf,
   schemeView,
   serveResultRow,
@@ -67,10 +68,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // 3. COLLEGE gate FIRST
   const gate = await requireCollege({ schoolId });
   if (gate) return gate;
-  // 4. permission
-  if (!can(session.role, "attendanceMarks", "view")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // 4. READ access — the ONE shared rule (6d-fix, §23.6): admin roles + REGISTRAR.
+  const denied = requireCollegeResultsRead(session);
+  if (denied) return denied;
   // 5. id
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 

@@ -1,5 +1,7 @@
+import { NextResponse } from "next/server";
 import { prisma } from "./db";
 import { resolveSchemeFor } from "./grading-store";
+import { COLLEGE_RESULTS_READ_REFUSAL, canReadCollegeResults } from "./college-results-access";
 import { bandForPercent, round2, showsGpa, type GradeBand, type GradingScheme } from "./grading";
 import {
   creditWeightedGpa,
@@ -45,6 +47,32 @@ import type { Mode } from "./institution";
 
 /** Grading always uses the COLLEGE-scoped scheme (D-6-1) — never the UI mode. */
 export const COLLEGE_GRADE_MODE: Mode = "COLLEGE";
+
+/* ------------------------------------------------------ read access (6d-fix) */
+
+/**
+ * The ONE read gate every college results READ handler applies (6d-fix).
+ *
+ * v1 lets only the admin-level roles and the REGISTRAR read results or a
+ * transcript (owner ruling, §23.6); TEACHER, GUARDIAN and STUDENT are denied.
+ * The RULE itself lives in `./college-results-access` — this is that rule wrapped
+ * as the 403 every route returns, so the four read handlers cannot drift apart
+ * and no handler re-states the role list.
+ *
+ * Returns `null` when the caller may read (the same shape as `requireCollege()`
+ * and `writeGuard()`), else the 403 to return:
+ *
+ *   const denied = requireCollegeResultsRead(session);
+ *   if (denied) return denied;
+ *
+ * It is deliberately a READ gate only: writes keep `can(role,
+ * "attendanceMarks", "full")`, and the COLLEGE tenant gate stays the FIRST check
+ * in every handler.
+ */
+export function requireCollegeResultsRead(session: { role?: string | null } | null | undefined): NextResponse | null {
+  if (canReadCollegeResults(session?.role)) return null;
+  return NextResponse.json({ error: COLLEGE_RESULTS_READ_REFUSAL }, { status: 403 });
+}
 
 /* ------------------------------------------------------------------- helpers */
 

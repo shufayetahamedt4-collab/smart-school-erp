@@ -9,6 +9,7 @@ import {
   finiteNumber,
   loadCollegeScheme,
   readString,
+  requireCollegeResultsRead,
   retakeOf,
   schemeView,
   serveResultRow,
@@ -103,10 +104,11 @@ export async function GET(req: NextRequest) {
   // 3. COLLEGE gate FIRST
   const gate = await requireCollege({ schoolId });
   if (gate) return gate;
-  // 4. permission (Q5: the grading-scheme module, reused)
-  if (!can(session.role, "attendanceMarks", "view")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // 4. READ access — the ONE shared rule (6d-fix, §23.6): only the admin-level
+  //    roles and the REGISTRAR may read results. TEACHER, GUARDIAN and STUDENT are
+  //    denied here, before any row is read; writes keep `attendanceMarks` full.
+  const denied = requireCollegeResultsRead(session);
+  if (denied) return denied;
 
   // Branch scoping: a result stores the branch it inherited from the programme, so
   // a branch admin sees only its own branch's rows.
