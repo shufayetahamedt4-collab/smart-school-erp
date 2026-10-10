@@ -481,6 +481,47 @@ console.log("\n### college course results — branch admin confinement");
       resBRow?.obtained === 80 && resBRow?.fullMarks === 100 && resBRow?.branchId === `${P}col-br-b` && resBRow?.attempt === 1,
       `${resBRow?.obtained}/${resBRow?.fullMarks} / ${resBRow?.branchId} / attempt=${resBRow?.attempt}`
     );
+
+    // 6. The TRANSCRIPT read obeys the SAME branch confinement (6e): the branch
+    //    admin reads its own branch's student and is refused another branch's with
+    //    a 403 that never names the student. The COLLEGE-scope admin is the
+    //    positive control beside it.
+    const colStuA = `${P}col-stu-a`;
+    const ownTranscript = await req(HOSTS.school, `/api/course-results/students/${colStuA}/transcript`, { cookie: collegeBranchAdmin });
+    check(
+      "branch admin CAN read its OWN branch student's transcript (200)",
+      ownTranscript.status === 200 && ownTranscript.data?.student?.name === "ZZ Iso College Student A",
+      `HTTP ${ownTranscript.status} name=${JSON.stringify(ownTranscript.data?.student?.name)}`
+    );
+    const foreignTranscript = await req(HOSTS.school, `/api/course-results/students/${colStuB}/transcript`, { cookie: collegeBranchAdmin });
+    check(
+      "branch admin CANNOT read ANOTHER branch student's transcript (403, no name)",
+      foreignTranscript.status === 403 && !String(foreignTranscript.text || "").includes("ZZ Iso College Student B"),
+      `HTTP ${foreignTranscript.status}`
+    );
+    const adminTranscript = await req(HOSTS.school, `/api/course-results/students/${colStuB}/transcript`, { cookie: collegeAdmin });
+    check(
+      "a SCHOOL-scoped college admin CAN read the other branch's transcript (200)",
+      adminTranscript.status === 200 && adminTranscript.data?.student?.name === "ZZ Iso College Student B",
+      `HTTP ${adminTranscript.status} name=${JSON.stringify(adminTranscript.data?.student?.name)}`
+    );
+
+    // 7. The transcript PRINT PAGE confines the branch too (6e): the branch admin's
+    //    own branch renders the page, another branch's student renders the
+    //    NOT-FOUND refusal — never the student's name.
+    const ownPrint = await req(HOSTS.school, `/print/college-transcript/${colStuA}`, { cookie: collegeBranchAdmin });
+    check(
+      "the transcript print page renders the branch admin's OWN branch student",
+      ownPrint.status === 200 && String(ownPrint.text || "").includes("ZZ Iso College Student A"),
+      `HTTP ${ownPrint.status}`
+    );
+    const foreignPrint = await req(HOSTS.school, `/print/college-transcript/${colStuB}`, { cookie: collegeBranchAdmin });
+    check(
+      "the transcript print page is NOT FOUND for ANOTHER branch's student (no name leaked)",
+      foreignPrint.status === 200 && /Transcript not found/.test(String(foreignPrint.text || "")) &&
+        !String(foreignPrint.text || "").includes("ZZ Iso College Student B"),
+      `HTTP ${foreignPrint.status} notFound=${/Transcript not found/.test(String(foreignPrint.text || ""))}`
+    );
   }
 }
 

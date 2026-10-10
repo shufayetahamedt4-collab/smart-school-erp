@@ -128,6 +128,12 @@ async function delJSON(cookie, route) {
   try { parsed = JSON.parse(text); } catch { parsed = { __raw: text.slice(0, 120) }; }
   return { status: res.status, body: parsed };
 }
+/** HTML-page helper (6e): a server-rendered page, returned as text for a leak sweep. */
+async function getHTML(cookie, route) {
+  const res = await fetch(`${BASE}${route}`, { headers: { cookie }, signal: AbortSignal.timeout(60000) });
+  const text = await res.text();
+  return { status: res.status, text };
+}
 
 /**
  * Names + ids of every tenant EXCEPT `own`, including departments and programs.
@@ -683,6 +689,59 @@ console.log("\n### course results — a COLLEGE tenant's rows are invisible and 
   check(
     cFStu.status === 400 && JSON.stringify(cFStu.body) === JSON.stringify(cGStu.body),
     `C1 POST with a foreign (BOTH) studentId is 400, byte-identical to a ghost (foreign=${JSON.stringify(cFStu.body)} ghost=${JSON.stringify(cGStu.body)})`
+  );
+}
+
+/* ---------- course results PAGES: no cross-tenant leak (6e) ---------- */
+// The API reads are swept above; the SCREEN and the transcript PRINT PAGE are the
+// two other surfaces a foreign tenant can reach. The page gate is the SAME rule
+// the API uses (6d-fix), so a foreign student renders the NOT-FOUND refusal —
+// never a transcript — and neither page names the other tenant's student.
+console.log("\n### course results — the page never leaks another tenant's student (6e)");
+{
+  const C1 = `${P}college`;
+  const colStuA = `${P}col-stu-a`;
+  const bothStu = `${P}both-stu`;
+  const NAME_A = "ZZ Iso College Student A";
+  const NAME_BOTH = "ZZ Iso Both Student";
+
+  const collegeCookie = await login("zz-iso-college-admin@test.local", CRED.collegeAdmin);
+  const bothCookie = await login("zz-iso-both-admin@test.local", CRED.bothAdmin);
+
+  // (1) Positive control: C1's OWN transcript print page names its own student.
+  const ownPrint = await getHTML(collegeCookie, `/print/college-transcript/${colStuA}`);
+  check(
+    ownPrint.status === 200 && ownPrint.text.includes(NAME_A),
+    `C1's own transcript print page renders its own student (status=${ownPrint.status}, named=${ownPrint.text.includes(NAME_A)})`
+  );
+
+  // (2) A FOREIGN tenant asking for that same student gets the NOT-FOUND refusal,
+  //     and the body never names the student.
+  const foreignPrint = await getHTML(bothCookie, `/print/college-transcript/${colStuA}`);
+  check(
+    foreignPrint.status === 200 && /Transcript not found/.test(foreignPrint.text) && !foreignPrint.text.includes(NAME_A),
+    `the BOTH tenant's print page for a C1 student is NOT FOUND and never names it (status=${foreignPrint.status}, notFound=${/Transcript not found/.test(foreignPrint.text)}, leaked=${foreignPrint.text.includes(NAME_A)})`
+  );
+
+  // (3) ...and the reverse holds too.
+  const reversePrint = await getHTML(collegeCookie, `/print/college-transcript/${bothStu}`);
+  check(
+    reversePrint.status === 200 && /Transcript not found/.test(reversePrint.text) && !reversePrint.text.includes(NAME_BOTH),
+    `C1's print page for a BOTH student is NOT FOUND and never names it (status=${reversePrint.status}, notFound=${/Transcript not found/.test(reversePrint.text)}, leaked=${reversePrint.text.includes(NAME_BOTH)})`
+  );
+
+  // (4) The results SCREEN carries no other tenant's student (name or id).
+  const ownScreen = await getHTML(collegeCookie, "/dashboard/college-results");
+  check(
+    ownScreen.status === 200 && !ownScreen.text.includes(NAME_BOTH) && !ownScreen.text.includes(bothStu),
+    `C1's results screen names no other tenant's student (status=${ownScreen.status}, leakedName=${ownScreen.text.includes(NAME_BOTH)}, leakedId=${ownScreen.text.includes(bothStu)})`
+  );
+
+  // (5) ...and the second college-capable tenant's screen names none of C1's.
+  const bothScreen = await getHTML(bothCookie, "/dashboard/college-results");
+  check(
+    bothScreen.status === 200 && !bothScreen.text.includes(NAME_A) && !bothScreen.text.includes(colStuA),
+    `the BOTH tenant's results screen names no C1 student (status=${bothScreen.status}, leakedName=${bothScreen.text.includes(NAME_A)}, leakedId=${bothScreen.text.includes(colStuA)})`
   );
 }
 
