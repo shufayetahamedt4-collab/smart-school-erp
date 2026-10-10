@@ -5,7 +5,7 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** GitHub — `github.com/shufayetahamedt4-collab/smart-school-erp` (any clone works — see "Working from a different PC/device" below)
-**Last updated:** 2026-09-24 (late evening) — Firestore region migration CUTOVER COMPLETE & verified; production runs on `smart-school-db` (asia-southeast1)
+**Last updated:** 2026-10-11 — **college Phase 6 is FINISHED** (results, GPA/CGPA, transcript) on `integration/main-into-college`, where the school and college lines are now merged; production still runs on `smart-school-db` (asia-southeast1). The newest session record is the **2026-10-11** block at the bottom of this file.
 
 ---
 
@@ -273,6 +273,69 @@ resolution.
 canonical variable is still set. Both names select the same database otherwise, and the guard in
 `scripts/lib/guard.mjs` refuses either name for emulator runs.
 
+**Database-id guard (integration 2, `b96ca63`):** `src/lib/database-id.ts` makes
+`FIRESTORE_DATABASE_ID` the **canonical** name and `FIRESTORE_DB_ID` the **alias**; unset means the
+project's `(default)` database, so removing the variable IS the rollback. When **both** are set and
+**differ**, the resolver **throws** — the app fails loudly, naming both variables, instead of silently
+opening a database the operator did not ask for. For emulator runs `scripts/lib/guard.mjs` refuses
+either name, because either one selects a named Cloud database.
+
 **Archive-retirement date:** the same record says **2026-10-08 (≈2 weeks after cutover): delete the
 africa-south1 `(default)` database** after one last parity spot-check. That date has now passed; until
 that deletion happens, `(default)` remains the free rollback insurance.
+
+---
+
+## 🔁 Session — 2026-10-11 (college Phase 6 finished; the two lines merged)
+
+**What is done since 2026-09-24** (the school/SaaS log above ends there; the college line continued on
+its own branch until the merge below):
+
+- **Firestore migration cutover record** — already recorded above (session 2026-09-24 #2): the new
+  database `smart-school-db` (asia-southeast1), the parity proof and the rollback procedure.
+- **`origin/main` integrated into the college line** — branch `integration/main-into-college`
+  (`cd0e2d5`, `docs/INTEGRATION-LOG.md`): the onboarding wizard, plan-limit enforcement, CSV
+  import/export, certificate templates, the timetable builder and the region cutover now sit on the
+  same branch as the college work. From here the school and college lines are **one line**.
+- **The onboarding wizard and the new-tenant seed are institution-type aware** (`c4fb047`, `84df90e`)
+  — SCHOOL / COLLEGE / BOTH.
+- **College Phase 6 FINISHED (6a–6f)** — the grading scheme's `showGpa` + institution-neutral presets,
+  the retake policy, credit-weighted term GPA and CGPA, the college result rows (`courseResults`), the
+  results API behind the college gate, the results screen + transcript print page, and the isolation
+  proof. Keys: 6a `cb05811`, 6b `0b1a3bb`, 6c `f12d227` (+ `e20f4f2` reads are admin/registrar only),
+  6d `58d9c85`, 6e `fc8ff62`, 6f the docs commit. The full record and counts are in
+  `docs/COLLEGE-STATUS.md` and `docs/COLLEGE-DECISIONS.md` §23.7.1. **Real Phase 7 (college fee basis)
+  and Phase 8a/8b/8c are NOT started.**
+- **Harness Host fix** — `d497f96` makes the host-scoped checks really run (they had been silently
+  skipping).
+
+**Known pre-existing reds (unchanged by Phase 6, documented not fixed):**
+
+- `verify-read-cache` — **1 fail**: a latency assertion that does not hold in dev mode.
+- `verify-routine-config` — **3 fails**: the seed writes only **section-scoped** routines while the
+  route's class-wide read returns the `sectionId == null` rows.
+
+**Open items (state at 2026-10-11):**
+
+1. **The harness Host fix is committed** (`d497f96`) — recorded here because the earlier reds were
+   partly caused by checks that silently skipped.
+2. **Routines missing-`sectionId` read hole** — the `verify-routine-config` cause above: the route's
+   class-wide read returns only `sectionId == null` rows, which the seed never writes.
+3. **Super-admin `POST /api/schools` still writes `feeSetting` for a college tenant** — a school-shaped
+   default on a college.
+4. **The wizard's success screen still says "school"** for a college / BOTH tenant.
+5. **The college sidebar still shows school items** — the mode-aware nav is not complete for a COLLEGE
+   tenant.
+6. **`docs/PHASE1-DECISION-WORKSHEET.md` and `docs/SMOKE-FAILURES.md` are untracked and outdated** —
+   both are still untracked in this tree (and are deliberately not staged); do not cite them as
+   current.
+7. **`firestore.indexes.json` `schoold` typo** — fixed in the file, but the index is queried by name
+   and both live databases still carry the misdeclared index; the code-side rename is its own session.
+8. **Firestore backup not yet confirmed** — the old `(default)` database stays the rollback insurance.
+9. **Local `main` has 2 superseded commits** (`25547a0`, `70d0176`) — equivalent changes already exist
+   on this branch; do **not** re-apply them (`docs/INTEGRATION-LOG.md`).
+10. **Archive date 2026-10-08 has passed** — do **not** delete the old `(default)` database yet; it is
+    the rollback target.
+11. **Go-live: role probe on a production build** — not yet done.
+12. **Go-live: production line decision** — `origin/main` vs `deploy/app-hosting` is still undecided
+    (**NOT PROVEN**).

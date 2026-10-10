@@ -1,15 +1,17 @@
 # COLLEGE-STATUS.md — the college work, whole story in one place
 
-**Date written:** 2026-10-09.
-**Branch:** `college-support`.
-**HEAD when written:** `dc0e970` (`phase 6-pre 6: restrict abandon to admins, harden test-only
-parameters, doc notes`).
+**Date written:** 2026-10-09. **Updated 2026-10-11 (Phase 6f).**
+**Branch:** `integration/main-into-college` — the **school and college lines are merged here** (see §2,
+"integration"). The branch that had the story to itself was `college-support`.
+**HEAD when first written:** `dc0e970` (`phase 6-pre 6: …`). **HEAD now:** the 6f docs commit you are
+reading (Phase 6's "finished" record); the last code commit before it is `fc8ff62`
+(`phase 6e: prove the college result rows' tenant and branch isolation`).
 **Source of truth for decisions:** [docs/COLLEGE-DECISIONS.md](docs/COLLEGE-DECISIONS.md). Where this
 document and that one differ, that one wins.
 
-This document is a **report**, not a plan and not a decision record. It adds no rule. Everything
-below is static evidence read from the repository at the HEAD above (file reads, `git log`, targeted
-searches). Anything the repository cannot prove is marked **NOT PROVEN**.
+This document is a **report**, not a plan and not a decision record. It adds no rule. Everything below
+is static evidence read from the repository at the HEAD above, plus the verifier counts recorded in
+`docs/COLLEGE-DECISIONS.md` §23.7.1. Anything the repository cannot prove is marked **NOT PROVEN**.
 
 ---
 
@@ -18,17 +20,19 @@ searches). Anything the repository cannot prove is marked **NOT PROVEN**.
 Read this before the tables, or the phase names will mislead you.
 
 - The commits labelled **`phase 6-pre 1`** through **`phase 6-pre 6`** are **hardening of Phase 5**
-  (the promotion ladder). They are **not** Phase 6. See `docs/COLLEGE-DECISIONS.md` §21–§22: "Phase 5
-  is finished and pushed (`a770a03`). Four items were still open. Phase 6-pre closes the three…".
-- The **real Phase 6** — **credit-weighted GPA/CGPA and the transcript** — **has NOT started.** It is
-  the "Phase 6" row of the reconciled phase list in `docs/COLLEGE-DECISIONS.md` §10.
-- This **`safety 1`** commit (the one you are reading) is **go-live safety work**: a config typo fix,
-  backup/environment/status documents, and recording `AGENTS.md`. It is **NOT Phase 7** (college
-  fees) and it is **not** the start of Phase 6.
-- Real Phase 7 (college fee basis) and Phase 8a/8b/8c (dashboard / reports / import) have **not
-  started** either.
+  (the promotion ladder). They are **not** Phase 6. See `docs/COLLEGE-DECISIONS.md` §21–§22.
+- The **`safety 1`** commit is **go-live safety work** (a config typo fix, backup/environment/status
+  documents, and recording `AGENTS.md`). It is **not a phase**, it is not Phase 7, and it is not the
+  start of Phase 6.
+- **`scripts/verify-phase7-e2e.mjs` is the SCHOOL-side end-to-end audit** (import / undo / credentials /
+  print) that came in with `origin/main`. Its "phase7" is the **school** plan's phase number. It is
+  **not** college Phase 7 (the college fee basis), and running it proves nothing about the college line.
+- The **real Phase 6** — credit-weighted GPA/CGPA and the transcript — **is FINISHED**: `6a`–`6f`,
+  §2 below. Nothing is still "not started" about it.
+- The **real Phase 7** (college fee basis) and **Phase 8a/8b/8c** (college dashboard / reports / import)
+  have **not started**. The per-programme scale override (D-6-19) is parked **with the owner**.
 
-The numbered college phases in this document are the implementation phases (0, M, 1–5, 6-pre), which
+The numbered college phases in this document are the implementation phases (0, M, 1–5, 6-pre, 6), which
 are **not** the same numbers as the plan phases in `docs/COLLEGE-PLAN-DELTA.md`. §10 of the decisions
 document reconciles them, and that table is the authority.
 
@@ -43,7 +47,7 @@ guardian synthetic session instead of 401`). At that point the product was a **s
   Teacher app (`teacher.`), Parents app (`parents.`). Rule 1 of `AGENTS.md` holds this sacred.
 - **Tenants** are schools. There was **no institution-type concept at all**.
 - **Roles:** `SUPER_ADMIN`, `SCHOOL_ADMIN`, `BRANCH_ADMIN`, `REGISTRAR`, `ACCOUNTANT`, `LIBRARIAN`,
-  `FRONT_DESK`, `TEACHER`, `GUARDIAN`.
+  `FRONT_DESK`, `TEACHER`, `GUARDIAN` (plus `STUDENT`).
 - **Academic spine:** `classes` / `sections` / `subjects`, attendance keyed `studentId_date`, exams
   and marks, fees, routine, library, admissions, notifications, guardians.
 - **Data layer:** Firestore behind a hand-written shim (`src/lib/db.ts`), with query push-down and a
@@ -60,7 +64,7 @@ stay the only enforcement (`docs/COLLEGE-DECISIONS.md` §3).
 
 ## 2. Phase-by-phase — commits and what a college admin can do
 
-All hashes are on `college-support`, in `git log --oneline` order (newest first).
+All hashes are on this line, in `git log --oneline` order (newest first within a phase).
 
 | Phase | Representative commits | What a college admin can do after it |
 |-------|------------------------|--------------------------------------|
@@ -75,7 +79,8 @@ All hashes are on `college-support`, in `git log --oneline` order (newest first)
 | **5-pre / 5a / 5b** | `be02822` Q7 answer + Phase 5 redefined · `3809429` pure promotion ladder logic + offline verifier · `8586a2c` college promotion API (preview/apply) · `46e69ec` doc-count proof for refused requests · `3570436` refuse programme shrink while on-roll students sit beyond the new last term | Promotion preview and apply behind the COLLEGE gate. A programme cannot be shrunk while on-roll students would fall outside it. |
 | **5c / 5d / 5e** | `84de6a5` promotion page and nav item · `ea751eb` whole-programme ladder (plan + run) · `c75e3db` ladder fails safely (structured partial-failure report, per-step flush) · `a770a03` gate verifier href, pending-request plural | **College Promotion** page. Run the whole programme's ladder: per-position advance, a structured partial-failure report, and a per-step flush so a crash leaves a readable state. |
 | **5 hardening ("6-pre")** | `5847f26` 6-pre 1 page logic extracted + verified offline · `74bf386` 6-pre 2 atomic per-programme lease · `d8e12a2` 6-pre 3 refuse ladder re-run after a partial failure · `8b9948c` 6-pre 4 ownership-safe lease with renewal, fail-closed block, complete finishTerms · `609e4b9` 6-pre 5 finish-empty-term, audited abandon, reconcile the run row on programme shrink/delete · `dc0e970` 6-pre 6 restrict abandon to admins, harden test-only parameters | Safe re-run rules, an atomic per-programme lease with renewal, fail-closed when the lease cannot be read, an admin-only abandon, an audited abandon, and "mark a term finished". A REGISTRAR can run the ladder but cannot abandon a run. |
-| **6 (real)** | — | **Not started.** Credit-weighted GPA/CGPA + transcript (`docs/COLLEGE-DECISIONS.md` §10, Phase 6 row). |
+| **integration** | `cd0e2d5` integration 1: merge `origin/main` into college-support (wizard, plan limits, import/export, certificates) · `b96ca63` integration 2: fail loudly when both database-id variables disagree · `bee9402` docs: record superseded local-main commits · `d497f96` test(scripts): deliver the Host header so host-scoped checks really run · `c4fb047` wizard and new-tenant seed are institution-type aware · `84df90e` onboarding: fix college profile step, submit label and fee defaults · `8354ca1` fix: keep college data access behind the college gate in the onboarding wizard | One line again. The school features (onboarding wizard, plan-limit enforcement, CSV import/export, certificate templates, timetable builder, Firestore cutover) and the college work live on the same branch; every conflict is resolved in [docs/INTEGRATION-LOG.md](docs/INTEGRATION-LOG.md). The wizard now respects the tenant's type. |
+| **6 (real) — FINISHED** | `2e0ff07` docs: phase 6 decisions · `cb05811` **6a** pure grading logic (`showGpa`, retake policy, credit-weighted GPA/CGPA, `resolveSchemeFor`) · `0b1a3bb` **6b** register the `courseResults` collection · `f12d227` **6c** the college results API behind the college gate · `e20f4f2` **6c-fix** reads are admin/registrar only · `58d9c85` **6d** college results screen, transcript print page, nav entry · `fc8ff62` **6e** tenant/branch isolation proof for the new rows · 6f this commit (docs) | **Results, GPA/CGPA and the transcript.** A college admin can open the **College Results** screen, see the active scheme's name and scale, enter/adjust a student's course results with retakes, and **print one student's transcript** (`/print/college-transcript/<studentId>`) — term GPA and CGPA are credit-weighted and derived at read time from the tenant's own scheme. Reads are admin-level or REGISTRAR only. |
 | **7, 8a/8b/8c** | — | **Not started.** College fee basis; college dashboard/reports/import. |
 
 **Safety / test-infrastructure commits in the same range** (they change no product behaviour):
@@ -86,29 +91,39 @@ fixes, plus `5f49be9` (refuse live Firestore unless `ALLOW_LIVE_FIRESTORE=1`) an
 
 ---
 
-## 3. Safety and testing — the current verifier counts
+## 3. Safety and testing — the counts at 6e / 6f
 
-**Where these numbers come from:** `docs/COLLEGE-DECISIONS.md` §"Verification (6-pre 6)", which
-records the two-way run on the local Firestore emulator at commit `609e4b9` → `dc0e970`. **They were
-not re-run by this `safety 1` commit** (it changes no code, so a re-run would prove nothing new and
-would need the emulator). Treat them as the last recorded, green numbers.
+**Where these numbers come from:** the Phase 6 run recorded in `docs/COLLEGE-DECISIONS.md` §23.7.1 —
+the emulator-only, baseline-first run that ended at `fc8ff62`, plus the step-by-step counts in §22 for
+the 6-pre work. The doc-only 6f commit changed no code and re-ran nothing. These are the last recorded,
+green numbers.
 
-The **usual ten** (the college/registration isolation set):
+**The college/registration isolation set:**
 
 | Verifier | Pass | Fail |
 |---|---|---|
+| `verify-tenant-isolation` | 97 | 0 |
+| `verify-branch-isolation` | 65 | 0 |
 | `verify-college-enrollment` | 40 | 0 |
 | `verify-course-registrations` | 50 | 0 |
 | `verify-registration-status` | 9 | 0 |
-| `verify-tenant-isolation` | 75 | 0 |
-| `verify-branch-isolation` | 52 | 0 |
 | `verify-college-gate` | 3 | 0 |
 | `verify-college-permissions` | 7 | 0 |
 | `verify-college-routes` | 3 | 0 |
-| `verify-nav-scope` | 7 | 0 |
+| `verify-nav-scope` | 8 | 0 |
 | `verify-college-terms` | 8 | 0 |
 
-The promotion and foundation suites:
+**Phase 6's own suites** (all new in Phase 6 except `verify-grading`, which is the school's):
+
+| Verifier | Pass | Fail |
+|---|---|---|
+| `verify-college-results` (offline logic, 6a) | 13 | 0 |
+| `verify-college-results-data` (6b) | 8 | 0 |
+| `verify-college-results-api` (6c) | 77 | 0 |
+| `verify-college-results-page` (6d) | 106 | 0 |
+| `verify-grading` (school, re-run unchanged) | 38 | 0 |
+
+**The promotion and foundation suites:**
 
 | Verifier | Pass | Fail |
 |---|---|---|
@@ -119,31 +134,42 @@ The promotion and foundation suites:
 | `verify-promotion-rollover` ×10 | 50 each | 0 |
 | `verify-mode-foundation` | 64 | 0 |
 
+**The school-side suites re-run in the same pass:**
+
+| Verifier | Pass | Fail |
+|---|---|---|
+| `verify-onboarding-seed` | 78 | 0 |
+| `verify-onboarding-type` | 38 | 0 |
+| `verify-bulk-import` | 118 | 0 |
+| `verify-phase7-e2e` (school audit) | 160 | 0 |
+| `scripts/qa-phase23.mjs` | 36 | 0 |
+| `scripts/qa-certificates.mjs` | 39 | 1 (credential-gated orphan sweep only) |
+
 Build and types:
 
 | Check | Result |
 |---|---|
 | `npm run typecheck` | 0 errors |
-| `npm run build` | `✓ Generating static pages (164/164)` — 164 pages |
+| `npm run build` | `✓ Generating static pages (177/177)` — 177 pages (164 before integration, 175 after the merge; Phase 6's two college routes make 177) |
 
-**Other counts in the tree at this HEAD:** 38 `verify-*.mjs` scripts; 67 `.mjs` files under
-`scripts/`; **12** college/registration/promotion verifiers
-(`verify-college-enrollment`, `-gate`, `-permissions`, `-promotion-api`, `-promotion-lease`,
-`-promotion-logic`, `-promotion-page`, `-routes`, `-terms`, `verify-course-registrations`,
-`verify-promotion-rollover`, `verify-registration-status`).
+**Other counts in the tree at this HEAD:** 46 `verify-*.mjs` scripts; 81 `.mjs` files under `scripts/`;
+**6** college API segments (`departments`, `programs`, `courses`, `course-registrations`,
+`college-promotion`, `course-results`) covering **30** gated handlers.
 
-**Known-failing checks (documented, not fixed):** four browser checks in `scripts/smoke-all.mjs`
-(the two `/print/*` pages and two `/teacher/marks` checks). They are analysed in
-[docs/SMOKE-FAILURES.md](docs/SMOKE-FAILURES.md) and are recorded as open in `PROGRESS.md`. They are
+**Known-failing checks (documented, not fixed, pre-existing, out of Phase 6's scope):**
+`verify-read-cache` — 1 fail (a latency assertion that does not hold in dev mode); `verify-routine-config`
+— 3 fails (the seed writes only **section-scoped** routines while the route's class-wide read returns
+the `sectionId == null` rows). Four browser checks in `scripts/smoke-all.mjs` (the two `/print/*` pages
+and two `/teacher/marks` checks) are also known-failing, analysed in
+[docs/SMOKE-FAILURES.md](docs/SMOKE-FAILURES.md) (which is untracked and a snapshot, see §8). They are
 **not** green, and claiming "the tests are green" would be wrong.
 
 ---
 
-## 4. The 15-step college-admin journey
+## 4. The college-admin journey
 
-Each step is graded **works** / **manual** / **missing** from static evidence (routes, pages, nav and
-verifiers present at `dc0e970`). Steps graded from the code alone are marked where a live run is
-needed to be certain.
+Each step is graded **works** / **manual** / **missing** from static evidence and the recorded
+verifier runs. Steps graded from the code alone are marked where a live run is needed to be certain.
 
 | # | Step | Status | Evidence / note |
 |---|------|--------|-----------------|
@@ -162,17 +188,24 @@ needed to be certain.
 | 13 | Preview and apply a promotion | **works** | Preview/apply API (`verify-college-promotion-api`, 100). |
 | 14 | Run the whole-programme ladder safely | **works** | `/dashboard/college-promotion` + `/api/college-promotion/ladder`; lease + fail-closed + partial-failure report (`verify-college-promotion-lease`, 113). |
 | 15 | Mark a term finished / abandon a run | **works** | "Finish empty term" and an **admin-only** audited abandon (`609e4b9`, `dc0e970`; `verify-college-promotion-page`, 18). |
+| 16 | Open the **College Results** screen and see the scheme in force | **works** | `/dashboard/results` (college nav) reusing the mode-scoped grading editor; the active scheme's **name and scale** are shown (D-6-6); `verify-college-results-page` (106). |
+| 17 | Record / adjust a student's course results, with retakes | **works** | `GET`/`POST /api/course-results` behind the college gate; `maxRetakes` enforced; a re-graded scheme changes the served CGPA with no re-entry (`verify-college-results-api`, 77). |
+| 18 | Print one student's transcript | **works** | `/print/college-transcript/<studentId>`; term GPA and CGPA derived at read time; the scheme name, scale, pass mark and print date are printed (D-6-12/D-6-14/D-6-16). |
 
-**Journey gaps that sit outside these 15 steps** (the parts a real college needs and does not have):
+**Journey gaps that sit outside these 18 steps** (the parts a real college needs and does not have):
 
-- **Results, GPA/CGPA and the transcript** — **missing** (real Phase 6 not started).
 - **College fees** — **missing / manual** (real Phase 7 not started; the fee screens are school-shaped).
 - **Per-course attendance** — **not built**. School attendance is one row per pupil per day keyed
   `studentId_date`; a per-course version cannot be retro-fitted onto it
   (`docs/COLLEGE-DECISIONS.md` §10, D-3-6). **NOT PROVEN** which model college attendance will use.
 - **College-specific guardian content** — **NOT PROVEN** whether the Parents app shows anything
-  college-specific.
-- **College retain / failed-course rules** — **NOT PROVEN** (no rule recorded in the repo).
+  college-specific, and a per-child guardian transcript view is deliberately out of v1 (owner to
+  decide).
+- **Per-course teacher view of results** — **NOT PROVEN** / out of v1 (owner to decide).
+- **College retain / failed-course rules** — **NOT PROVEN** (no rule recorded in the repo). Phase 6
+  records and prints pass/fail but never gates a promotion on it (Q6).
+- **Per-programme grade scale** — **not built** (D-6-19; first candidate after v1, owner to confirm).
+- **College dashboard / reports / import** — **missing** (Phase 8a/8b/8c).
 
 ---
 
@@ -180,46 +213,49 @@ needed to be certain.
 
 | # | Item | Where | Size | Who it blocks | Blocks a sale? |
 |---|------|-------|------|---------------|----------------|
-| 1 | Real **Phase 6**: credit-weighted GPA/CGPA + transcript | `COLLEGE-DECISIONS.md` §10 | Large | College admin, students | **Yes** — no results, no transcript |
-| 2 | Real **Phase 7**: college fee basis | §10 | Large | College accountant | **Yes** — no college billing |
-| 3 | Phase **8a/8b/8c**: college dashboard / reports / import | §10 | Large | College admin | Partly |
-| 4 | Four known-failing browser checks | `scripts/smoke-all.mjs`; [SMOKE-FAILURES.md](docs/SMOKE-FAILURES.md) | Small–medium | Nobody in production; CI trust | No |
-| 5 | Per-course college attendance model undecided | `COLLEGE-DECISIONS.md` §10 | Medium | College teachers | **Yes**, for a college running attendance |
-| 6 | College fee heads / structures not modelled | fee code (school-shaped) | Medium | College accountant | **Yes** |
-| 7 | `firestore.indexes.json` `subscriptions` index is declared but not exercised | `firestore.indexes.json` | Small | Nobody (the shim sorts in memory) | No |
-| 8 | `scripts/deploy-guide.md` Phase 5 still describes the old `APP_URL` placeholder step | `scripts/deploy-guide.md:90` | Small (doc) | The operator | No |
-| 9 | `docs/PHASE1-DECISION-WORKSHEET.md` is stale (says "Phase 1 has NOT started") | that file | Small (doc) | A future reader | No |
-| 10 | `docs/SMOKE-FAILURES.md` is a snapshot at `e538e74`; HEAD has moved and two involved files changed | that file | Small (doc) | A future reader | No |
-| 11 | `PROGRESS.md:1494` still says multi-branch / CSV / billing / white-label are "not yet" | `PROGRESS.md:1494` | Small (doc) | A future reader | No |
-| 12 | Two deployments stay in step (App Hosting production + Netlify demo) | host configs | Ongoing | The operator | No |
-| 13 | The old `(default)` Firestore database still exists as a rollback target — no decision recorded | `apphosting.yaml` comment, `src/lib/firebase.ts` | Decision | The operator | No |
-| 14 | `docs/COLLEGE-PLAN.md` (the original A–I plan) is absent from the repo by design | preamble of `COLLEGE-DECISIONS.md` | n/a | A phase-4+ preflight | No |
+| 1 | Real **Phase 7**: college fee basis | `COLLEGE-DECISIONS.md` §10 | Large | College accountant | **Yes** — no college billing |
+| 2 | Phase **8a/8b/8c**: college dashboard / reports / import | §10 | Large | College admin | Partly |
+| 3 | Per-course college attendance model undecided | `COLLEGE-DECISIONS.md` §10 | Medium | College teachers | **Yes**, for a college running attendance |
+| 4 | College fee heads / structures not modelled | fee code (school-shaped) | Medium | College accountant | **Yes** |
+| 5 | Post-v1: per-programme scale override (D-6-19) | §23.6 | Small | Owner to confirm | No |
+| 6 | Post-v1: per-child guardian view, per-course teacher view | §23.6 | Small–medium | Owner to decide | No |
+| 7 | Known-failing checks: `verify-read-cache` (1), `verify-routine-config` (3), four browser checks | `scripts/`; [SMOKE-FAILURES.md](docs/SMOKE-FAILURES.md) | Small–medium | Nobody in production; CI trust | No |
+| 8 | Routines missing-`sectionId` read hole (the `verify-routine-config` cause) | `src/app/api/routines/route.ts` + `scripts/seed.mjs` | Small | A future reader | No |
+| 9 | Super-admin `POST /api/schools` still writes `feeSetting` for a college tenant | `src/app/api/schools/route.ts` | Small | College admin | No |
+| 10 | Wizard success screen says "school"; college sidebar still shows school items | onboarding page, `src/components/nav.ts` | Small | College admin | No |
+| 11 | `firestore.indexes.json` `schoold` typo: fixed in the file, still live in both databases | `firestore.indexes.json` + the live DBs | Small | Nobody (the shim sorts in memory) | No |
+| 12 | Firestore backup not yet confirmed; the old `(default)` database is the rollback insurance and its archive date (2026-10-08) has passed | `apphosting.yaml`, `src/lib/firebase.ts` | Decision | The operator | No |
+| 13 | Go-live: role probe on a **production** build | — | Small | The operator | No |
+| 14 | Go-live: production line decision — `origin/main` vs `deploy/app-hosting` | — | Decision | The operator | No |
+| 15 | `docs/PHASE1-DECISION-WORKSHEET.md` and `docs/SMOKE-FAILURES.md` are **untracked** and outdated | those files | Small (doc) | A future reader | No |
+| 16 | `docs/COLLEGE-PLAN.md` (the original A–I plan) is absent from the repo by design | preamble of `COLLEGE-DECISIONS.md` | n/a | A phase-4+ preflight | No |
 
-Items 4, 7, 8, 9, 10, 11 are pure documentation/CI debt and are cheap. Items 1, 2, 3, 5, 6 are the
-real remaining product work.
+Items 7–10 and 15 are cheap documentation/CI/hardening debt; items 1–4 are the real remaining product
+work.
 
 ---
 
 ## 6. The state of the product (one page)
 
-- **Schools are untouched.** A tenant with no `institutionType` reads as a school, its nav is a frozen
-  byte-identical snapshot, and every school code path stays as it was. This is the central promise and
-  it is asserted by verifiers (`verify-nav-scope`, `verify-tenant-isolation`,
-  `verify-branch-isolation`).
-- **A college tenant can be run end to end up to promotion:** departments → programmes → terms and
-  curriculum → courses → enrolment → registration and approval → promotion ladder. All of it sits
-  behind one `requireCollege()` gate, enforced by a static verifier that fails the build if a college
-  route forgets it.
+- **Schools are untouched.** A tenant with no `institutionType` reads as a school, its nav stays
+  deep-equal to the recorded snapshot, and every school code path stays as it was. This is the central
+  promise and it is asserted by verifiers (`verify-nav-scope`, `verify-tenant-isolation` 97,
+  `verify-branch-isolation` 65, `verify-grading` 38).
+- **A college tenant can be run end to end from departments to a printed transcript:** departments →
+  programmes → terms and curriculum → courses → enrolment → registration and approval → promotion
+  ladder → results → GPA/CGPA → transcript. All of it sits behind one `requireCollege()` gate,
+  enforced by a static verifier that fails the build if a college route forgets it.
 - **Authorization never comes from mode.** `can()`, tenant isolation and the permission matrix are the
-  only enforcement. A cookie or a `?mode=` value grants nothing.
-- **The college work is genuinely unfinished where it matters commercially:** results/GPA/transcript
-  (Phase 6) and college fees (Phase 7) are not started. A college cannot yet produce a transcript or
-  bill its students.
-- **Testing is strong and offline-first.** 38 verifiers, 12 of them college-related, and the emulator
-  is required by design — no script reaches a live database. Four browser checks are known-failing and
-  documented rather than fixed.
-- **This `safety 1` commit adds operational safety, not features:** the index typo is fixed, and the
-  backup, environments/secrets and this status document now exist.
+  only enforcement. A cookie or a `?mode=` value grants nothing. College **reads** are narrower still:
+  admin-level roles plus the REGISTRAR only (`src/lib/college-results-access.ts`).
+- **Grades are derived, never frozen (v1).** Editing a scheme re-interprets stored marks and reprints
+  them; a transcript therefore names the scheme, its scale, the pass mark and the print date, which is
+  the recorded mitigation (D-6-12's known limitation).
+- **The college work's remaining commercial gap is fees (Phase 7)** plus the dashboard/reports/import
+  phase. A college can produce a transcript but cannot yet bill its students.
+- **Testing is strong and offline-first.** 46 verifiers, 6 of the college segments guarded, the
+  emulator required by design — no script reaches a live database without `ALLOW_LIVE_FIRESTORE=1`. A
+  handful of checks are known-failing and documented rather than fixed.
 
 ---
 
@@ -227,29 +263,26 @@ real remaining product work.
 
 | # | What it said (or implied) | Where | The correct version |
 |---|---------------------------|-------|---------------------|
-| 1 | `subscriptions` index field `schoold` | `firestore.indexes.json:15` | The field is **`schoolId`**. Fixed in this commit. |
-| 2 | `"phase 6-pre 1"` … `"phase 6-pre 6"` mean Phase 6 | commit subjects `5847f26`…`dc0e970` | They are **hardening of Phase 5**. Real Phase 6 (GPA/CGPA + transcript) has not started. |
-| 3 | This `safety 1` commit is Phase 7 | — | It is **go-live safety work**, not Phase 7 (college fees). |
-| 4 | "Multi-branch / CSV / billing / white-label **not yet**" | `PROGRESS.md:1494` | Stale. Branches and CSV student import exist on `college-support`; the wizard/billing/export exist on `origin/main`. |
-| 5 | "The deploy guide's `APP_URL` is a placeholder" | `scripts/deploy-guide.md:90` | Stale. `apphosting.yaml` now holds the real App Hosting URL; the guide's Phase 5 still describes the placeholder step. |
-| 6 | "The tests are green" | — | Four browser checks in `smoke-all.mjs` are known-failing and documented, not fixed. |
-| 7 | `firestore.indexes.json` "is fine" | `firestore.indexes.json` | It declared a composite index on `schoold` (typo for `schoolId`). Latent misconfiguration, not an outage — the shim sorts in memory, so queries still worked. |
-| 8 | Phase 1 "has NOT started; Phase M is FROZEN" | `docs/PHASE1-DECISION-WORKSHEET.md` | Phase 1 landed (`95c5d00`) and phases 2–5 plus 6-pre are done. The worksheet is outdated. |
-| 9 | Phase numbers 3, 4, 5, 6, 7 mean the same thing everywhere | `COLLEGE-PLAN-DELTA.md` vs `COLLEGE-DECISIONS.md` | The delta's Phase 3 was **deferred then dropped**; its catalogue half moved into implementation Phase 3. Only §10 of the decisions document is authoritative. |
-| 10 | "`classes` carry a stored `mode`" | `COLLEGE-PLAN-DELTA.md` §3/§6 | No such field exists. Phase M shipped key-scoping and the cookie model, not stored `mode` on core rows. |
-| 11 | "The data layer pushes only one equality filter to Firestore" | `COLLEGE-PLAN-DELTA.md` §3 | Outdated. `pushdownConditionsFor` pushes every scalar equality (and scalar `in`). |
-| 12 | "The scratch files were removed **before** this commit" | `COLLEGE-DECISIONS.md` D-6pre6-4 | They were removed **after** the commit, in post-push housekeeping, and were **never** committed. Fixed in this commit. |
+| 1 | `subscriptions` index field `schoold` | `firestore.indexes.json` | The field is **`schoolId`**. Fixed in the file; the misdeclared index is still live in both databases. |
+| 2 | `"phase 6-pre 1"` … `"phase 6-pre 6"` mean Phase 6 | commit subjects `5847f26`…`dc0e970` | They are **hardening of Phase 5**. Real Phase 6 (GPA/CGPA + transcript) is `cb05811`…`fc8ff62` and is finished. |
+| 3 | The `safety 1` commit is a phase (or Phase 7) | — | It is **go-live safety work**, not a phase and not Phase 7. |
+| 4 | `verify-phase7-e2e` is college Phase 7 | `scripts/verify-phase7-e2e.mjs` | It is the **school-side** end-to-end audit that came in with `origin/main`; college Phase 7 (fees) has not started. |
+| 5 | The college transcript READ is `/api/students/[id]/transcript` | `COLLEGE-DECISIONS.md` §23.7 (6c row, as first written) | It is `/api/course-results/students/[id]/transcript` — `students` is a frozen non-college segment the route guard refuses. |
+| 6 | "Multi-branch / CSV / billing / white-label **not yet**" | `PROGRESS.md` (2026-09-18 session) | Stale. Branches and CSV student import exist; the wizard/billing/export exist on the merged line. |
+| 7 | "The tests are green" | — | A few checks are known-failing and documented (§3), not fixed. |
+| 8 | Phase numbers 3, 4, 5, 6, 7 mean the same thing everywhere | `COLLEGE-PLAN-DELTA.md` vs `COLLEGE-DECISIONS.md` | The delta's Phase 3 was **deferred then dropped**; its catalogue half moved into implementation Phase 3; its Phase 5 is this document's Phase 6. Only §10 of the decisions document is authoritative. |
 
 ---
 
 ## 8. NOT PROVEN — items this report cannot settle
 
-- Which phase numbering is authoritative where `phase 6-pre` and §10's "Phase 6" are read together —
-  this document states the rule (§0), but the older commits' subjects cannot be rewritten.
-- Whether `deploy/app-hosting` or `origin/main` is the production line. **NOT PROVEN.**
+- Whether `deploy/app-hosting` or `origin/main` is the production line. **NOT PROVEN** — still an open
+  go-live decision.
 - Whether the four known-failing browser checks are caused by stale fixtures today (the analysis in
-  `SMOKE-FAILURES.md` predates the current `smoke-all.mjs`).
-- The exact school nav item count (two documents disagree: 31 vs 34).
+  `SMOKE-FAILURES.md` predates the current `smoke-all.mjs`; that file is also untracked).
+- A production-build role probe of the college screens — **not run** (go-live checklist item).
 - College retain / failed-course rules — no rule is recorded in the repo.
 - College-specific guardian-portal content — not verified.
+- Which model a future per-course college attendance uses — no rule recorded.
+- The exact school nav item count (two documents disagree: 31 vs 34).
 - Whether every item `PROGRESS.md` lists as open is closed by `origin/main`.

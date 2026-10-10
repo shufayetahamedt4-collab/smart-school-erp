@@ -1058,6 +1058,13 @@ programme shrink/delete left its run row behind. 6-pre 4 fixes the lease. 6-pre 
 two test-only knobs are made inert in production inside the functions that own them rather than at
 their callers.
 
+**CORRECTION ADDED 2026-10-11 (Phase 6f).** The build line and the counts in this section are a
+snapshot of the 6-pre work — true at their commits and now SUPERSEDED. Nothing above is rewritten.
+After Phase 6 the same checks read: `next build` **177/177**, not 164; `verify-tenant-isolation`
+**97**, not 75; `verify-branch-isolation` **65**, not 52. `verify-college-promotion-page` (18) and
+`verify-college-promotion-lease` (113) are unchanged, as this section predicts. The authoritative,
+current evidence table is §23.7.1.
+
 ### 6-pre 4 — the lease is renewed, owned and fail-closed
 
 - **D-6pre4-1 — the release is OWNED, not unconditional.** `finaliseProgrammeRun` now runs
@@ -1607,6 +1614,85 @@ numbers, then prove every later difference is an addition).
 | **6d** | **Page(s) + nav**: the college results entry screen, the transcript print route, and **one** nav item behind `requires:"COLLEGE"`; the grading editor reused mode-scoped (D-6-1) | `verify-nav-scope.mjs` against the recorded `scripts/nav-scope-snapshot.json` (non-college nav **deep-equal unchanged**), the page's logic proved offline where it can be (`verify-college-promotion-page.mjs`'s pattern), and screenshots |
 | **6e** | **Isolation + regression proof with recorded baselines**: fixture and tenant/branch harness additions for the new rows (`isolation-fixture.mjs` gains `courseResults` in its `owned` prefix-sweep) | `verify-tenant-isolation` / `verify-branch-isolation` **baseline recorded first**, then re-run: every new assertion an **addition**, no existing assertion changed (the §11 D-3e pattern); the COLLEGE gate asserted explicitly (a SCHOOL tenant gets 403 with zero data); and the untouched-by-Phase-6 harnesses (`verify-grading`, `verify-mode-foundation`, `verify-course-registrations`, `qa-phase23`, `qa-certificates`) re-run to **identical counts**, plus `next build` with its page count recorded |
 | **6f** | **This section's “finished” record** | The counts table in the style of §22 (verifier, before, after, why), `tsc` 0 errors, and an explicit statement of anything that could not run |
+
+**Status (updated 2026-10-11, 6f): all six steps are DONE and pushed** on
+`integration/main-into-college` — 6a `cb05811` · 6b `0b1a3bb` · 6c `f12d227` (+ `e20f4f2`, the 6c-fix
+that narrowed the reads to the admin-level roles and the REGISTRAR) · 6d `58d9c85` · 6e `fc8ff62` ·
+6f this commit (docs only). The steps ran in the recorded order, each owing its evidence before the
+next started, so the table above is history rather than a plan. **Real Phase 7 (the college fee basis)
+and Phase 8a/8b/8c are NOT started**; the per-programme scale override (D-6-19) is parked with the
+owner.
+
+**The transcript READ is `/api/course-results/students/[id]/transcript`** — the 6c row's correction,
+kept here so a reader does not look for `/api/students/[id]/transcript` (a frozen non-college segment
+whose route guard refuses a college read). **The READ access rule** is the one written in §23.6
+(6d-fix, owner ruling 2026-10-10): every college results read — the list, the single row, the
+transcript read and the transcript print page — is allowed to the **admin-level roles and the
+REGISTRAR only**; a TEACHER, a GUARDIAN and a STUDENT are refused (API 403, no print, no nav entry).
+The post-v1 **per-child guardian view** and **per-course teacher view** stay out of v1 and are
+**owner to decide**.
+
+### 23.7.1 The finished record (6f) — the counts, before and after
+
+Environment, as every Phase 6 step used it: the local Firestore emulator only
+(`FIRESTORE_EMULATOR_HOST`, `FIREBASE_PROJECT_ID=demo-ss-test`), the seed and the isolation fixture in
+place, the app restarted after each edit, and `next build` run LAST with dev stopped first. Every
+harness named here was run **baseline first** (D-3e-1), and every new assertion is an ADDITION — no
+existing check was changed, weakened, skipped or deleted.
+
+**A. The Phase 6 additions, and the suites that grew**
+
+| suite | before Phase 6 | after 6e | why it moved |
+|---|---|---|---|
+| `verify-college-results` (6a, offline logic) | — (new) | **13** | every preset validates, the four retake policies resolve (`REPLACE` / `BEST` / `BOTH` / `AVERAGE`), credit weighting with and without credits, the no-GPA shape, empty and junk inputs |
+| `verify-college-results-data` (6b) | — (new) | **8** | `courseResults` in `COLS`/`RELS`/prisma, and the `course-results` segment in `COLLEGE_API_SEGMENTS` in the same change |
+| `verify-college-results-api` (6c) | — (new) | **77** | the HTTP matrix: 403/400/404, one bad attempt refused with a reason, `maxRetakes` enforced, a re-graded scheme moving the served CGPA with no re-entry, a document-count bracket around every refusal |
+| `verify-college-results-page` (6d) | — (new) | **106** | the results screen and the transcript print page: the offline decisions plus the print page's own checks |
+| `verify-tenant-isolation` | 75 | **97** | +22 checks: cross-tenant create/read/update/delete on the new result rows and the transcript read |
+| `verify-branch-isolation` | 52 | **65** | +13 checks: the same rows and the transcript read, confined by branch |
+| `verify-nav-scope` | 7 | **8** | +1: the one new college nav entry; the non-college nav stays deep-equal to `scripts/nav-scope-snapshot.json` |
+| `next build` | 164 pages | **177 pages** | integration took it 164 → 175 (origin/main's 6 pages + 7 API routes, nothing lost); 6d's two college routes make 177 |
+
+**B. Re-run in the same pass, unchanged — no existing assertion moved**
+
+| suite | count |
+|---|---|
+| `verify-grading` | 38 / 0 |
+| `verify-college-enrollment` | 40 / 0 |
+| `verify-course-registrations` | 50 / 0 |
+| `verify-registration-status` | 9 / 0 |
+| `verify-college-gate` | 3 / 0 |
+| `verify-college-permissions` | 7 / 0 |
+| `verify-college-routes` | 3 / 0 (6 college segments, 30 gated handlers) |
+| `verify-college-terms` | 8 / 0 |
+| `verify-college-promotion-logic` | 12 / 0 |
+| `verify-college-promotion-api` | 100 / 0 |
+| `verify-college-promotion-page` | 18 / 0 |
+| `verify-college-promotion-lease` | 113 / 0 |
+| `verify-promotion-rollover` ×10 | 50 / 0 each |
+| `verify-mode-foundation` | 64 / 0 |
+| `verify-onboarding-seed` | 78 / 0 |
+| `verify-onboarding-type` | 38 / 0 |
+| `verify-bulk-import` | 118 / 0 |
+| `verify-phase7-e2e` (the SCHOOL-side audit) | 160 / 0 |
+| `scripts/qa-phase23.mjs` | 36 / 0 |
+| `scripts/qa-certificates.mjs` | 39 / 1 |
+| `npm run typecheck` | 0 errors |
+
+**C. Known-failing checks — pre-existing, unchanged, out of Phase 6's scope.** `verify-read-cache`:
+1 fail, a latency assertion that does not hold in dev mode. `verify-routine-config`: 3 fails, because
+the seed writes only **section-scoped** routines while the route's class-wide read returns the
+`sectionId == null` rows, so the seeded rows are not what the check expects. Both were red before
+Phase 6 and are unchanged by it; no Phase 6 assertion depends on either. The single `qa-certificates`
+failure is the final **credential-gated orphan sweep**, which the emulator-only rule forbids (all 39
+content checks pass).
+
+**D. What could not run, stated rather than implied.** No **production-build role probe** of the new
+college screens was run (it is still an open go-live item, `PROGRESS.md`), so the screens are
+evidenced by the HTTP checks and by screenshots rather than by a production binary. The known v1
+limitation of derived-on-read grades stands (D-6-12): editing a scheme rewrites what an
+already-issued transcript prints, mitigated by printing the scheme name, its scale and the print
+date.
 
 ### 23.8 Corrections to `docs/COLLEGE-PLAN-DELTA.md`, recorded deliberately
 
