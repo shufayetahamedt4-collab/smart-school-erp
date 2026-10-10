@@ -528,6 +528,164 @@ console.log("\n### course registrations — a COLLEGE tenant's rows are invisibl
   );
 }
 
+/* ---------- course results: cross-tenant isolation (Phase 6c) ---------- */
+// A `courseResults` row in college tenant C1 must be invisible AND untouchable
+// from every other tenant: the SCHOOL tenant (the gate) and the BOTH tenant (the
+// second college-capable tenant, whose row set must never include C1's). A
+// foreign id is NOT FOUND (404) or GATED (403) — never an oracle — and the
+// foreign row is asserted unchanged afterwards. The fixture stores no grade at
+// all, so every check below also proves the read DERIVES the grade from the
+// active scheme (D-6-12) and names that scheme (D-6-6): the assertions are
+// written against the response's OWN `passPercent`/`showGpa`, so they hold under
+// any scheme the tenant is configured with rather than pinning the shipped one.
+console.log("\n### course results — a COLLEGE tenant's rows are invisible and untouchable elsewhere");
+{
+  const C1 = `${P}college`;
+  const colResA = `${P}col-res-a`;
+  const colResB = `${P}col-res-b`;
+  const colStuA = `${P}col-stu-a`;
+  const colCourseA = `${P}col-course-a`;
+  const bothStu = `${P}both-stu`;
+  const bothCourse = `${P}both-course`;
+  const bothRes = `${P}both-res`;
+
+  const collegeCookie = await login("zz-iso-college-admin@test.local", CRED.collegeAdmin);
+  const bothCookie = await login("zz-iso-both-admin@test.local", CRED.bothAdmin);
+  const sCookie = await login("zz-iso-admin@test.local", CRED.admin);
+
+  // (1) C1 sees its own two results...
+  const own = await getJSON(collegeCookie, "/api/course-results");
+  const ownIds = (own.body.data || []).map((r) => r.id);
+  check(own.status === 200, `/api/course-results → 200 for a COLLEGE tenant (got ${own.status})`);
+  check(
+    ownIds.includes(colResA) && ownIds.includes(colResB),
+    `C1 sees both of its own results (${JSON.stringify(ownIds)})`
+  );
+
+  // (2) ...graded ON READ under the tenant's own scheme (D-6-12), with the active
+  //     scale named in the payload so it is never a guess (D-6-6).
+  const passPercent = Number(own.body.scheme?.passPercent);
+  const showGpa = own.body.scheme?.showGpa !== false;
+  const rowA = (own.body.data || []).find((r) => r.id === colResA);
+  check(
+    rowA?.percent === 70 && typeof rowA?.grade === "string" && rowA.grade.length > 0 &&
+      rowA?.passed === (70 >= passPercent),
+    `the stored 70/100 is graded at read time (percent=${rowA?.percent} grade=${JSON.stringify(rowA?.grade)} passed=${rowA?.passed} pass=${passPercent}%)`
+  );
+  check(
+    typeof own.body.scheme?.name === "string" && own.body.scheme.name.length > 0 &&
+      typeof own.body.scheme?.gpaScale === "number",
+    `the response names the scale in force (${own.body.scheme?.name} out of ${own.body.scheme?.gpaScale})`
+  );
+
+  // (3) ...and no foreign row or name anywhere in the payload.
+  //
+  // The DERIVED fields (`grade`, `gradeRemark`, and the `scheme` block) are THIS
+  // tenant's own grade-band labels and scheme name, not another tenant's rows — a
+  // one-letter band such as "A" collides with a class or section named "A" in some
+  // other tenant, which is not a leak. They are excluded from the name comparison
+  // only; every id, and every joined entity name (student, course, programme),
+  // is still swept exactly as the sibling sections sweep theirs.
+  const foreign = await referenceDataExcept(C1);
+  const sweepable = {
+    ...own.body,
+    scheme: undefined,
+    data: (own.body.data || []).map(({ grade, gradeRemark, ...rest }) => rest),
+  };
+  const oStr = collectStrings(sweepable);
+  const oLeakNames = [...foreign.names].filter((n) => oStr.has(n));
+  const oLeakIds = [...foreign.ids].filter((id) => oStr.has(id));
+  check(
+    oLeakNames.length === 0 && oLeakIds.length === 0,
+    `/api/course-results — no foreign id or name${oLeakNames.length ? ` (NAMES: ${oLeakNames.slice(0, 3).join(", ")})` : ""}${oLeakIds.length ? ` (IDS: ${oLeakIds.slice(0, 3).join(", ")})` : ""}`
+  );
+
+  // (4) The transcript READ (6c) derives the same grade, and suppresses the CGPA
+  //     ENTIRELY under a no-GPA scheme rather than printing a 0.00 (D-6-16).
+  const tOwn = await getJSON(collegeCookie, `/api/course-results/students/${colStuA}/transcript`);
+  const tData = tOwn.body.data;
+  const tCourse = (tData?.terms || []).flatMap((t) => t.courses || []).find((c) => c.courseId === colCourseA);
+  check(
+    tOwn.status === 200 && tData?.scheme?.name === own.body.scheme?.name &&
+      tData?.scheme?.passPercent === passPercent,
+    `→ 200 for its own student, naming the same scheme (status=${tOwn.status}, scheme=${tData?.scheme?.name})`
+  );
+  check(
+    tCourse?.percent === 70 && typeof tCourse?.grade === "string" && tCourse.grade.length > 0 &&
+      (showGpa ? typeof tData?.cgpa === "number" : tData?.cgpa === null),
+    `the transcript derives the course grade and ${showGpa ? "a numeric CGPA" : "NO CGPA at all"} (percent=${tCourse?.percent} grade=${JSON.stringify(tCourse?.grade)} cgpa=${JSON.stringify(tData?.cgpa)})`
+  );
+
+  // (5) A foreign student id on the transcript read is NOT FOUND, never an oracle.
+  const tForeign = await getJSON(collegeCookie, `/api/course-results/students/${bothStu}/transcript`);
+  check(tForeign.status === 404, `the transcript read of a foreign (BOTH) student → 404 (got ${tForeign.status})`);
+
+  // (6) A SCHOOL tenant hits the COLLEGE gate: 403 with ZERO data, on both reads.
+  const sList = await getJSON(sCookie, "/api/course-results");
+  check(
+    sList.status === 403 && sList.body?.data === undefined,
+    `/api/course-results → 403 with ZERO data for a SCHOOL tenant (status=${sList.status}, data=${JSON.stringify(sList.body?.data)})`
+  );
+  const sTranscript = await getJSON(sCookie, `/api/course-results/students/${colStuA}/transcript`);
+  check(
+    sTranscript.status === 403 && sTranscript.body?.data === undefined,
+    `the transcript read → 403 with ZERO data for a SCHOOL tenant (status=${sTranscript.status})`
+  );
+
+  // (7) The BOTH tenant's list is 200 and carries ONLY its own result.
+  const bList = await getJSON(bothCookie, "/api/course-results");
+  const bIds = (bList.body.data || []).map((r) => r.id);
+  check(
+    bList.status === 200 && bIds.includes(bothRes) && !bIds.includes(colResA) && !bIds.includes(colResB),
+    `the BOTH tenant sees only its own result (${JSON.stringify(bIds)})`
+  );
+
+  // (8) A foreign id from the COLLEGE tenant is NOT FOUND for the BOTH tenant.
+  const bOne = await getJSON(bothCookie, `/api/course-results/${colResA}`);
+  check(bOne.status === 404, `the BOTH tenant GET one (foreign C1 id) → 404 (got ${bOne.status})`);
+
+  // (9) PATCH and DELETE on the foreign row are 404 too (never a 403 oracle).
+  const bPatch = await patchJSON(bothCookie, `/api/course-results/${colResA}`, { obtained: 1 });
+  const bDel = await delJSON(bothCookie, `/api/course-results/${colResA}`);
+  check(
+    bPatch.status === 404 && bDel.status === 404,
+    `the BOTH tenant PATCH/DELETE of the foreign C1 row → 404/404 (got ${bPatch.status}/${bDel.status})`
+  );
+
+  // (10) ...and the C1 row is UNCHANGED after every foreign attempt.
+  const resRow = (await db.collection("courseResults").doc(colResA).get()).data();
+  check(
+    resRow?.obtained === 70 && resRow?.fullMarks === 100 && resRow?.schoolId === C1 &&
+      resRow?.branchId === `${P}col-br-a` && resRow?.attempt === 1,
+    `the C1 result row is unchanged after the foreign attempts (${resRow?.obtained}/${resRow?.fullMarks} / ${resRow?.schoolId} / ${resRow?.branchId})`
+  );
+
+  // (11) A FOREIGN studentId in a BOTH-tenant POST is the SAME 400 as a ghost id.
+  const fStu = await postJSON(bothCookie, "/api/course-results", { studentId: colStuA, courseId: bothCourse, obtained: 50, fullMarks: 100 });
+  const gStu = await postJSON(bothCookie, "/api/course-results", { studentId: `${P}no-such-student`, courseId: bothCourse, obtained: 50, fullMarks: 100 });
+  check(
+    fStu.status === 400 && JSON.stringify(fStu.body) === JSON.stringify(gStu.body),
+    `a foreign studentId in a POST is 400, byte-identical to a ghost (foreign=${JSON.stringify(fStu.body)} ghost=${JSON.stringify(gStu.body)})`
+  );
+
+  // (12) A FOREIGN courseId in a BOTH-tenant POST is the SAME 400 as a ghost id.
+  const fCourse = await postJSON(bothCookie, "/api/course-results", { studentId: bothStu, courseId: colCourseA, obtained: 50, fullMarks: 100 });
+  const gCourse = await postJSON(bothCookie, "/api/course-results", { studentId: bothStu, courseId: `${P}no-such-course`, obtained: 50, fullMarks: 100 });
+  check(
+    fCourse.status === 400 && JSON.stringify(fCourse.body) === JSON.stringify(gCourse.body),
+    `a foreign courseId in a POST is 400, byte-identical to a ghost (foreign=${JSON.stringify(fCourse.body)} ghost=${JSON.stringify(gCourse.body)})`
+  );
+
+  // (13) ...and the reverse: C1 cannot pull another tenant's student into a
+  //      result either — the same 400 as a ghost, so no oracle.
+  const cFStu = await postJSON(collegeCookie, "/api/course-results", { studentId: bothStu, courseId: colCourseA, obtained: 50, fullMarks: 100 });
+  const cGStu = await postJSON(collegeCookie, "/api/course-results", { studentId: `${P}no-such-student`, courseId: colCourseA, obtained: 50, fullMarks: 100 });
+  check(
+    cFStu.status === 400 && JSON.stringify(cFStu.body) === JSON.stringify(cGStu.body),
+    `C1 POST with a foreign (BOTH) studentId is 400, byte-identical to a ghost (foreign=${JSON.stringify(cFStu.body)} ghost=${JSON.stringify(cGStu.body)})`
+  );
+}
+
 /* ---------- BOTH tenant, mode=SCHOOL: the API still follows institutionType ---------- */
 console.log("\n### BOTH tenant in SCHOOL mode — the API still follows institutionType");
 // INTENDED BEHAVIOUR (docs/COLLEGE-DECISIONS.md §3): the UI *mode* is context

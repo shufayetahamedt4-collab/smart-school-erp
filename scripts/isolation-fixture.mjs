@@ -363,6 +363,30 @@ async function create() {
   });
   mark("courseRegistrations", colRegB);
 
+  // ---- College results (Phase 6c) -------------------------------------------
+  //      One `courseResults` row per branch-bound programme, so a BRANCH-scoped
+  //      session has a genuine other-branch row to be refused, and a SCHOOL-scoped
+  //      one has both. Written RAW, carrying the same
+  //      schoolId/branchId/studentId/courseId/programId/termNumber/attempt shape
+  //      the results route writes, so the tenant and branch probes exercise the
+  //      real confinement. The marks are ordinary (70/100 and 80/100): the
+  //      LETTER/point/CGPA are derived at read time from the tenant's ACTIVE
+  //      scheme (D-6-12), so the fixture deliberately stores no grade at all.
+  const colResA = `${P}col-res-a`;
+  await db.collection("courseResults").doc(colResA).set({
+    id: colResA, schoolId: collegeSchoolId, branchId: colBranchA, studentId: colStuA,
+    courseId: colCourseA, programId: colProgA, termNumber: 1, attempt: 1,
+    obtained: 70, fullMarks: 100, recordedById: null, createdAt: now,
+  });
+  mark("courseResults", colResA);
+  const colResB = `${P}col-res-b`;
+  await db.collection("courseResults").doc(colResB).set({
+    id: colResB, schoolId: collegeSchoolId, branchId: colBranchB, studentId: colStuB,
+    courseId: colCourseB, programId: colProgB, termNumber: 1, attempt: 1,
+    obtained: 80, fullMarks: 100, recordedById: null, createdAt: now,
+  });
+  mark("courseResults", colResB);
+
   // ---- BOTH tenant WITH college data (one department) + a SCHOOL_ADMIN -------
   const bothSchoolId = `${P}both`;
   await db.collection("schools").doc(bothSchoolId).set({
@@ -415,6 +439,15 @@ async function create() {
     requestedById: `${P}user-both-admin`, decidedById: null, decidedAt: null, createdAt: now,
   });
   mark("courseRegistrations", bothReg);
+  // The BOTH tenant's OWN result row: the second college-capable tenant's row, so
+  // its list shows exactly this and never the COLLEGE tenant's.
+  const bothRes = `${P}both-res`;
+  await db.collection("courseResults").doc(bothRes).set({
+    id: bothRes, schoolId: bothSchoolId, branchId: null, studentId: bothStu,
+    courseId: bothCourse, programId: bothProg, termNumber: 1, attempt: 1,
+    obtained: 60, fullMarks: 100, recordedById: null, createdAt: now,
+  });
+  mark("courseResults", bothRes);
   track.creds.bothAdmin = newPw();
   const bothAdminUserId = `${P}user-both-admin`;
   await db.collection("users").doc(bothAdminUserId).set({
@@ -504,7 +537,7 @@ async function create() {
     demoStudent: { email: "zz-iso-demo-student@test.local", password: track.creds.demoStudent },
     classId, sectionId, subjectId, studentId, teacherId, examId, feeId, hwId, convId,
     colCourseA, colCourseB, colCourseNone, colMapA, colMapB, bothCourse, bothProg, bothMap,
-    colStuA, colStuB, colRegA, colRegB, bothStu, bothReg,
+    colStuA, colStuB, colRegA, colRegB, colResA, colResB, bothStu, bothReg, bothRes,
     regOnlySchoolId, regOnlyEmptySchoolId, regOnlyId,
   }, null, 2));
 }
@@ -538,7 +571,8 @@ async function clean() {
   // cannot be attributed to (or safely deleted by) the fixture.
   const owned = ["users", "students", "classes", "sections", "subjects", "teachers",
     "attendance", "homeworks", "fees", "exams", "routines", "meetingSlots", "conversations", "schools",
-    "branches", "departments", "programs", "courses", "programCourses", "courseRegistrations"];
+    "branches", "departments", "programs", "courses", "programCourses", "courseRegistrations",
+    "courseResults"];
   for (const col of owned) {
     const snap = await db.collection(col).where("__name__", ">=", P).where("__name__", "<=", P + "\uf8ff").get();
     for (const d of snap.docs) {

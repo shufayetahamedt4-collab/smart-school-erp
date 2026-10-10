@@ -34,12 +34,17 @@
  *   5. THE SCHOOL SPINE IS UNTOUCHED. `examMark` still maps to `marks`, `marks` is
  *      still used by exactly one model, and the school-critical mappings are
  *      unchanged.
- *   6. NO API YET. 6b builds no route: nothing under `src/app/api` names
- *      `prisma.courseResult`.
- *   7. THE SEGMENT IS DEFERRED, DELIBERATELY. `verify-college-routes.mjs` check 1
- *      fails a LISTED college segment that has no directory ("a stale list"), so
- *      `course-results` is added in the same change that creates its directory
- *      (6c) — the guard stays strict at 3/0 instead of being weakened.
+ *   6. THE MODEL IS REACHABLE ONLY FROM A LISTED SEGMENT. Every file under
+ *      `src/app/api` that names `prisma.courseResult` must sit inside a listed
+ *      college segment, and (since 6c) exactly one such segment carries it. 6b
+ *      itself built no route; 6c built the API behind the same guard, so this
+ *      check bounds WHERE the model may be reached from instead of asserting it
+ *      is unreachable.
+ *   7. THE SEGMENT AND ITS DIRECTORY AGREE. `verify-college-routes.mjs` check 1
+ *      fails a LISTED college segment that has no directory ("a stale list") and
+ *      fails an unclassified directory, so `course-results` is listed in the same
+ *      change that creates `src/app/api/course-results` (6c) — and the two must
+ *      keep agreeing afterwards.
  *   8. THE GUARD COVERS THE NEW MODEL. `verify-college-routes.mjs`'s
  *      `COLLEGE_MODEL_RE` includes `courseResult`, so a non-college route touching
  *      college results fails check 3 from the moment the model exists.
@@ -258,37 +263,54 @@ console.log("\n5. the school spine is untouched — marks is still the school's 
 
 /* ------------------------------------------------------------------------ 6 */
 
-console.log("\n6. no API yet — nothing under src/app/api reaches the new model");
+console.log("\n6. the model is reachable only from inside a listed college segment");
 {
   const apiDir = fileURLToPath(new URL("../src/app/api", import.meta.url));
+  const collegeSet = new Set(segments.COLLEGE_API_SEGMENTS);
   const offenders = [];
+  const owners = new Set();
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = `${dir}/${entry.name}`;
       if (entry.isDirectory()) walk(full);
       else if (entry.isFile() && entry.name.endsWith(".ts")) {
-        if (/\bprisma\.courseResult\b/.test(maskCommentsAndStrings(readFileSync(full, "utf8")))) offenders.push(full);
+        if (!/\bprisma\.courseResult\b/.test(maskCommentsAndStrings(readFileSync(full, "utf8")))) continue;
+        const rel = full.slice(apiDir.length + 1).split("\\").join("/");
+        const segment = rel.split("/")[0];
+        owners.add(segment);
+        if (!collegeSet.has(segment)) offenders.push(rel);
       }
     }
   };
   if (existsSync(apiDir)) walk(apiDir);
-  if (offenders.length) bad("no-api", `6b builds no route, but ${offenders.join(", ")} names prisma.courseResult`);
-  else ok("no route file under src/app/api names prisma.courseResult — the model is registered but unreachable until 6c");
+  if (offenders.length)
+    bad(
+      "route-scope",
+      `a NON-college route names prisma.courseResult: ${offenders.join(", ")} — a college model belongs only in a listed college segment (check 3 of verify-college-routes.mjs)`
+    );
+  else if (!owners.size)
+    bad("route-scope", "no route names prisma.courseResult — 6c builds the results API, so at least one must");
+  else if (owners.size !== 1 || !owners.has("course-results"))
+    bad("route-scope", `prisma.courseResult is reached from ${[...owners].join(", ")} — expected only the course-results segment`);
+  else ok('prisma.courseResult is reached only from the LISTED "course-results" segment (6c), never from a non-college directory');
 }
 
 /* ------------------------------------------------------------------------ 7 */
 
-console.log("\n7. the segment is deferred to 6c, deliberately — the guard's stale-list rule forbids listing it early");
+console.log("\n7. the segment and its directory agree — the 6c landing that keeps check 1 green");
 {
-  const listed = [...segments.COLLEGE_API_SEGMENTS];
+  const listed = [...segments.COLLEGE_API_SEGMENTS].includes("course-results");
   const dirExists = existsSync(fileURLToPath(new URL("../src/app/api/course-results", import.meta.url)));
-  const guardPinsStale = /a listed segment with no directory|stale/i.test(guardText) || /staleSegments/.test(guardText);
-  if (!guardPinsStale) bad("segment", "the guard no longer pins the stale-list rule — re-check the 6b deferral");
-  else if (listed.includes("course-results"))
-    bad("segment", 'COLLEGE_API_SEGMENTS lists "course-results" while src/app/api/course-results does not exist — verify-college-routes check 1 would fail');
-  else if (dirExists)
-    bad("segment", "the directory src/app/api/course-results exists but the segment is not listed — check 1 would fail the other way");
-  else ok('not listed and no directory: the segment lands in 6c together with src/app/api/course-results, so check 1 stays green (guarded by the recorded rule)');
+  const guardPinsStale = /staleSegments/.test(guardText);
+  if (!guardPinsStale)
+    bad("segment", "the guard no longer pins the stale-list rule — check 1 could then accept a listed segment with no directory");
+  else if (!listed && !dirExists)
+    bad("segment", "neither the segment nor its directory exists — 6c must land both together");
+  else if (listed && !dirExists)
+    bad("segment", 'COLLEGE_API_SEGMENTS lists "course-results" but src/app/api/course-results does not exist — verify-college-routes check 1 would fail (a stale list)');
+  else if (!listed && dirExists)
+    bad("segment", "src/app/api/course-results exists but the segment is not listed — check 1 would fail the other way (an unclassified directory)");
+  else ok('"course-results" is listed AND src/app/api/course-results exists: 6c landed both in one change, so check 1 stays green');
 }
 
 /* ------------------------------------------------------------------------ 8 */
@@ -319,5 +341,6 @@ if (failures) {
 console.log(
   `✅ COLLEGE RESULTS DATA LAYER OK — ${checks} check(s): courseResults is registered in COLS/RELS/prisma as a purely ` +
     `additive change (the three pre-6b baselines still reproduce), the school marks spine is untouched, the row takes a ` +
-    `random id, the guard covers the new model, and the API segment waits for its directory in 6c.`
+    `random id, the guard covers the new model, the model is reached only from the listed course-results segment, and ` +
+    `that segment and its directory agree.`
 );

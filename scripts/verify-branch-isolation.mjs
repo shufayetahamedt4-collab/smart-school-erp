@@ -412,6 +412,78 @@ console.log("\n### college departments/programs — branch admin confinement");
   }
 }
 
+/* ------------------------------------- college course results (6c): branch confinement */
+// The `courseResults` rows created by isolation-fixture.mjs (one per branch-bound
+// programme) must obey the SAME confinement as the programme they inherit their
+// branch from: a BRANCH-scoped admin lists and reads ONLY its own branch's rows,
+// and every foreign-branch probe is a 403 that changes nothing. The COLLEGE-scope
+// admin reaches both. Nothing is compared against an exact count — the branch A
+// row must be present and the branch B row absent, whatever else the tenant holds.
+console.log("\n### college course results — branch admin confinement");
+{
+  const TRACK = new URL(".qa-fixtures.json", import.meta.url);
+  if (!existsSync(TRACK)) {
+    check("the isolation fixture is present (scripts/.qa-fixtures.json)", false, "run: node scripts/isolation-fixture.mjs create");
+  } else {
+    const creds = (JSON.parse(readFileSync(TRACK, "utf8")).creds) || {};
+    const collegeAdmin = await login(HOSTS.school, "zz-iso-college-admin@test.local", creds.collegeAdmin);
+    const collegeBranchAdmin = await login(HOSTS.school, "zz-iso-college-br-admin@test.local", creds.collegeBranchAdmin);
+
+    const colResA = `${P}col-res-a`; // branch A — the branch admin's own row
+    const colResB = `${P}col-res-b`; // branch B — another branch of the SAME tenant
+    const colStuB = `${P}col-stu-b`; // a branch-B student, for the POST probe
+    const courseB = `${P}col-course-b`;
+
+    // 1. The branch admin's list carries its own branch's row and NOT branch B's
+    //    (a result stores the branch it inherited from its programme).
+    const bList = (await req(HOSTS.school, "/api/course-results", { cookie: collegeBranchAdmin })).data || [];
+    const bIds = bList.map((r) => r.id);
+    check(
+      "branch admin's results list carries its own branch's row and NOT another branch's",
+      bIds.includes(colResA) && !bIds.includes(colResB),
+      JSON.stringify(bIds)
+    );
+
+    // 2. Another branch's row cannot be read, re-marked or deleted.
+    const resForeignGet = await req(HOSTS.school, `/api/course-results/${colResB}`, { cookie: collegeBranchAdmin });
+    check("branch admin CANNOT GET another branch's result (403)", resForeignGet.status === 403, `HTTP ${resForeignGet.status}`);
+    const resForeignPatch = await patch(HOSTS.school, `/api/course-results/${colResB}`, { obtained: 1 }, collegeBranchAdmin);
+    check("branch admin CANNOT PATCH another branch's result (403)", resForeignPatch.status === 403, `HTTP ${resForeignPatch.status}`);
+    const resForeignDelete = await req(HOSTS.school, `/api/course-results/${colResB}`, { cookie: collegeBranchAdmin, method: "DELETE" });
+    check("branch admin CANNOT DELETE another branch's result (403)", resForeignDelete.status === 403, `HTTP ${resForeignDelete.status}`);
+
+    // 3. A result inherits the PROGRAMME's branch, so recording one for a branch-B
+    //    student is confined by the branch-B programme — a 403.
+    const resForeignPost = await post(HOSTS.school, "/api/course-results", { studentId: colStuB, courseId: courseB, obtained: 50, fullMarks: 100 }, collegeBranchAdmin);
+    check("a BRANCH-scoped admin CANNOT record a result for another branch's student (403)", resForeignPost.status === 403, `HTTP ${resForeignPost.status}`);
+
+    // 4. The COLLEGE-scoped admin (SCHOOL_ADMIN) reaches BOTH branches' rows…
+    const aList = (await req(HOSTS.school, "/api/course-results", { cookie: collegeAdmin })).data || [];
+    const aIds = aList.map((r) => r.id);
+    check(
+      "a SCHOOL-scoped college admin sees BOTH branches' results",
+      aIds.includes(colResA) && aIds.includes(colResB),
+      JSON.stringify(aIds)
+    );
+    // …and the branch admin's OWN row is readable — the positive control beside
+    // every 403 above.
+    const ownGet = await req(HOSTS.school, `/api/course-results/${colResA}`, { cookie: collegeBranchAdmin });
+    check(
+      "branch admin CAN read its own branch's result (200)",
+      ownGet.status === 200 && ownGet.data?.id === colResA,
+      `HTTP ${ownGet.status}`
+    );
+
+    // 5. None of the foreign probes above may have touched branch B's row.
+    const resBRow = (await db.collection("courseResults").doc(colResB).get()).data();
+    check(
+      "the other branch's result row is unchanged after the foreign probes",
+      resBRow?.obtained === 80 && resBRow?.fullMarks === 100 && resBRow?.branchId === `${P}col-br-b` && resBRow?.attempt === 1,
+      `${resBRow?.obtained}/${resBRow?.fullMarks} / ${resBRow?.branchId} / attempt=${resBRow?.attempt}`
+    );
+  }
+}
+
 /* --------------------------------------------------------------- cleanup */
 console.log("\n### cleanup");
 const wantedAdm = new Set(createdAdmissionNos);

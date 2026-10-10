@@ -34,12 +34,20 @@
 // `src/app/api/course-registrations`, so the guard gates its handlers too.
 // Phase 5b (§16) adds `college-promotion` the same way, in the change that creates
 // `src/app/api/college-promotion` — the per-program promotion ladder's own segment.
+// Phase 6c (§23.7) adds `course-results` the same way, in the change that creates
+// `src/app/api/course-results` — the college RESULT row's own segment (the
+// `courseResults` collection, D-6-17). The transcript READ is nested under it
+// (`course-results/students/[id]/transcript`) rather than under the school's own
+// `/api/students`, because that segment is frozen non-college: check 3 forbids a
+// file there from calling `requireCollege` or touching a college model, and this
+// list has no allowlist to weaken. A college surface belongs in a college segment.
 export const COLLEGE_API_SEGMENTS = [
   "departments",
   "programs",
   "courses",
   "course-registrations",
   "college-promotion",
+  "course-results",
 ] as const;
 
 export type CollegeApiSegment = (typeof COLLEGE_API_SEGMENTS)[number];
