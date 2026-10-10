@@ -1,5 +1,6 @@
 import { initializeApp, getApps, cert, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import { resolveDatabaseId } from "@/lib/database-id";
 
 /**
  * Lazy Firebase Admin singleton.
@@ -56,13 +57,16 @@ function assertLiveFirestoreAllowed(): void {
 export function getDb(): Firestore {
   if (!_db) {
     assertLiveFirestoreAllowed();
-    // Database selection is configuration-driven. FIRESTORE_DATABASE_ID is the
-    // CANONICAL name (docs/ENVIRONMENTS-AND-SECRETS.md); FIRESTORE_DB_ID is
-    // accepted as a documented ALIAS — it is origin/main's cutover switch name
-    // (docs/INTEGRATION-LOG.md). When BOTH are set, FIRESTORE_DATABASE_ID wins.
-    // Unset => the project's "(default)" database, which is the rollback
-    // database (no code change is needed to roll back).
-    const databaseId = process.env.FIRESTORE_DATABASE_ID || process.env.FIRESTORE_DB_ID;
+    // Database selection is configuration-driven (src/lib/database-id.ts, a pure
+    // module): FIRESTORE_DATABASE_ID is the CANONICAL name
+    // (docs/ENVIRONMENTS-AND-SECRETS.md); FIRESTORE_DB_ID is a documented ALIAS
+    // (origin/main's cutover switch name, docs/INTEGRATION-LOG.md). Only one is
+    // set in the real deployment, so the behaviour is unchanged. Unset => the
+    // project's "(default)" database, which is the rollback database (no code
+    // change is needed to roll back). When BOTH are set and DIFFER, the resolver
+    // THROWS rather than silently pick one — the app fails loudly, naming both
+    // variables, instead of opening a database the operator did not ask for.
+    const databaseId = resolveDatabaseId();
     _db = databaseId
       ? getFirestore(adminApp(), databaseId)
       : getFirestore(adminApp());
