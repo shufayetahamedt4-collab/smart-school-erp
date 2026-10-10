@@ -1365,3 +1365,276 @@ and BRANCH_ADMIN still abandoning (200 each); and the seam ignored under `NODE_E
 
 The build output contains no new warnings — the only two are the pre-existing `jose` Edge-Runtime
 notices for `middleware.ts`'s import trace.
+
+## 23. Phase 6 decisions (the grading scheme, GPA/CGPA and the transcript)
+
+Phase 6 is the §10 phase-list row “**Credit-weighted GPA/CGPA + transcript**” (the delta's Phase 5).
+This section is its **preflight**: the decisions below are the shape of the work. **No Phase 6 code
+exists yet**, and no Phase 7 work is started or implied.
+
+**Owner ruling (2026-10-10), binding.** Grading scale, pass mark, fail/retake policy and whether a GPA
+is shown at all are decided by **each institution (its admin)**, not by us. Institutions differ —
+Bangladesh HSC uses a 5.00 scale, universities usually 4.00, English-medium schools use level-based
+letter grades (A*, A, B…) and may have no GPA, and a college may have its own retake rule. Our job is
+to make each of those **easy to set up**; **no rule is hardcoded**, and no preset is privileged over
+an admin's own edit.
+
+### 23.1 What already exists, and what Phase 6 reuses
+
+The school side already ships a **per-tenant, admin-editable, mode-scoped** grading system. Phase 6
+**extends** it rather than building a second one.
+
+| Existing piece | Where | Reused for college how |
+|---|---|---|
+| `GradingScheme` — `{ name, gpaScale, passPercent, failCapsGpa, bands[] }` | `src/lib/grading.ts` | As-is. `GradeBand` is already **`{ grade, minPercent, gpa, remark }`** — “letter, min mark, point” exactly, so an A*/A/B ladder needs no model change (labels are free text ≤ 6 chars) |
+| `DEFAULT_SCHEME` + `GRADING_PRESETS` (bd-5, gpa-4, letters-5) | `src/lib/grading.ts` | Extended (23.2 D-6-3). `DEFAULT_SCHEME` **is** the official BD HSC 5.00 ladder (A+ ≥80 → 5.00 … D ≥33 → 1.00, F below, pass 33%) |
+| `validateScheme` / `coerceScheme` | `src/lib/grading.ts` | Extended **additively** (23.2 D-6-5); a stored value that fails validation still falls back to the default, never to a broken print |
+| `bandForPercent` / `gradeForScheme` / `gpaOfScheme` / `round2` / `bandLabel` | `src/lib/grading.ts` | Reused. `gpaOfScheme` is the **plain mean**; the **credit-weighted** CGPA is the new part |
+| Mode-scoped storage: `schemeKey(schoolId, mode)` → `grading_scheme_<schoolId>` (SCHOOL, byte-identical to today) / `grading_scheme_<schoolId>__college` (COLLEGE) | `src/lib/grading-store.ts`, `src/lib/institution.ts` (`COLLEGE_KEY_SUFFIX`) | **As-is, and this is the big one**: a college already has its **own** scheme slot, reached by `loadScheme(schoolId)` because `resolveActiveMode` returns the only allowed mode for a single-mode tenant |
+| `/api/grading-scheme` `GET`/`PUT`/`DELETE` + `GradingSchemeEditor` | `src/app/api/grading-scheme/route.ts`, `src/components/GradingSchemeEditor.tsx` | **No API or editor change needed for 23.2(a)**: the route resolves the mode server-side (a `BOTH` tenant switches with the cookie, a `COLLEGE` tenant always reads the college key) |
+| Terms: `termCount` / `termLabel` / `termLabels` / `isValidTermNumber` | `src/lib/college-terms.ts` | The transcript's term skeleton (Year 1…, Semester 1…), from the student's programme |
+| Courses with **credits** (`creditHours`, nullable) and the programme→course map (`termNumber`, `requirement`) | `course` / `programCourse` in `src/lib/db.ts`; `GET /api/programs/[id]/courses` | The CGPA weight and the planned course list |
+| Registrations (`status: PENDING/APPROVED/REJECTED` machine) | `courseRegistration`, `src/lib/registration-status.ts` | **Only APPROVED rows are gradable** — the single status machine stays the one definition |
+| College route gate: `COLLEGE_API_SEGMENTS` + `verify-college-routes.mjs` | `src/lib/college-routes.ts` | A new segment name must be added **in the same change that creates its directory** (§8 D-A) |
+| The rhythm itself: pure logic + offline verifier → API → page → isolation proof, **baseline first** | §15 (5a), §16 (5b), §11 (3e), §17 (5b-2/5b-3) | The build order in 23.6 |
+
+**Three real gaps** (the only genuinely new things):
+
+1. **“No GPA” cannot be expressed.** `gpaScale` is mandatory (0.1–10) and `validateScheme` requires a `gpa` on every band, so a school that shows letters or percentages only cannot be configured today.
+2. **There is no college result row.** `examMark` (`marks`) is the **school** spine — `{ examId, studentId, subjectId, obtained, fullMarks, grade, gradePoint }`, per exam **and** per school subject — and **D-3-6 / D-4a-0 (LOCKED)** require college marks to live in **separate college collections**, never on that spine. No `courseResult`/`courseMark`/`cgpa` collection exists in `src/lib/db.ts` today.
+3. **There is no retake policy anywhere**, and no transcript file or page exists in `src/` at all (the only `transcript` hit in `src/` is a comment about printed decimals).
+
+### 23.2 (a) The grading scheme — per tenant, mode-scoped, extended not replaced
+
+- **D-6-1 — the storage stays exactly what it is.** The scheme lives in the existing mode-scoped
+  `settings` key (`grading_scheme_<schoolId>` / `…__college`), read and written through
+  `grading-store.ts`. **No new collection, no new key shape, no migration.** A tenant that never ran a
+  college cannot be affected, because only COLLEGE reaches the suffixed key (the `modeScopedKey`
+  contract, §4).
+- **D-6-2 — one additive field expresses “no GPA”: `showGpa?: boolean`, absent means `true`.**
+  Absent-is-true is the whole backward-compatibility guarantee: every stored scheme, every preset and
+  the `CUSTOM` object in `scripts/verify-grading.mjs` keep validating and printing exactly as today.
+  When `showGpa` is `false`, the scheme prints **letters and/or percentages only**, and a band's `gpa`
+  becomes **optional** (D-6-5).
+- **D-6-3 — presets become an institution-neutral list, and the admin's own edit always wins.**
+  `GRADING_PRESETS` gains the shapes the owner named, keeping the three existing keys intact
+  (`verify-grading.mjs` asserts `presets.length >= 2`):
+
+  | Preset key | Shape | Note |
+  |---|---|---|
+  | `bd-5` (existing, label already the HSC ladder) | 5.00, pass 33% | **This is BD HSC** — present the label as “Bangladesh HSC / National (5.00)” |
+  | `bd-university-4` (**new**) | 4.00 CGPA-style, pass 40% | The university half of the ruling |
+  | `eng-medium-letters` (**new**) | Level-based letters (A*, A, B…), **`showGpa: false`** | English-medium schools/colleges |
+  | `percent-only` (**new**) | `showGpa: false`, one 0% band | “Percent only” for an institution with no letters |
+  | `gpa-4`, `letters-5` (existing) | unchanged | No existing key is renamed or removed |
+
+  A preset is a **starting point**, never a lock: selecting one drops an editable copy into the editor,
+  and the saved scheme is the admin's own (the same rule the wizard already applies to the college
+  skeleton).
+- **D-6-4 — every saving/validation rule the school has today keeps applying**, for every shape: a
+  unique `minPercent` per band, at least two bands, at most 20, a band starting at 0%, a label ≤ 6
+  chars, and (when GPA is shown) `0 ≤ gpa ≤ gpaScale`. Phase 6 adds **no** second scale, and does not
+  touch `failCapsGpa`.
+- **D-6-5 — `validateScheme` relaxes exactly one rule, and only for a no-GPA scheme.** With
+  `showGpa: false` a band may omit `gpa`; with `showGpa` true or absent, **nothing is relaxed**. A
+  no-GPA scheme that *does* carry points is still validated against the scale, so the editor cannot
+  write a value the transcript would print wrongly. Additive only: no existing refusal is removed or
+  reworded.
+- **D-6-6 — the DEFAULT does NOT change (owner ruling, 2026-10-10).** An unconfigured tenant of every
+  shape keeps reading `DEFAULT_SCHEME` — Bangladesh National 5.00 — because the wizard seeds an **HSC**
+  programme (`COLLEGE_DEFAULT_SKELETON`: “HSC Science”, `degreeLevel: "HSC"`, 2 years), so the shipped
+  5.00 ladder is the right starting point and a mode-aware default would only add a second thing to
+  explain. **Q1 asked this and the owner answered: leave the default alone.** What the ruling requires
+  instead is that the scale is *visible, and one click away*:
+  - the active scheme's **name and scale** are shown on the **college results screen** at all times —
+    an admin must never have to guess which scale is grading;
+  - the same **name and scale are printed on every transcript**, with the pass mark and the print date
+    (D-6-14 — this is what makes a derived transcript honest, D-6-12);
+  - the **presets are one click** from that screen (D-6-3's list), and selecting one still drops an
+    *editable copy* — a preset is never applied behind the admin's back.
+- **D-6-18 — scheme resolution goes through ONE function, so a per-programme override can be added
+  later without touching a single caller.** A college may legitimately run programmes with
+  **different scales at the same time** (HSC 5.00 next to a degree/honours 4.00 — the same reason the
+  delta gave the school and college halves separate keys). **v1 stays one scheme per tenant** (D-6-19),
+  but no caller may read `loadScheme`/`schemeKey` directly for the purpose of grading or printing:
+  they call one resolver — `resolveSchemeFor({ schoolId, mode, programId? })` — whose v1 behaviour is
+  “ignore `programId`, return the tenant's mode-scoped scheme”. The override then becomes a change
+  *inside* that function, with every caller, the print route and the API contract untouched.
+- **D-6-19 — v1 is ONE scheme per tenant, and the per-programme override is the first item AFTER
+  v1.** It is listed first in §23.6's “first candidate after version 1” and marked **“owner to confirm
+  whether it is needed for the first college customer”**. It is deliberately not built now, and it is
+  not a blocker for any of 6a–6f.
+
+### 23.3 (b) The retake policy — per tenant, mode-scoped, next to the scheme
+
+- **D-6-7 — the retake policy lives in the SAME mode-scoped settings document as the scheme**, as a
+  new optional `retake` block (`{ policy, maxRetakes }`). One document, one write, one cache
+  invalidation, one mode scope — a second settings key would be a second thing to keep in step. A
+  scheme with no `retake` block means today's behaviour: no retakes recorded, nothing to resolve.
+- **D-6-8 — `policy` is one of `REPLACE | BEST | BOTH | AVERAGE`, and the resolution is a pure
+  function of the attempts.** `REPLACE` = the latest attempt is the course grade; `BEST` = the highest
+  attempt; `BOTH` = every attempt is reported (the transcript prints each) and the **last** attempt is
+  the effective one for the CGPA; `AVERAGE` = the mean of the attempt points. The chosen policy never
+  changes the **stored** attempts — only which value the CGPA and the transcript print (D-6-12).
+- **D-6-9 — `maxRetakes` is an integer or `null` (unlimited).** Enforced at the API when a retake is
+  recorded (a refusal naming the limit), never by deleting an attempt.
+- **D-6-10 — there is exactly ONE pass mark per mode, and it already exists.** `scheme.passPercent`
+  stays the only pass mark; a retake rule **references** it (a course is “failed” when its percent is
+  below `passPercent`). Phase 6 does **not** add a second pass mark — two would let a transcript
+  disagree with the grade it prints.
+
+### 23.4 (c) CGPA — credit-weighted by default, computed only from the tenant's own settings
+
+- **D-6-11 — CGPA is credit-weighted (as §10 and the delta already say).** “Credit” is
+  `course.creditHours`; the weight of a course is that row's credits, and a course with no recorded
+  credits (`creditHours: null` — normal for HSC) is **not** silently zero-weighted. The fallback is
+  the owner's call (Q2); the recommendation is **weight 1 per course, and print the weighting basis**,
+  with the arithmetic falling back to the plain mean when **no** course in the set carries credits.
+- **D-6-12 — a GPA/CGPA is DERIVED on read, never a frozen snapshot.** This is the school's existing
+  rule (editing a band re-grades marks already entered, with no re-entry — asserted by
+  `verify-grading.mjs`) and Phase 6 keeps it: the stored row holds the **marks** (`obtained`,
+  `fullMarks`) and the attempt number, and the letter/point/CGPA are computed from the tenant's scheme
+  at read time. A printed transcript therefore reflects the scale **in force when it was printed**, and
+  the printout names that scale (D-6-14) so a reader can always tell which one applied. If a frozen
+  “as-issued” transcript is ever wanted, that is a new, separate deliverable — not v1.
+
+  **Known v1 limitation, recorded deliberately (owner ruling, 2026-10-10): derived-on-read means a
+  later scheme change REWRITES what an already-issued transcript prints.** A transcript printed last
+  term and the same transcript printed today can show different letters, different points and a
+  different CGPA once an admin edits a band or the pass mark — the marks on file do not change, only
+  their interpretation. That is the price of the re-grade-without-re-entry behaviour the school
+  already promises, and Phase 6 accepts it for v1 because the alternative (frozen grades) would break
+  that promise. The mitigations are the two the ruling asks for: **the transcript prints the active
+  scheme's name, its scale and the print date**, so a reader can always see which policy produced the
+  page; and **“freeze at term publish”** sits on the out-of-v1 list (§23.6) with this exact reason.
+- **D-6-13 — the computation reads only this tenant's own rows and only this tenant's own settings.**
+  The scheme comes from `loadScheme(schoolId, mode)` (so a `BOTH` tenant's college CGPA can never be
+  computed from the school scale), and the rows are the tenant's `courseRegistration`/result rows, so
+  a foreign id can only narrow the result to zero. This is asserted, not assumed (23.6/6e).
+
+### 23.5 (d) The transcript — what it prints, per setting
+
+- **D-6-14 — ONE page, one student, one programme, derived entirely from the tenant's settings.**
+  `/print/college-transcript/<studentId>` (a print route beside the existing `report-card` and
+  `marksheet` prints), reachable only for a college tenant. **Required on every print, per the owner
+  ruling: the active scheme's NAME, its scale, the pass mark and the print date** — they are what keep
+  a derived transcript honest (D-6-12's known limitation). It prints:
+
+  | Block | Content | Changes with a setting? |
+  |---|---|---|
+  | Header | Institution name (+ address), the student's name, admission no, programme + degree level, term system, **and the scale in force** (`scheme.name`, `GPA out of X.XX` / “letters only” / “percent only”), print date | The scale lines follow `showGpa`, `gpaScale` and `name` |
+  | Body, per term | The term label from `termLabel(termNumber, termSystem)`; for each course the student has a result for: code, title, `creditHours`, obtained/full (`percent`), **letter** | Letters are the admin's own band labels (A* prints as A*) |
+  | Per course | **point** column | Only when `showGpa` is true |
+  | Retaken course | The attempts, per the tenant's `policy`, with the effective one marked and the rest visibly superseded | Follows `REPLACE/BEST/BOTH/AVERAGE` |
+  | Per term | Term GPA (credit-weighted over that term's points) | Only when `showGpa` is true |
+  | Footer | **CGPA** (credit-weighted, cumulative), pass/fail per course (`percent >= passPercent`), and the scheme footer (name, scale, pass mark) | CGPA only when `showGpa` is true; the pass mark always prints |
+
+- **D-6-15 — the transcript prints courses the student has a RESULT for, in the term they took them.**
+  The programme's mapping is what makes a course gradable (and decides its term), but a mapped course
+  with no result is **not** printed as a zero in v1 — an empty term prints nothing rather than a
+  fabricated mark. (Planned-but-ungraded terms are a later ask; see 23.6 for what stays out.)
+- **D-6-16 — no GPA is ever printed “as 0.00” to mean “not applicable”.** With `showGpa: false` the
+  GPA/point columns and the CGPA block are **absent**, not zeroed — a printed 0.00 means a real zero.
+  This is the print-side half of the owner's “whether GPA is shown at all” ruling.
+- **D-6-17 — the college result row is a SEPARATE collection (`courseResults`), per D-3-6/D-4a-0.**
+  Fields: `schoolId`, `branchId` (inherited like every college row, so branch scoping filters it
+  directly), `studentId`, `courseId`, `programId`, `termNumber`, `attempt` (1-based), `obtained`,
+  `fullMarks`, timestamps/actor. The school `marks`/`attendance` spine, `/api/marks`, `exams`,
+  `subjects` and the report card are **not touched**. The row is unique on
+  `(studentId, courseId, termNumber, attempt)`.
+
+### 23.6 (e) What stays OUT of version 1 (deliberately small)
+
+- **No college attendance.** `courseAttendance` stays the separately-locked future collection
+  (D-3-6/D-4a-0); Phase 6 records results only.
+- **No change to the Phase 5 promotion ladder, and no progression gate.** D6 (§15) says course
+  progress is not consulted and a promotion is never blocked; Phase 6 introduces pass/fail data but
+  **does not** start gating on it (see Q6).
+- **No frozen/as-issued transcript**, no transcript re-issue workflow, no versioning (D-6-12).
+- **No official/unofficial variants, no signing, no QR verification, no PDF archival** — the page prints
+  from live data like `report-card`/`marksheet` do today.
+- **No bulk/cohort transcript generation**, no batch printing, no email delivery.
+- **No other move of the school spine**: `subjects`, `exams`, `marks`, `attendance`, `report-card`,
+  `marksheet` and `/api/grading-scheme`'s existing contract are untouched; the school's report card
+  keeps printing exactly what `verify-grading.mjs` asserts today (`Pass mark 40%`, `GPA out of 5.00`).
+- **No new `ModuleKey`** in v1 (reuse `attendanceMarks`, which already gates the grading scheme — Q5).
+- **No parent/guardian transcript view**, no transcript on the parent portal.
+- **No credit transfer, no external board import, no grade-appeal workflow, no thesis/graduation
+  statement, and no second programme per student** (`students.programId` is one programme today).
+- **No “freeze at term publish”, and the reason is recorded.** Sealing each term's grades when the
+  term closes — so a later scheme edit could no longer rewrite them — needs a publish/close state
+  machine, a stored snapshot per term, and an answer to whether a frozen transcript may be re-issued.
+  Derived-on-read is the v1 behaviour instead, with its known limitation stated in D-6-12 and
+  mitigated by printing the scheme name, its scale and the print date.
+- **No per-programme scale override** (D-6-18/D-6-19) — v1 resolves exactly one scheme per tenant.
+- **No Phase 7 work** (college fees are Phase 7 and remain unstarted).
+
+**The first candidate after version 1 — the per-programme scale override (D-6-19) — and the order
+matters.** A college running HSC (5.00) and degree/honours (4.00) programmes at the same time is a
+real customer shape, so this is listed **first** among post-v1 work. **D-6-18 already makes it cheap:**
+the override is added *inside* the one scheme resolver, so no caller, no print route and no API
+contract changes when it lands. **Owner to confirm whether it is needed for the first college
+customer** — if it is, it is the first item after 6f; if not, it stays parked with no caller left to
+unpick.
+
+### 23.7 (f) The build order, in the repository's usual rhythm
+
+Each step below owes the evidence in the right-hand column **before** the next one starts; the
+“baseline first” rule of D-3e-1 applies to **every** harness named here (run it unchanged, record the
+numbers, then prove every later difference is an addition).
+
+| Step | Deliverable | Evidence it owes |
+|---|---|---|
+| **6a** | **Pure logic first**: `src/lib/college-results.ts` (attempt resolution for the four policies, credit-weighted term GPA + cumulative CGPA, no-GPA handling, missing-credit fallback) and the additive `src/lib/grading.ts` changes (`showGpa`, presets, validation) | New **offline** verifier `scripts/verify-college-results.mjs`, in the shape of `verify-college-promotion-logic.mjs`/`verify-college-terms.mjs`: every preset validates, every policy resolves, weighting with/without credits, empty and junk inputs — **no DB, no server, no network** |
+| **6b** | **Data layer**: `courseResults` in `COLS`/`RELS`/prisma accessors **and** the new segment added to `COLLEGE_API_SEGMENTS` in the same change (§8 D-A) | `verify-college-routes.mjs` passes with the new segment (a listed segment with no directory fails the guard, by design); `verify-college-terms.mjs`-style key/shape proofs |
+| **6c** | **API**: `GET`/`POST /api/course-results` (+ retake recording) and the transcript read `GET /api/students/[id]/transcript`, each with `requireCollege({schoolId})` **first**, target-tenant scoping, 404 on a foreign row, 400 on a foreign id in a body, audit rows, `writeGuard` on mutations | New `scripts/verify-college-results-api.mjs` (HTTP): the 403/400/404 matrix, one bad attempt refused with a reason, `maxRetakes` enforced, a re-graded scheme changing the served CGPA with no re-entry, and a document-count bracket around every refusal so “writes nothing” is counted, not assumed (§17 Q2's pattern) |
+| **6d** | **Page(s) + nav**: the college results entry screen, the transcript print route, and **one** nav item behind `requires:"COLLEGE"`; the grading editor reused mode-scoped (D-6-1) | `verify-nav-scope.mjs` against the recorded `scripts/nav-scope-snapshot.json` (non-college nav **deep-equal unchanged**), the page's logic proved offline where it can be (`verify-college-promotion-page.mjs`'s pattern), and screenshots |
+| **6e** | **Isolation + regression proof with recorded baselines**: fixture and tenant/branch harness additions for the new rows (`isolation-fixture.mjs` gains `courseResults` in its `owned` prefix-sweep) | `verify-tenant-isolation` / `verify-branch-isolation` **baseline recorded first**, then re-run: every new assertion an **addition**, no existing assertion changed (the §11 D-3e pattern); the COLLEGE gate asserted explicitly (a SCHOOL tenant gets 403 with zero data); and the untouched-by-Phase-6 harnesses (`verify-grading`, `verify-mode-foundation`, `verify-course-registrations`, `qa-phase23`, `qa-certificates`) re-run to **identical counts**, plus `next build` with its page count recorded |
+| **6f** | **This section's “finished” record** | The counts table in the style of §22 (verifier, before, after, why), `tsc` 0 errors, and an explicit statement of anything that could not run |
+
+### 23.8 Corrections to `docs/COLLEGE-PLAN-DELTA.md`, recorded deliberately
+
+1. **The college settings suffix is `__college`, not `_college`.** The delta's §2 table proposes
+   `grading_scheme_<schoolId>_college`; what actually shipped in Phase M is
+   `COLLEGE_KEY_SUFFIX = "__college"` (`src/lib/institution.ts`), so the key is
+   `grading_scheme_<schoolId>__college`. Phase 6 follows the shipped suffix — the delta's spelling is
+   superseded.
+2. **The delta's open item about a college grading preset is now ANSWERED by the owner ruling.**
+   `docs/COLLEGE-PLAN-DELTA.md` “Unverified items” asks whether a college needs its own grade-scale
+   preset beyond the existing `GRADING_PRESETS`. The ruling puts the scale in each institution's own
+   hands and names the shapes (5.00 HSC, 4.00 university, level-based letters with no GPA, custom),
+   which is D-6-3 — presets are **institution-neutral starting points**, not college-only ones.
+3. **The delta's Phase 5 (“credit-weighted GPA/CGPA + transcript”) is this document's Phase 6.** Its
+   note that “the grading scheme becomes mode-scoped in Phase M, so `loadScheme` must take a mode” is
+   already **done**: `loadScheme(schoolId, mode?)` resolves the mode itself, so Phase 6 needs no
+   grading-store change for that reason.
+4. **`docs/COLLEGE-PLAN.md` is still absent from this repository.** The A–I detail for this phase was
+   never written to disk, so everything above is re-supplied from the shipped code and the owner
+   ruling rather than recalled from that plan (the §10 correction stands).
+
+### 23.9 The owner's answers (2026-10-10)
+
+All six questions are **answered and accepted**; each answer is now the decision cited in the last
+column, so nothing here is still open on our side. Everything an institution sets for itself — scale,
+bands, pass mark, retake rule, whether to show a GPA — stays admin-editable (D-6-1…D-6-10) and is
+**not** asked here.
+
+| # | Question | Owner's answer | Where it landed |
+|---|---|---|---|
+| **Q1** | The default scale an unconfigured tenant gets | **Do not change the default.** The wizard seeds an HSC programme, so Bangladesh National 5.00 stays as the starting point. In exchange the active scheme's **name and scale must be visible on the college results screen** and **printed on every transcript**, and the **presets must be one click** away | **D-6-6** |
+| **Q2** | Weighting a course with no `creditHours` | **Accepted as recommended**: weight 1 per course, plain mean when no course in the set carries credits, never zero-weight and never refuse to compute | **D-6-11** |
+| **Q3** | Does a transcript show every retake attempt? | **Accepted**: every attempt in the term it was taken, with the effective one marked | **D-6-8 / D-6-14** |
+| **Q4** | Results screen: new, or reuse the school editor? | **Accepted**: reuse the existing mode-scoped editor and page, and add **one** college nav entry | **D-6-6 / 6d** |
+| **Q5** | Permission for college results | **Accepted**: reuse `attendanceMarks` in v1; **no** new `ModuleKey` | **23.6 / 6c** |
+| **Q6** | Does a failed course block the promotion ladder? | **Accepted**: no change in Phase 6 — D6 (§15) stands; record and print pass/fail, never gate a promotion | **23.6 / 6e** |
+
+**Two things the ruling added, both recorded above:** a college may run programmes on **different
+scales at once** (D-6-18 makes the later per-programme override a one-function change), and
+**derived-on-read rewrites an already-issued transcript** when the scheme is edited — a **known v1
+limitation** (D-6-12), mitigated by printing the scheme name, scale and print date, with “freeze at
+term publish” deliberately out of v1 (23.6).
+
+**One item is now with the owner, not with us:** whether the **per-programme scale override** (D-6-19)
+is needed **for the first college customer**. It is listed first after v1 either way, and D-6-18 means
+the answer costs no caller changes.
+
