@@ -5,11 +5,26 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   School, UserCog, BookOpen, Layers, Wallet, Check, Plus, X, ArrowRight, ArrowLeft,
-  Sparkles, PartyPopper,
+  Sparkles, PartyPopper, GraduationCap,
 } from "lucide-react";
 import { api } from "@/lib/client";
-import { Field, TextInput, Textarea, ErrorNote, LoadingScreen } from "@/components/ui";
+import { Field, TextInput, Textarea, Select, ErrorNote, LoadingScreen } from "@/components/ui";
 import { fmtMoney } from "@/lib/utils";
+import {
+  INSTITUTION_TYPES,
+  INSTITUTION_TYPE_LABELS,
+  type InstitutionType,
+} from "@/lib/institution";
+import {
+  COLLEGE_DEFAULT_SKELETON,
+  DEGREE_LEVELS,
+  TERM_SYSTEMS,
+  cloneCollege,
+  type DegreeLevel,
+  type SeedCollege,
+  type SeedTermSystem,
+  type TenantSeed,
+} from "@/lib/onboarding-seed";
 
 /**
  * PRD §3.3 — Self-serve onboarding wizard.
@@ -23,7 +38,9 @@ interface ClassDef { name: string; sections: string[] }
 interface Status {
   onboarded: boolean;
   school: { id: string; name: string; slug: string; status: string } | null;
-  progress: { classes: number; subjects: number; fees: boolean };
+  progress: { classes: number; subjects: number; fees: boolean; departments?: number; programs?: number; courses?: number };
+  institutionType: InstitutionType | null;
+  defaults: TenantSeed;
 }
 
 const STEPS = [
@@ -31,6 +48,7 @@ const STEPS = [
   { key: "admin", label: "Admin", icon: UserCog },
   { key: "classes", label: "Classes", icon: Layers },
   { key: "subjects", label: "Subjects", icon: BookOpen },
+  { key: "college", label: "College", icon: GraduationCap },
   { key: "fees", label: "Fees", icon: Wallet },
 ];
 
@@ -63,6 +81,10 @@ export default function OnboardingPage() {
   const [newClass, setNewClass] = useState("");
   // step 4 — subjects
   const [subjects, setSubjects] = useState<string[]>([]);
+  // The tenant shape, and the college half's starter structure (only used for a
+  // tenant that runs a college — see STEP / stepKey below).
+  const [institutionType, setInstitutionType] = useState<InstitutionType>("SCHOOL");
+  const [college, setCollege] = useState<SeedCollege | null>(null);
   const [newSubject, setNewSubject] = useState("");
   // step 5 — fees
   const [fees, setFees] = useState({ monthlyFee: "1500", admissionFee: "5000" });
@@ -74,14 +96,29 @@ export default function OnboardingPage() {
     ])
       .then(([st, me]) => {
         setAuthed(!!me);
+        // A brand-new tenant starts on the default seed for the shape it is being
+        // created in — school classes and subjects, or the college skeleton.
+        if (st && !st.school) {
+          setInstitutionType(st.institutionType ?? "SCHOOL");
+          setCollege(st.defaults?.college ? cloneCollege(st.defaults.college) : null);
+          setClasses(st.defaults?.classes ?? []);
+          setSubjects([...(st.defaults?.subjects ?? [])]);
+        }
         setRole(me?.user?.role || null);
         if (st) {
           setStatus(st);
+          // An existing tenant's stored shape is authoritative, and its own college
+          // data is never replaced: the starter structure is only offered while the
+          // tenant has no college rows yet (the server skips anything that exists).
+          setInstitutionType(st.institutionType ?? "SCHOOL");
+          if (st.defaults?.college && !(st.progress?.departments ?? 0)) {
+            setCollege(cloneCollege(st.defaults.college));
+          }
           if (st.school) {
             // Extend mode — prefill profile from the existing school.
             setSchool((s) => ({ ...s, name: st.school!.name }));
             if (me?.user) setAdmin({ name: me.user.name, email: me.user.email || "", password: "" });
-            if (st.onboarded) setStep(2); // jump straight to classes
+            if (st.onboarded) setStep(1); // jump straight to the first setup step (classes / college)
           } else if (me?.user) {
             setAdmin({ name: me.user.name, email: me.user.email || "", password: "" });
           }
@@ -92,15 +129,25 @@ export default function OnboardingPage() {
 
   const extendMode = !!status?.school;
   const adminStepVisible = !extendMode;
+  // Which halves this tenant has, and therefore which steps it needs: the admin
+  // step only while creating, the school-half steps only for a school, and the
+  // college step only for a college.
+  const schoolHalf = institutionType !== "COLLEGE";
+  const collegeHalf = institutionType !== "SCHOOL";
+  const steps = STEPS.filter((s) =>
+    s.key === "admin" ? adminStepVisible : s.key === "college" ? collegeHalf : schoolHalf
+  );
+  const lastStep = steps.length - 1;
+  const stepKey = steps[Math.min(step, lastStep)]?.key ?? "profile";
 
   const canNext = useMemo(() => {
-    if (step === 0) return !!school.name.trim();
+    if (stepKey === "profile") return !!school.name.trim();
     if (step === 1) return adminStepVisible ? !!admin.email.trim() && !!admin.password : true;
     if (step === 2) return true; // classes optional
     if (step === 3) return true; // subjects optional
     if (step === 4) return true; // fees optional (defaults apply)
     return true;
-  }, [step, school, admin, adminStepVisible]);
+  }, [step, stepKey, school, admin, adminStepVisible]);
 
   const addClass = (name: string, sections: string[] = ["A", "B"]) => {
     const n = name.trim();
@@ -118,6 +165,9 @@ export default function OnboardingPage() {
         school: {
           ...(extendMode && status?.school ? { id: status.school.id } : {}),
           name: school.name.trim(),
+          // Only a NEW tenant's shape is settable through the wizard; on an existing
+          // tenant the server reads the stored type and ignores this.
+          ...(extendMode ? {} : { institutionType }),
           address: school.address || null,
           phone: school.phone || null,
           email: school.email || null,
@@ -127,6 +177,9 @@ export default function OnboardingPage() {
         admin: adminStepVisible ? { name: admin.name, email: admin.email.trim(), password: admin.password } : undefined,
         classes: classes.map((c) => ({ name: c.name, sections: c.sections })),
         subjects: subjects.map((s) => ({ name: s })),
+        // The college half is sent only for a tenant that actually runs a college;
+        // omitted on a NEW tenant, the server applies the default seed.
+        ...(collegeHalf && college ? { college } : {}),
         fees: { monthlyFee: Number(fees.monthlyFee) || 0, admissionFee: Number(fees.admissionFee) || 0 },
       };
       const res = await api<any>("/api/onboarding", { method: "POST", body: JSON.stringify(payload) });
@@ -174,6 +227,9 @@ export default function OnboardingPage() {
           <h1 className="text-xl font-black text-slate-900">{done.extended ? "Setup updated!" : "Your school is ready!"}</h1>
           <p className="mt-2 text-sm text-slate-500">
             {done.classesCreated} class(es), {done.sectionsCreated} section(s) and {done.subjectsCreated} subject(s) configured.
+            {done.departmentsCreated
+              ? ` College: ${done.departmentsCreated} department(s), ${done.programsCreated} programme(s), ${done.coursesCreated} course(s).`
+              : ""}
             {done.fees ? ` Fees: ${fmtMoney((done.fees as any).monthlyFee)}/month.` : ""}
           </p>
           <div className="mt-5 flex justify-center gap-2">
@@ -190,14 +246,22 @@ export default function OnboardingPage() {
       <div className="mx-auto max-w-2xl px-4">
         <div className="mb-6 text-center">
           <div className="text-[11px] font-bold uppercase tracking-widest text-indigo-500">Setup wizard</div>
-          <h1 className="mt-1 text-2xl font-black text-slate-900">{extendMode ? `Extend ${status?.school?.name}` : "Create your school"}</h1>
-          <p className="mt-1 text-sm text-slate-500">Five quick steps — you can change everything later in Settings.</p>
+          <h1 className="mt-1 text-2xl font-black text-slate-900">
+            {extendMode
+              ? `Extend ${status?.school?.name}`
+              : institutionType === "COLLEGE"
+                ? "Create your college"
+                : institutionType === "BOTH"
+                  ? "Create your school & college"
+                  : "Create your school"}
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">{steps.length} quick steps — you can change everything later in Settings.</p>
         </div>
 
         {/* stepper */}
         <div className="mb-6 flex items-center justify-center gap-1 sm:gap-2">
-          {STEPS.filter((s) => s.key !== "admin" || adminStepVisible).map((s, i) => {
-            const idx = STEPS.indexOf(s);
+          {steps.map((s, i) => {
+            const idx = i;
             const active = step === idx;
             const past = step > idx;
             return (
@@ -206,7 +270,7 @@ export default function OnboardingPage() {
                   {past ? <Check size={14} /> : <s.icon size={14} />}
                 </span>
                 <span className={active ? "text-slate-900" : "text-slate-400"}>{s.label}</span>
-                {i < STEPS.filter((x) => x.key !== "admin" || adminStepVisible).length - 1 && <span className="hidden text-slate-300 sm:inline">→</span>}
+                {i < lastStep && <span className="hidden text-slate-300 sm:inline">→</span>}
               </button>
             );
           })}
@@ -216,11 +280,32 @@ export default function OnboardingPage() {
           {error && <div className="mb-4"><ErrorNote message={error} /></div>}
 
           {/* STEP 1 — school profile */}
-          {step === 0 && (
+          {stepKey === "profile" && (
             <div className="space-y-4">
               <StepTitle icon={School} title="School profile" sub="How your school appears across the app." />
               <Field label="School name *">
                 <TextInput value={school.name} onChange={(e) => setSchool({ ...school, name: e.target.value })} placeholder="e.g. Sunrise Model School" disabled={extendMode} />
+              </Field>
+              <Field label="Institution type">
+                <Select
+                  value={institutionType}
+                  onChange={(e) => {
+                    const next = e.target.value as InstitutionType;
+                    setInstitutionType(next);
+                    if (next === "SCHOOL") setCollege(null);
+                    else if (!college) setCollege(cloneCollege(COLLEGE_DEFAULT_SKELETON));
+                  }}
+                  disabled={extendMode}
+                >
+                  {INSTITUTION_TYPES.map((t) => (
+                    <option key={t} value={t}>{INSTITUTION_TYPE_LABELS[t]}</option>
+                  ))}
+                </Select>
+                <p className="mt-1 text-xs text-slate-400">
+                  {extendMode
+                    ? "Set when the tenant was created — change it from the Super Admin console."
+                    : "School, college, or both. This decides which of the following steps you get."}
+                </p>
               </Field>
               <Field label="Tagline">
                 <TextInput value={school.tagline} onChange={(e) => setSchool({ ...school, tagline: e.target.value })} placeholder="e.g. Learning today, leading tomorrow" />
@@ -242,7 +327,7 @@ export default function OnboardingPage() {
           )}
 
           {/* STEP 2 — admin account */}
-          {step === 1 && adminStepVisible && (
+          {stepKey === "admin" && adminStepVisible && (
             <div className="space-y-4">
               <StepTitle icon={UserCog} title="Admin account" sub="This account manages the whole school." />
               <Field label="Admin name"><TextInput value={admin.name} onChange={(e) => setAdmin({ ...admin, name: e.target.value })} placeholder="Full name" /></Field>
@@ -250,7 +335,7 @@ export default function OnboardingPage() {
               <Field label="Password *"><TextInput type="password" value={admin.password} onChange={(e) => setAdmin({ ...admin, password: e.target.value })} placeholder="Min 6 characters" /></Field>
             </div>
           )}
-          {step === 1 && !adminStepVisible && (
+          {stepKey === "admin" && !adminStepVisible && (
             <div className="space-y-3 text-sm text-slate-500">
               <StepTitle icon={UserCog} title="Admin account" sub="You are signed in — this school keeps your admin account." />
               <div className="rounded-xl bg-slate-50 p-4 font-semibold text-slate-700">{admin.name || "Admin"} · {admin.email}</div>
@@ -258,7 +343,7 @@ export default function OnboardingPage() {
           )}
 
           {/* STEP 3 — classes */}
-          {step === 2 && (
+          {stepKey === "classes" && (
             <div className="space-y-4">
               <StepTitle icon={Layers} title="Classes & sections" sub="Add the classes your school runs, with sections." />
               <div className="flex flex-wrap gap-2">
@@ -294,7 +379,7 @@ export default function OnboardingPage() {
           )}
 
           {/* STEP 4 — subjects */}
-          {step === 3 && (
+          {stepKey === "subjects" && (
             <div className="space-y-4">
               <StepTitle icon={BookOpen} title="Subjects" sub="Pick the common ones or add your own." />
               <div className="flex flex-wrap gap-2">
@@ -312,8 +397,98 @@ export default function OnboardingPage() {
             </div>
           )}
 
+          {/* STEP — college structure (only for a tenant that runs a college) */}
+          {stepKey === "college" && college && (
+            <div className="space-y-4">
+              <StepTitle icon={GraduationCap} title="College structure" sub="A starter department, programme and course list. Edit the names now, or change everything later in the college pages." />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Department">
+                  <TextInput
+                    value={college.department.name}
+                    onChange={(e) => setCollege({ ...college, department: { ...college.department, name: e.target.value } })}
+                    placeholder="e.g. Science"
+                  />
+                </Field>
+                <Field label="Programme">
+                  <TextInput
+                    value={college.program.name}
+                    onChange={(e) => setCollege({ ...college, program: { ...college.program, name: e.target.value } })}
+                    placeholder="e.g. HSC Science"
+                  />
+                </Field>
+                <Field label="Degree level">
+                  <Select
+                    value={college.program.degreeLevel}
+                    onChange={(e) =>
+                      setCollege({ ...college, program: { ...college.program, degreeLevel: e.target.value as DegreeLevel } })
+                    }
+                  >
+                    {DEGREE_LEVELS.map((d) => (
+                      <option key={d} value={d}>{d.replace("_", " ")}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Duration (years)">
+                  <TextInput
+                    type="number"
+                    min={1}
+                    max={6}
+                    value={college.program.durationYears}
+                    onChange={(e) =>
+                      setCollege({ ...college, program: { ...college.program, durationYears: Number(e.target.value) || 1 } })
+                    }
+                  />
+                </Field>
+                <Field label="Term system">
+                  <Select
+                    value={college.program.termSystem}
+                    onChange={(e) =>
+                      setCollege({ ...college, program: { ...college.program, termSystem: e.target.value as SeedTermSystem } })
+                    }
+                  >
+                    {TERM_SYSTEMS.map((t) => (
+                      <option key={t} value={t}>{t === "YEARLY" ? "Yearly" : "Semester"}</option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              <div className="space-y-2">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Course catalogue — term {college.mapCoursesToTerm}
+                </div>
+                {COLLEGE_DEFAULT_SKELETON.courses.map((c) => {
+                  const on = college.courses.some((x) => x.code === c.code);
+                  return (
+                    <button
+                      key={c.code}
+                      onClick={() =>
+                        setCollege({
+                          ...college,
+                          courses: on
+                            ? college.courses.filter((x) => x.code !== c.code)
+                            : [...college.courses, { ...c }],
+                        })
+                      }
+                      className={`flex w-full items-center justify-between rounded-xl px-4 py-2.5 text-left transition ${on ? "bg-indigo-50" : "bg-slate-50"}`}
+                    >
+                      <span className="text-sm font-bold text-slate-700">{c.title}</span>
+                      <span className="text-xs text-slate-400">
+                        {c.code}{c.creditHours ? ` · ${c.creditHours} cr` : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+                {!college.courses.length && (
+                  <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-400">
+                    No courses selected — the department and programme are still created.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* STEP 5 — fees */}
-          {step === 4 && (
+          {stepKey === "fees" && (
             <div className="space-y-4">
               <StepTitle icon={Wallet} title="Fee structure" sub="Defaults used when creating students — change anytime." />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -328,8 +503,8 @@ export default function OnboardingPage() {
             <button className="btn btn-secondary" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0}>
               <ArrowLeft size={14} /> Back
             </button>
-            {step < 4 ? (
-              <button className="btn btn-primary" onClick={() => setStep((s) => (extendMode && s === 0 ? 2 : s + 1))} disabled={!canNext}>Continue <ArrowRight size={14} /></button>
+            {step < lastStep ? (
+              <button className="btn btn-primary" onClick={() => setStep((s) => Math.min(lastStep, s + 1))} disabled={!canNext}>Continue <ArrowRight size={14} /></button>
             ) : (
               <button className="btn btn-primary" onClick={submit} disabled={busy || !school.name.trim()}>
                 <Check size={14} /> {busy ? "Setting up…" : extendMode ? "Save setup" : "Create school"}

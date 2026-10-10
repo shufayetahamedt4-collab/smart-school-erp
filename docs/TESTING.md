@@ -113,6 +113,17 @@ Newly guarded in this change: `seed.mjs`, `setup.mjs`, `audit-counts.mjs`, `chec
 `_qa-verify.mjs`, `bench-routes.mjs`, `bench-stats.mjs`, `parity-diff.mjs`, `parity-diff-qr.mjs`,
 `parity-sweep-routes.mjs`.
 
+The institution-type-aware onboarding change adds two verifiers, with deliberately different needs:
+
+- `scripts/verify-onboarding-type.mjs` — **guarded** (`requireEmulator()`). It creates real tenants
+  through the wizard API, checks the seeded school/college halves and deletes them again, so it may
+  only ever run against the emulator, with the app already up:
+  `SMOKE_PORT=3000 node scripts/verify-onboarding-type.mjs`.
+- `scripts/verify-onboarding-seed.mjs` — deliberately **unguarded and offline**. It exercises only the
+  pure decision table in `src/lib/onboarding-seed.ts` (plus two route files read as text), so it opens
+  no socket, writes nothing, and needs neither the emulator nor a server:
+  `node scripts/verify-onboarding-seed.mjs`.
+
 Already guarded: `smoke-all.mjs` and the full `verify-*.mjs` suite.
 
 ## 5. Never agent-runnable — production-targeted scripts

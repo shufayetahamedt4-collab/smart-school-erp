@@ -4,6 +4,15 @@ import { prisma } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
 import { can } from "@/lib/permissions";
+import {
+  type InstitutionType,
+  allowedModes,
+  hasCollege,
+  hasSchool,
+  isInstitutionType,
+  normalizeInstitutionType,
+} from "@/lib/institution";
+import { type SeedCollege, defaultSeedFor, resolveCollegeSeed } from "@/lib/onboarding-seed";
 
 /**
  * PRD §3.3 — Self-serve onboarding wizard.
@@ -28,24 +37,62 @@ export async function GET(req: NextRequest) {
 
   if (!schoolId) {
     // No school yet — wizard should start from scratch.
-    return NextResponse.json({ data: { onboarded: false, school: null } });
+    // Nothing is stored yet, so there is no tenant shape to read: the wizard
+    // starts on SCHOOL and the Super Admin may pick another shape on step 1.
+    return NextResponse.json({
+      data: {
+        onboarded: false,
+        school: null,
+        institutionType: null,
+        defaults: defaultSeedFor("SCHOOL"),
+      },
+    });
   }
 
   const school = await prisma.school.findUnique({ where: { id: schoolId } });
-  if (!school) return NextResponse.json({ data: { onboarded: false, school: null } });
+  if (!school)
+    return NextResponse.json({
+      data: {
+        onboarded: false,
+        school: null,
+        institutionType: null,
+        defaults: defaultSeedFor("SCHOOL"),
+      },
+    });
 
-  const [classes, subjects, feeSetting, setup] = await Promise.all([
+  // The tenant's own shape decides what the wizard offers and seeds. An absent
+  // value reads as SCHOOL, so every pre-existing tenant is unaffected.
+  const institutionType: InstitutionType = normalizeInstitutionType((school as any).institutionType);
+  const collegeHalf = hasCollege(institutionType);
+
+  const [classes, subjects, feeSetting, setup, departments, programs, courses] = await Promise.all([
     prisma.classRoom.count({ where: { schoolId } }),
     prisma.subject.count({ where: { schoolId } }),
     prisma.feeSetting.findUnique({ where: { schoolId } }),
     prisma.setting.findUnique({ where: { key: `school.${schoolId}.onboarded` } }),
+    // College counts are read only for a tenant that has a college half, so a
+    // school tenant pays no extra queries.
+    collegeHalf ? prisma.department.count({ where: { schoolId } }) : Promise.resolve(0),
+    collegeHalf ? prisma.program.count({ where: { schoolId } }) : Promise.resolve(0),
+    collegeHalf ? prisma.course.count({ where: { schoolId } }) : Promise.resolve(0),
   ]);
 
   return NextResponse.json({
     data: {
       onboarded: !!setup,
-      school: { id: school.id, name: school.name, slug: school.slug, status: school.status },
-      progress: { classes, subjects, fees: !!feeSetting },
+      school: {
+        id: school.id,
+        name: school.name,
+        slug: school.slug,
+        status: school.status,
+        institutionType,
+      },
+      institutionType,
+      allowedModes: allowedModes(institutionType),
+      // What a tenant of THIS shape starts with: the wizard prefills from this, so
+      // a college is offered a college skeleton instead of a school class ladder.
+      defaults: defaultSeedFor(institutionType),
+      progress: { classes, subjects, fees: !!feeSetting, departments, programs, courses },
     },
   });
 }
@@ -94,7 +141,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "School id is required." }, { status: 400 });
     }
 
-    const result = await applyWizardData(school.id, body, { createAdmin: false });
+    // The tenant's STORED type is authoritative in extend mode: a type posted to
+    // the wizard is ignored on purpose, because changing a tenant's shape is
+    // `PATCH /api/schools/[id]`, which owns the approved change rule
+    // (`canChangeInstitutionType`).
+    const extendType: InstitutionType = normalizeInstitutionType((school as any).institutionType);
+    const extendSeed = resolveCollegeSeed(body?.college, extendType, false);
+    if (!extendSeed.ok) return NextResponse.json({ error: extendSeed.error }, { status: 400 });
+    const result = await applyWizardData(school.id, body, {
+      institutionType: extendType,
+      isNew: false,
+      college: extendSeed.spec,
+    });
     await prisma.setting.upsert({
       where: { key: `school.${school.id}.onboarded` },
       update: { value: "1" },
@@ -125,6 +183,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Tenant shape — absent ⇒ SCHOOL; an explicit value must be one of the three,
+  // exactly like `POST /api/schools`. This is the wizard half of the fix: a
+  // caller can now actually create a COLLEGE tenant through the wizard instead
+  // of having the value silently ignored.
+  if (body?.school?.institutionType !== undefined && !isInstitutionType(body.school.institutionType)) {
+    return NextResponse.json({ error: "institutionType must be SCHOOL, COLLEGE or BOTH." }, { status: 400 });
+  }
+  const institutionType: InstitutionType = normalizeInstitutionType(body?.school?.institutionType);
+
+  // Validate the college half BEFORE anything is written, so a bad value is a
+  // clean 400 rather than a half-created tenant.
+  const collegeSeed = resolveCollegeSeed(body?.college, institutionType, true);
+  if (!collegeSeed.ok) return NextResponse.json({ error: collegeSeed.error }, { status: 400 });
+
   const result = (await prisma.$transaction(async (tx) => {
     const school = await tx.school.create({
       data: {
@@ -136,6 +208,7 @@ export async function POST(req: NextRequest) {
         tagline: body?.school?.tagline || null,
         status: "ACTIVE",
         plan: "Pro",
+        institutionType,
         themeColor: body?.school?.themeColor || "#4f46e5",
       },
     });
@@ -174,7 +247,11 @@ export async function POST(req: NextRequest) {
     return { school, adminUser };
   }))!;
 
-  const wizard = await applyWizardData(result.school.id, body, { createAdmin: false });
+  const wizard = await applyWizardData(result.school.id, body, {
+    institutionType,
+    isNew: true,
+    college: collegeSeed.spec,
+  });
 
   await prisma.branch.create({ data: { schoolId: result.school.id, name: "Main Campus" } }).catch(() => undefined);
   await prisma.setting.upsert({
@@ -182,7 +259,7 @@ export async function POST(req: NextRequest) {
     update: { value: "1" },
     create: { key: `school.${result.school.id}.onboarded`, value: "1" },
   });
-  await audit("SCHOOL_ONBOARDED", "school", result.school.id, { name, adminEmail });
+  await audit("SCHOOL_ONBOARDED", "school", result.school.id, { name, adminEmail, institutionType });
   return NextResponse.json(
     { data: { schoolId: result.school.id, slug: result.school.slug, ...wizard } },
     { status: 201 }
@@ -191,15 +268,38 @@ export async function POST(req: NextRequest) {
 
 /**
  * Shared wizard-data writer for both create and extend flows.
- * Creates classes (+sections), subjects and fee settings.
+ * Creates classes (+sections), subjects and fee settings for the school half of
+ * the tenant, and the department → programme → course catalogue for the college
+ * half. Which halves exist is decided by the tenant's own `institutionType`.
  */
 async function applyWizardData(
   schoolId: string,
   body: any,
-  _opts: { createAdmin: boolean }
-): Promise<{ classesCreated: number; sectionsCreated: number; subjectsCreated: number; fees: unknown }> {
+  opts: { institutionType: InstitutionType; isNew: boolean; college: SeedCollege | null }
+): Promise<{
+  classesCreated: number;
+  sectionsCreated: number;
+  subjectsCreated: number;
+  departmentsCreated: number;
+  programsCreated: number;
+  coursesCreated: number;
+  mappingsCreated: number;
+  fees: unknown;
+}> {
   // ---- 3. Classes with sections ------------------------------------------
-  const classDefs: { name: string; sections: string[] }[] = Array.isArray(body?.classes) ? body.classes : [];
+  // The type-appropriate default seed, in one place: school classes + subjects,
+  // college department + programme + courses.
+  const seed = defaultSeedFor(opts.institutionType);
+  // An OMITTED list on a brand-new tenant means "give me the default seed"; a
+  // list that is present — even an empty one — is taken literally. A tenant with
+  // no school half never receives school rows, however the caller asks.
+  const classDefs: { name: string; sections: string[] }[] = !hasSchool(opts.institutionType)
+    ? []
+    : Array.isArray(body?.classes)
+      ? body.classes
+      : body?.classes === undefined && opts.isNew
+        ? seed.classes
+        : [];
   let classesCreated = 0;
   let sectionsCreated = 0;
   for (const def of classDefs) {
@@ -221,7 +321,13 @@ async function applyWizardData(
   }
 
   // ---- 4. Subjects ---------------------------------------------------------
-  const subjectDefs: { name: string; code?: string }[] = Array.isArray(body?.subjects) ? body.subjects : [];
+  const subjectDefs: { name: string; code?: string }[] = !hasSchool(opts.institutionType)
+    ? []
+    : Array.isArray(body?.subjects)
+      ? body.subjects
+      : body?.subjects === undefined && opts.isNew
+        ? seed.subjects.map((name) => ({ name }))
+        : [];
   let subjectsCreated = 0;
   for (const def of subjectDefs) {
     const subjectName = String(def?.name || "").trim();
@@ -251,5 +357,112 @@ async function applyWizardData(
     });
   }
 
-  return { classesCreated, sectionsCreated, subjectsCreated, fees };
+  // ---- 4b. College half: department → programme → course catalogue ---------
+  // Only a tenant that actually runs a college gets these rows, and only a
+  // tenant with a school half gets classes and subjects (above). Both halves are
+  // the same default seed the wizard offers, so a tenant created here matches a
+  // tenant created by hand in the college pages. `branchId` is left null: the
+  // wizard's "Main Campus" branch is created after this call, and a branch-less
+  // catalogue is the shape the college pages and the isolation fixtures already
+  // cover.
+  let departmentsCreated = 0;
+  let programsCreated = 0;
+  let coursesCreated = 0;
+  let mappingsCreated = 0;
+  if (opts.college) {
+    const spec = opts.college;
+    let department: any = await prisma.department.findFirst({
+      where: { schoolId, code: spec.department.code },
+    });
+    if (!department) {
+      department = await prisma.department.create({
+        data: {
+          schoolId,
+          name: spec.department.name,
+          code: spec.department.code,
+          branchId: null,
+          headStaffId: null,
+          description: null,
+          status: "ACTIVE",
+        },
+      });
+      departmentsCreated++;
+    }
+
+    let program: any = await prisma.program.findFirst({
+      where: { schoolId, code: spec.program.code },
+    });
+    if (!program) {
+      program = await prisma.program.create({
+        data: {
+          schoolId,
+          departmentId: department.id,
+          name: spec.program.name,
+          code: spec.program.code,
+          degreeLevel: spec.program.degreeLevel,
+          durationYears: spec.program.durationYears,
+          branchId: null,
+          status: "ACTIVE",
+          termSystem: spec.program.termSystem,
+        },
+      });
+      programsCreated++;
+    }
+
+    for (const c of spec.courses) {
+      let course: any = await prisma.course.findFirst({ where: { schoolId, code: c.code } });
+      if (!course) {
+        course = await prisma.course.create({
+          data: {
+            schoolId,
+            departmentId: department.id,
+            branchId: null,
+            code: c.code,
+            title: c.title,
+            creditHours: c.creditHours,
+            type: c.type,
+            status: "ACTIVE",
+          },
+        });
+        coursesCreated++;
+      }
+      const already = await prisma.programCourse.findFirst({
+        where: {
+          programId: program.id,
+          courseId: course.id,
+          termNumber: spec.mapCoursesToTerm,
+        },
+      });
+      if (!already) {
+        await prisma.programCourse.create({
+          data: {
+            schoolId,
+            programId: program.id,
+            courseId: course.id,
+            termNumber: spec.mapCoursesToTerm,
+            requirement: "REQUIRED",
+          },
+        });
+        mappingsCreated++;
+      }
+    }
+
+    await audit("COLLEGE_SKELETON_SEEDED", "school", schoolId, {
+      department: spec.department.code,
+      program: spec.program.code,
+      courses: coursesCreated,
+      mappings: mappingsCreated,
+    });
+  }
+
+  return {
+    classesCreated,
+    sectionsCreated,
+    subjectsCreated,
+    departmentsCreated,
+    programsCreated,
+    coursesCreated,
+    mappingsCreated,
+    fees,
+  };
 }
