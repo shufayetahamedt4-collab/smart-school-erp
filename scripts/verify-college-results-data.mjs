@@ -76,6 +76,18 @@ const PRE_6B = {
   accessors: "67ccce4cf572e04c7cef21329f062c1f70fc606e",
 };
 
+/**
+ * The models registered by phases AFTER 6b. 6b's additive proof is about its OWN
+ * model, so a later phase's legitimate addition must not read as 6b's regression;
+ * these are dropped alongside `courseResult` before the baseline comparison. Only
+ * these NAMES are dropped, so an edit, rename or removal of any pre-existing entry
+ * still fails the proof.
+ *
+ * Phase 7b (the college fee spine, docs/COLLEGE-DECISIONS.md §24) added the four
+ * `collegeFee*` models in its own change; 6b's baseline predates them.
+ */
+const LATER_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "collegeFeeConfig"];
+
 /** Blank out comments and string literals, PRESERVING LENGTH, so a scan sees code only. */
 function maskCommentsAndStrings(text) {
   const out = text.split("");
@@ -179,17 +191,20 @@ console.log("\n2. additive only — every pre-6b collection, relation key and ac
   const relKeys = [...relsText.matchAll(/^  (\w+):/gm)].map((m) => m[1]).sort();
   const accessors = [...prismaText.matchAll(/^  (\w+): model\("/gm)].map((m) => m[1]).sort();
 
+  // courseResult + the models of later phases (see LATER_MODELS).
+  const drop = new Set(["courseResult", ...LATER_MODELS]);
+  const keep = (name) => !drop.has(name);
   const head = {
-    cols: sha1(pairs.filter((p) => !p.startsWith("courseResult=")).join("\n")),
-    relKeys: sha1(relKeys.filter((k) => k !== "courseResult").join("\n")),
-    accessors: sha1(accessors.filter((a) => a !== "courseResult").join("\n")),
+    cols: sha1(pairs.filter((p) => keep(p.split("=")[0])).join("\n")),
+    relKeys: sha1(relKeys.filter(keep).join("\n")),
+    accessors: sha1(accessors.filter(keep).join("\n")),
   };
 
   const wrong = Object.keys(PRE_6B).find((k) => head[k] !== PRE_6B[k]);
   if (wrong) {
     bad(
       "additive",
-      `the ${wrong} map differs from the pre-6b baseline beyond courseResult ` +
+      `the ${wrong} map differs from the pre-6b baseline beyond courseResult and the later-phase models ` +
         `(computed ${head[wrong]}, recorded ${PRE_6B[wrong]})`
     );
   } else if (!pairs.includes("courseResult=courseResults")) {
@@ -200,7 +215,7 @@ console.log("\n2. additive only — every pre-6b collection, relation key and ac
     bad("additive", "the prisma shim has no courseResult accessor");
   } else {
     ok(
-      `COLS ${pairs.length} entries, RELS ${relKeys.length} models, prisma ${accessors.length} accessors — removing courseResult reproduces all three recorded baselines, so nothing else moved`
+      `COLS ${pairs.length} entries, RELS ${relKeys.length} models, prisma ${accessors.length} accessors — removing courseResult (and the ${LATER_MODELS.length} later-phase models) reproduces all three recorded baselines, so nothing else moved`
     );
   }
 }

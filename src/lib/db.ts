@@ -186,6 +186,28 @@ const COLS: Record<string, string> = {
   // `rand()`; nothing uses `create` here, because a claim must be atomic and
   // goes through `$claim` instead.
   promotionRun: "promotionRuns",
+  // ---- College support (Phase 7b) ----
+  // The college FEE spine (docs/COLLEGE-DECISIONS.md §24, D-7-1…D-7-14): the four
+  // rows §24 gives the college its own collection names for — the model names are
+  // the document's (`collegeFeeHead`, `collegeFeeStructure`, `collegeFee`,
+  // `collegeFeeConfig`) and the collections follow the repository's own model →
+  // collection convention (`feeCategory` → `feeCategories`, `courseResult` →
+  // `courseResults`), so: collegeFeeHeads, collegeFeeStructures, collegeFees,
+  // collegeFeeConfigs. They are deliberately SEPARATE from the school fee spine
+  // (`fee`, `feeSettings`, `feeCategories`, `feeTemplates`): D-7-1/D-7-3/D-7-19
+  // forbid extending it, and Q3's binding condition — the two modes' money must
+  // never mix in a read — is only checkable while they are different collections.
+  // There is NO `mode` field anywhere, here or on the rows.
+  // Ordinary rows with random ids, exactly like `courseRegistration`/
+  // `courseResult`: NO `idFor`/`idForCreate` entry, because the uniqueness rules —
+  // (programId, termNumber, headId) for a structure row, and the deterministic
+  // `cf_…` charge id 7a derives for a charge — are enforced in-code by the 7c
+  // routes, which must REFUSE a duplicate with a reason rather than silently
+  // overwrite one through a derived id.
+  collegeFeeHead: "collegeFeeHeads",
+  collegeFeeStructure: "collegeFeeStructures",
+  collegeFee: "collegeFees",
+  collegeFeeConfig: "collegeFeeConfigs",
   // ---- Certificates (origin/main) ----
   // Custom per-school certificate templates. The union keeps this next to the
   // college collections above (integration 1, docs/INTEGRATION-LOG.md).
@@ -765,6 +787,35 @@ const RELS: Record<string, Record<string, Rel>> = {
   },
   twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
+  // ---- College support (Phase 7b) ----
+  // The college fee spine's own rows. `branchId` and the STORED foreign keys are
+  // named here for the same reason every other college row names them: the store
+  // cannot join, so branch scoping (`scopeWhere`) and `canAccessBranch` filter the
+  // row directly. `schoolId` is on all four (a college fee row belongs to exactly
+  // one tenant); `programId`/`termNumber`/`headId` are the identity 7a derives a
+  // charge from (D-7-10), and `collegeFeeConfig` is school-scoped and carries NO
+  // branch, because D-7-3 gives the college's channels one tenant-wide row.
+  // No pre-existing relation block was touched: 7b adds these four keys only.
+  collegeFeeHead: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+  },
+  collegeFeeStructure: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    program: { to: "program", fk: "programId", kind: "one" },
+    head: { to: "collegeFeeHead", fk: "headId", kind: "one" },
+  },
+  collegeFee: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
+    program: { to: "program", fk: "programId", kind: "one" },
+    head: { to: "collegeFeeHead", fk: "headId", kind: "one" },
+  },
+  collegeFeeConfig: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+  },
   certificateTemplate: { school: { to: "school", fk: "schoolId", kind: "one" } },
 };
 
@@ -2293,6 +2344,17 @@ export const prisma = {
   // The ladder's lease row, addressed through the shim like every other model
   // (read/update/delete). `$claim` is the one write that must be atomic.
   promotionRun: model("promotionRun"),
+  // ---- College support (Phase 7b) ----
+  // The college fee spine (D-7-1…D-7-14), the four collections §24 registers,
+  // addressed through the shim like every other model. Registered in the same
+  // change as their COLS/RELS entries, so `prisma.collegeFee*` is the ONE way to
+  // reach them — and `scripts/verify-college-routes.mjs`'s `COLLEGE_MODEL_RE` now
+  // lists all four, so a NON-college route that reaches for one fails the route
+  // guard instead of leaking a college row into a school read.
+  collegeFeeHead: model("collegeFeeHead"),
+  collegeFeeStructure: model("collegeFeeStructure"),
+  collegeFee: model("collegeFee"),
+  collegeFeeConfig: model("collegeFeeConfig"),
   // ---- Certificates (origin/main) ----
   certificateTemplate: model("certificateTemplate"),
   $transaction: transaction,

@@ -141,8 +141,17 @@ const AFTER_GATE_TOKENS = [
  * is covered by check 3 from the moment it exists — the alternative (leaving it
  * out) would let a non-college route read college results unnoticed. `\b` keeps
  * `course` from matching `courseResult`, so the name is listed in its own right.
+ *
+ * Phase 7b adds the four college FEE models — `collegeFeeHead`,
+ * `collegeFeeStructure`, `collegeFee`, `collegeFeeConfig` (D-7-1…D-7-14) — in the
+ * same change that registers them in `db.ts`, so the whole college fee spine is
+ * covered by check 3 from the moment it exists: a school fee route, page or lib
+ * that reached for one would fail this guard rather than mix the two modes' money
+ * (the Q3 condition). The list is a STRENGTHENING — no allowlist, no relaxation:
+ * `collegeFee` is listed shortest-last so a longer name is matched in its own
+ * right and `\b` keeps the shorter one from matching a longer one.
  */
-const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course|courseResult)\b/;
+const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course|courseResult|collegeFeeHead|collegeFeeStructure|collegeFeeConfig|collegeFee)\b/;
 
 let failures = 0;
 const ok = (msg) => console.log(`  ✅ ${msg}`);
