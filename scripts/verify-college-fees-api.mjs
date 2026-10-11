@@ -30,6 +30,12 @@
  *   • every college payment appends ONE `PAYMENT` ledger entry with `feeId: null`
  *     and `meta.collegeFeeId`, and uses the college's own `CRCP-…` receipt sequence;
  *   • the tenant's college fee config is ONE row (a save can never create a second);
+ *   • the STAFF matrix (7c-follow-up): the ACCOUNTANT and the BRANCH_ADMIN reach all
+ *     17 handlers, the REGISTRAR is read-only (every read reached, every write 403);
+ *   • the ledger READERS (7c-follow-up): the tenant-wide ledger read and the ledger
+ *     CSV export include the college money — tagged, never untagged — a student's own
+ *     ledger shows their own college payment, and NO school `payment` row is written
+ *     (so no school payments surface can show college money);
  *   • and NO college fee row appears in any school fee read (`/api/fees`, `/api/stats`).
  *
  * Usage: SMOKE_PORT=3000 node scripts/verify-college-fees-api.mjs
@@ -101,6 +107,7 @@ const check = (label, ok, detail = "") => {
   if (!ok) failures++;
 };
 const countOf = (n) => n;
+const sha1 = (s) => createHash("sha1").update(s).digest("hex");
 const COLLEGE_COLS = ["collegeFeeHeads", "collegeFeeStructures", "collegeFees", "collegeFeeConfigs", "collegeDiscounts"];
 
 async function req(path, { cookie, host = HOST, ...init } = {}) {
@@ -127,6 +134,41 @@ async function login(identifier, password, host = HOST) {
 const post = (path, body, cookie, opts = {}) => req(path, { cookie, method: "POST", body: JSON.stringify(body), ...opts });
 const patch = (path, body, cookie, opts = {}) => req(path, { cookie, method: "PATCH", body: JSON.stringify(body), ...opts });
 const del = (path, cookie, opts = {}) => req(path, { cookie, method: "DELETE", ...opts });
+
+/**
+ * EVERY handler of the segment, as a PROBE: route, method and a deliberately
+ * invalid body/id. That is what makes one probe serve two matrices — the answer
+ * measures the GATE, not the validator: a caller the allow-list admits is stopped
+ * by its own 400/404 (so nothing is ever written), while a caller it refuses gets
+ * its 403.
+ *
+ * It is a function because the payment probe names the charge derived for `headA`,
+ * which only exists once the run has created it.
+ */
+function collegeFeeHandlers() {
+  return [
+    ["GET", "/api/college-fees/config"],
+    ["PATCH", "/api/college-fees/config", {}],
+    ["GET", "/api/college-fees/heads"],
+    ["POST", "/api/college-fees/heads", {}],
+    ["PATCH", "/api/college-fees/heads", { id: `${P}no-such-head`, name: "x" }],
+    ["DELETE", "/api/college-fees/heads?id=" + encodeURIComponent(`${P}no-such-head`)],
+    ["GET", "/api/college-fees/structure"],
+    ["POST", "/api/college-fees/structure", {}],
+    ["PATCH", "/api/college-fees/structure", { id: `${P}no-such-row`, amount: 1 }],
+    ["DELETE", "/api/college-fees/structure?id=" + encodeURIComponent(`${P}no-such-row`)],
+    ["POST", "/api/college-fees/generate", { programId: PROG_A, termNumber: 1 }],
+    ["GET", "/api/college-fees/charges"],
+    ["GET", `/api/college-fees/dues?studentId=${encodeURIComponent(STU_A)}`],
+    ["POST", "/api/college-fees/payments", { chargeId: `cf_${STU_A}_${headA}_1_1`, amountMinor: 100, method: "CASH" }],
+    ["GET", "/api/college-fees/discounts"],
+    ["POST", "/api/college-fees/discounts", {}],
+    ["PATCH", "/api/college-fees/discounts", { id: `${P}no-such-award`, state: "APPROVED" }],
+  ];
+}
+
+/** The handlers that MOVE MONEY or CHANGE a fee definition (the writes of the segment). */
+const COLLEGE_FEE_WRITE_METHODS = new Set(["POST", "PATCH", "DELETE"]);
 
 /* --------------------------------------------------------------- reset */
 
@@ -800,7 +842,6 @@ console.log("\n### the 403/400/404 matrix and the role probe, everything bracket
   // measures the probes and nothing else.
   const probeBefore = await spineCount();
   const PW = "Probe@12345";
-  const sha1 = (s) => createHash("sha1").update(s).digest("hex");
   const runId = Date.now().toString(36);
   const probeUsers = ["TEACHER", "GUARDIAN", "STUDENT"].map((role) => {
     const email = `zziso-feeprobe-${role.toLowerCase()}+${runId}@test.local`;
@@ -830,25 +871,7 @@ console.log("\n### the 403/400/404 matrix and the role probe, everything bracket
   // must get a 403 from all EIGHT routes, reads and writes alike. The bodies are
   // deliberately invalid (a ghost id, a missing field), so a handler that wrongly
   // ADMITS a teacher is still caught by its 400/404 — and nothing is written.
-  const HANDLERS = [
-    ["GET", "/api/college-fees/config"],
-    ["PATCH", "/api/college-fees/config", {}],
-    ["GET", "/api/college-fees/heads"],
-    ["POST", "/api/college-fees/heads", {}],
-    ["PATCH", "/api/college-fees/heads", { id: `${P}no-such-head`, name: "x" }],
-    ["DELETE", "/api/college-fees/heads?id=" + encodeURIComponent(`${P}no-such-head`)],
-    ["GET", "/api/college-fees/structure"],
-    ["POST", "/api/college-fees/structure", {}],
-    ["PATCH", "/api/college-fees/structure", { id: `${P}no-such-row`, amount: 1 }],
-    ["DELETE", "/api/college-fees/structure?id=" + encodeURIComponent(`${P}no-such-row`)],
-    ["POST", "/api/college-fees/generate", { programId: PROG_A, termNumber: 1 }],
-    ["GET", "/api/college-fees/charges"],
-    ["GET", `/api/college-fees/dues?studentId=${encodeURIComponent(STU_A)}`],
-    ["POST", "/api/college-fees/payments", { chargeId: `cf_${STU_A}_${headA}_1_1`, amountMinor: 100, method: "CASH" }],
-    ["GET", "/api/college-fees/discounts"],
-    ["POST", "/api/college-fees/discounts", {}],
-    ["PATCH", "/api/college-fees/discounts", { id: `${P}no-such-award`, state: "APPROVED" }],
-  ];
+  const HANDLERS = collegeFeeHandlers();
   let matrix = true;
   for (const u of probeUsers) {
     const cookie = sessions[u.role];
@@ -866,6 +889,69 @@ console.log("\n### the 403/400/404 matrix and the role probe, everything bracket
   }
   check("…so no teacher/guardian/student can read or write any college money (the stop-and-report condition holds)", matrix);
   await bracket("every denied-role probe", probeBefore);
+}
+
+/* ------------------------------------------- the STAFF matrix (7c-follow-up) */
+// The allow-list's own staff: the three fixture roles beside the SCHOOL_ADMIN.
+// D-7-18 admits the ACCOUNTANT as a WRITER (the accounts office) and the
+// REGISTRAR as READ-ONLY, and a BRANCH_ADMIN as a writer inside its branch. This
+// section is the executable half of that rule — the same 17-handler probe the
+// denied-role matrix uses, so the gate is measured on every route and method:
+//
+//   • ACCOUNTANT   — every handler reached (writes included; the award DECISION
+//                    rule is proved separately above, where the accountant is
+//                    refused the approve);
+//   • REGISTRAR    — every READ reached, EVERY WRITE 403 (read-only, D-7-18);
+//   • BRANCH_ADMIN — every handler reached in its own branch (branch confinement
+//                    is proved separately above, with a foreign-branch spine).
+console.log("\n### the staff matrix: ACCOUNTANT, REGISTRAR and BRANCH_ADMIN against every handler");
+{
+  const probeBefore = await spineCount();
+  const HANDLERS = collegeFeeHandlers();
+  const reads = HANDLERS.filter(([m]) => !COLLEGE_FEE_WRITE_METHODS.has(m));
+  const writes = HANDLERS.filter(([m]) => COLLEGE_FEE_WRITE_METHODS.has(m));
+
+  /** The handlers this cookie was REFUSED (401/403) on — a probe writes nothing. */
+  const refusedOn = async (cookie, list) => {
+    const out = [];
+    for (const [method, path, body] of list) {
+      const r = await req(path, { cookie, host: HOST, method, body: body === undefined ? undefined : JSON.stringify(body) });
+      if (r.status === 401 || r.status === 403) out.push(`${method} ${path.split("?")[0]}=${r.status}`);
+    }
+    return out;
+  };
+  /** The handlers this cookie was ADMITTED to (anything but 401/403). */
+  const reachedOn = async (cookie, list) => {
+    const out = [];
+    for (const [method, path, body] of list) {
+      const r = await req(path, { cookie, host: HOST, method, body: body === undefined ? undefined : JSON.stringify(body) });
+      if (r.status !== 401 && r.status !== 403) out.push(`${method} ${path.split("?")[0]}=${r.status}`);
+    }
+    return out;
+  };
+
+  const accRefused = await refusedOn(collegeAccountant, HANDLERS);
+  check(
+    "the ACCOUNTANT reaches ALL 17 handlers — the accounts office writes the fee spine, not just reads it",
+    accRefused.length === 0,
+    accRefused.length ? `refused: ${accRefused.join(", ")}` : `0/${HANDLERS.length} refused`
+  );
+
+  const regReads = await reachedOn(collegeRegistrar, reads);
+  const regWrites = await refusedOn(collegeRegistrar, writes);
+  check(
+    `the REGISTRAR is READ-ONLY: all ${reads.length} reads reached, and all ${writes.length} writes are 403`,
+    regReads.length === reads.length && regWrites.length === writes.length,
+    `reads=${regReads.length}/${reads.length} writesRefused=${regWrites.length}/${writes.length}${regWrites.length !== writes.length ? ` (admitted: ${writes.filter((h) => !regWrites.includes(`${h[0]} ${h[1].split("?")[0]}=403`)).map((h) => h[0] + " " + h[1].split("?")[0]).join(", ")})` : ""}`
+  );
+
+  const brRefused = await refusedOn(collegeBranchAdmin, HANDLERS);
+  check(
+    "the BRANCH_ADMIN reaches all 17 handlers on its own branch's spine (confinement is proved separately)",
+    brRefused.length === 0,
+    brRefused.length ? `refused: ${brRefused.join(", ")}` : `0/${HANDLERS.length} refused`
+  );
+  await bracket("every staff-role probe", probeBefore);
 }
 
 /* --------------------------------------------- school-fee invisibility */
@@ -900,6 +986,94 @@ console.log("\n### no college fee row appears in a school fee read (Q3, the 7c h
   );
 }
 
+/* ---------------------------------- the ledger READERS (7c-follow-up audit) */
+// EVERY reader of the ledger, audited in this phase and pinned here so a new one
+// is a deliberate decision rather than a discovery:
+//
+//   • `GET /api/ledger`               → lib/ledger `ledgerForSchool` (staff) and
+//                                       `ledgerForStudent` (a guardian or student's
+//                                       own child); the school ledger page
+//                                       (`src/app/dashboard/ledger/page.tsx`) is
+//                                       its only UI client.
+//   • `GET /api/export?type=ledger`   → `prisma.ledgerEntry.findMany` (the CSV the
+//                                       import/export page links to).
+//   • `DELETE /api/students/[id]`     → a WRITE: the cascade nulls `studentId`/
+//                                       `feeId` on the pupil's history rows.
+//   • `lib/ledger` write-path guards  → `refAlreadyProcessed`, `applyLateFees`.
+//   • No day book, cash book, receivable or outstanding report exists in this app
+//     (grepped: the only "outstanding" today is the fee list's own due total, read
+//     from `fees`, not from the ledger).
+//
+// **What that means for college money (reported, not silently changed).** D-7-12
+// and D-7-13 put a college payment and an approved award in the SAME central ledger
+// and TAG them — `feeId: null` plus `meta.collegeFeeId` / `meta.collegeDiscountId`
+// — instead of inventing a second ledger. So a TENANT-wide ledger read legitimately
+// contains college money, and the tag (never a filter) is what lets a school viewer
+// tell it apart; that is the intended inclusion this section pins. What must never
+// happen is college money reaching a SCHOOL FEE surface, and the section above
+// pins `/api/fees` and `/api/stats` byte-identical with the spine populated, plus
+// no `cf_…` id or college head in that read.
+console.log("\n### the ledger readers: what a school-facing ledger read shows of college money");
+{
+  const ledgerRead = await req("/api/ledger?take=200", { cookie: collegeAdmin });
+  const rows = Array.isArray(ledgerRead.data) ? ledgerRead.data : [];
+  const collegeRows = rows.filter((e) => e && e.meta && (e.meta.collegeFeeId || e.meta.collegeDiscountId));
+  check(
+    "the tenant's ledger read INCLUDES the college money, and every college row is TAGGED (feeId null + meta.collegeFeeId / collegeDiscountId)",
+    ledgerRead.status === 200 &&
+      collegeRows.some((e) => e.kind === "PAYMENT" && e.meta.collegeFeeId === tuitionCharge && !e.feeId) &&
+      collegeRows.some((e) => e.kind === "DISCOUNT" && !!e.meta.collegeDiscountId && !e.feeId),
+    `HTTP ${ledgerRead.status} rows=${rows.length} collegeTagged=${collegeRows.length}`
+  );
+  const descriptions = rows.filter((e) => typeof e?.description === "string" && e.description.startsWith("College payment"));
+  check(
+    "…and no college amount is in that read UNTAGGED: every 'College payment' row carries its collegeFeeId",
+    descriptions.length > 0 && descriptions.every((e) => e.meta && !!e.meta.collegeFeeId),
+    `collegePaymentRows=${descriptions.length} tagged=${descriptions.filter((e) => e.meta?.collegeFeeId).length}`
+  );
+
+  // The CSV export is the second school-facing ledger read, and it is the same
+  // documented inclusion: the college row is exported (it is the tenant's money)
+  // with an EMPTY feeId column, so a school viewer can always tell it apart.
+  const csvRes = await fetch(`${BASE}/api/export?type=ledger`, { headers: { Host: HOST, cookie: collegeAdmin }, signal: AbortSignal.timeout(60000) });
+  const csv = await csvRes.text();
+  const csvLines = csv.split(/\r?\n/);
+  const collegeCsv = csvLines.filter((l) => l.includes("College payment"));
+  check(
+    "the ledger CSV export includes the college row too, with an EMPTY feeId column (its collegeFeeId lives in meta, not in the school's feeId)",
+    csvRes.status === 200 && collegeCsv.length >= 2 && collegeCsv.every((l) => l.trim().endsWith(",")),
+    `HTTP ${csvRes.status} collegeLines=${collegeCsv.length}`
+  );
+
+  // A STUDENT's own ledger (the `ledgerForStudent` reader): their own college
+  // payment is on it — it is their money, in the one ledger the school uses.
+  const email = `zziso-ledgerprobe-student+${Date.now().toString(36)}@test.local`;
+  const uid = `u_${sha1(email)}`;
+  await db.collection("users").doc(uid).set({
+    id: uid, email, name: "ZZ Ledger Probe Student", role: "STUDENT",
+    schoolId: C1, active: true, passwordHash: bcrypt.hashSync("Probe@12345", 4), createdAt: new Date(),
+  });
+  await db.collection("students").doc(STU_A).set({ userId: uid }, { merge: true });
+  const mine = await req("/api/ledger", { cookie: await login(email, "Probe@12345", APP_HOST), host: APP_HOST });
+  const mineRows = Array.isArray(mine.data) ? mine.data : [];
+  check(
+    "a student's OWN ledger shows their own college payment, tagged the same way (ledgerForStudent is a college-money reader too)",
+    mine.status === 200 && mineRows.some((e) => e.kind === "PAYMENT" && e.meta && e.meta.collegeFeeId === tuitionCharge),
+    `HTTP ${mine.status} rows=${mineRows.length} collegeTagged=${mineRows.filter((e) => e.meta?.collegeFeeId).length}`
+  );
+
+  // …and the school PAYMENTS surface stays clean: `confirmCollegePayment` writes NO
+  // `payment` row (D-7-12 records the ledger entry and the charge's own receipt), so
+  // the school payments list, its receipt sequence and every school payment report
+  // are structurally unable to show a college payment.
+  const schoolPayments = (await db.collection("payments").where("schoolId", "==", C1).get()).docs.map((d) => d.data());
+  check(
+    "no `payments` row was written for the college payment, so the school payments surface cannot show college money",
+    schoolPayments.every((p) => !String(p?.feeId || "").startsWith("cf_") && !p?.collegeFeeId),
+    `schoolPaymentRows=${schoolPayments.length} collegeTagged=${schoolPayments.filter((p) => String(p?.feeId || "").startsWith("cf_") || p?.collegeFeeId).length}`
+  );
+}
+
 /* -------------------------------------------------------------------- end */
 
 console.log("");
@@ -912,5 +1086,6 @@ console.log(
   `✅ COLLEGE FEES API OK — ${checks} check(s): the eight /api/college-fees routes are gated (requireCollege → the D-7-18 allow-list → writeGuard), ` +
     `the test/reports show PER_CREDIT + an unknown unit/basis refused by 7a's own validation, the (programme, term, head) duplicate is a visible 409, ` +
     `generation is idempotent and tops up, a payment is integer minor units with over-payment refused and two racing payments cannot both land, ` +
-    `awards follow propose/approve with no self-approval and post their waived money to the shared ledger, and no college row leaks into a school fee read.`
+    `awards follow propose/approve with no self-approval and post their waived money to the shared ledger, the accountant/branch-admin/registrar staff matrix holds (registrar read-only), ` +
+    `the ledger readers show the college money only with its tag, and no college row leaks into a school fee read.`
 );

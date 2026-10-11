@@ -58,6 +58,17 @@
  *      `COLLEGE_MODEL_RE` includes all four — and 7c's `collegeDiscount`
  *      (a strengthening: no allowlist, no relaxed check) — and `college-routes.ts`
  *      stays dependency-free.
+ *   10. THE LEDGER'S READERS ARE THE AUDITED SET (7c-follow-up). The code-level
+ *      readers of the shared ledger are exactly `src/lib/ledger.ts` (the two
+ *      query helpers), `src/app/api/ledger/route.ts` and
+ *      `src/app/api/export/route.ts` (?type=ledger). A new reader fails until it
+ *      is added here — its inclusion of college money is a decision, not a
+ *      discovery. (The `students/[id]` DELETE cascade is string-keyed and only
+ *      nulls a foreign key; it serves no report.)
+ *   11. THE COLLEGE ENTRY IS TAGGED (7c-follow-up). `confirmCollegePayment` writes
+ *      `feeId: null` plus `meta.collegeFeeId`, appends no school `payment` row, and
+ *      uses the college's own `CRCP-` receipt sequence — so the only reads that
+ *      show it are the ledger's tenant-wide readers, which can tell it apart.
  *
  * TWO DELIBERATE RE-SCOPES, both documented here because both are additions that
  * must not read as regressions:
@@ -82,6 +93,7 @@
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { relative } from "node:path";
 
 const dbText = readFileSync(new URL("../src/lib/db.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const guardText = readFileSync(new URL("./verify-college-routes.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
@@ -666,6 +678,86 @@ console.log("\n9. the guard covers the new models (7b's four and 7c's collegeDis
   }
 }
 
+/* ----------------------------------------------------------------------- 10 */
+
+console.log("\n10. the ledger readers are the AUDITED set, and the college money in the shared ledger is only ever TAGGED (7c-follow-up)");
+{
+  // WHERE THE LEDGER IS READ, pinned as text. A new reader must be added to this
+  // list in the same change that adds it — the check fails until somebody reviews
+  // it against the ruling below — and the readers that exist are the ones this
+  // phase audited. The needle is CODE (comments and strings masked), so the
+  // string-keyed cascade in `src/app/api/students/[id]/route.ts` (`ids("ledgerEntry",
+  // …)` — it NULLS the foreign key, it never serves a report) is deliberately not
+  // part of the set.
+  // Paths are relative to `src/` (the scan's root).
+  const AUDITED_READERS = [
+    "lib/ledger.ts", //            ledgerForStudent / ledgerForSchool + the write-path guards
+    "app/api/ledger/route.ts", //  the ONLY route that serves a ledger read (school, guardian, student)
+    "app/api/export/route.ts", //  ?type=ledger — the CSV a school viewer exports
+  ];
+  const LEDGER_READ_RE = /\bprisma\.ledgerEntry\.(?:findMany|findFirst|findUnique)\b|\bledgerForSchool\b|\bledgerForStudent\b/g;
+
+  const srcDir = fileURLToPath(new URL("../src", import.meta.url));
+  const found = [];
+  const walkSrc = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walkSrc(full);
+      else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
+        const code = maskCommentsAndStrings(readFileSync(full, "utf8"));
+        if ((code.match(LEDGER_READ_RE) || []).length) {
+          found.push(relative(srcDir, full).split("\\").join("/"));
+        }
+      }
+    }
+  };
+  walkSrc(srcDir);
+  const sorted = [...found].sort();
+  const expected = [...AUDITED_READERS].sort();
+  if (!sorted.length) bad("ledger-readers", "the ledger-reader scan found nothing — the needle is stale and the check would be vacuous");
+  else if (sorted.join("|") !== expected.join("|"))
+    bad(
+      "ledger-readers",
+      `the ledger's readers are ${JSON.stringify(sorted)} but this phase audited ${JSON.stringify(expected)} — a NEW reader must be reviewed (does it show college money? is that intended?), and the audit recorded in scripts/verify-college-fees-api.mjs updated`
+    );
+  else if (!/\bresolveActingStudent\b/.test(readFileSync(`${srcDir}/app/api/ledger/route.ts`, "utf8")))
+    bad("ledger-readers", "the ledger route no longer resolves a guardian/student to their own child — the student reader would be unscoped");
+  else
+    ok(
+      `the ledger's readers are exactly the ${expected.length} audited files (ledgerForSchool/ledgerForStudent in src/lib/ledger.ts, the /api/ledger route, and the ?type=ledger CSV export), and the route still scopes a guardian/student to their own child; the DELETE cascade that nulls the FK is string-keyed and serves no report`
+    );
+}
+
+/* ----------------------------------------------------------------------- 11 */
+
+console.log("\n11. the college ledger entry is TAGGED and writes NO school `payment` row (D-7-12 — reported, not silently changed)");
+{
+  // Comments blanked (so the JSDoc that NAMES these rules cannot satisfy the
+  // check), strings KEPT — the `CRCP-` prefix lives inside a template literal.
+  const ledgerText = stripComments(readFileSync(new URL("../src/lib/ledger.ts", import.meta.url), "utf8"));
+  const start = ledgerText.indexOf("export async function confirmCollegePayment");
+  const body = start >= 0 ? ledgerText.slice(start) : "";
+  const receiptFn = /export function collegeReceiptNo[\s\S]*?\n\}/.exec(ledgerText);
+  if (!start) bad("college-ledger-tag", "confirmCollegePayment is not in src/lib/ledger.ts — D-7-12 binds it there");
+  else if (!/feeId:\s*null/.test(body))
+    bad("college-ledger-tag", "confirmCollegePayment no longer writes `feeId: null` — a college entry could then look like a school fee payment");
+  else if (!/collegeFeeId/.test(body) || !/\bmeta:/.test(body))
+    bad("college-ledger-tag", "confirmCollegePayment no longer tags its entry with meta.collegeFeeId");
+  else if (/prisma\.payment\b/.test(body))
+    bad(
+      "college-ledger-tag",
+      "confirmCollegePayment writes a school `payment` row — the school payments list, its receipt sequence and every school payment report would then show college money (STOP AND REPORT)"
+    );
+  else if (!receiptFn || !/CRCP-/.test(receiptFn[0]))
+    bad("college-ledger-tag", "collegeReceiptNo no longer emits the college's own CRCP- sequence");
+  else if (/(^|[^C])RCP-/.test(receiptFn[0]))
+    bad("college-ledger-tag", "collegeReceiptNo emits the school's RCP- prefix — the two modes' receipt numbers would interleave");
+  else
+    ok(
+      "the college payment appends ONE tagged entry (`feeId: null` + `meta.collegeFeeId`), writes no school `payment` row, and uses its own CRCP- receipt sequence — so only the ledger's tenant-wide readers see it, and they can always tell it apart"
+    );
+}
+
 /* ---------------------------------------------------------------------- end */
 
 console.log("");
@@ -677,6 +769,8 @@ console.log(
   `✅ COLLEGE FEES DATA LAYER OK — ${checks} check(s): the four college fee collections are registered in ` +
     `COLS/RELS/prisma as a purely additive change (the four recorded pre-7b baselines, RELS bodies included, still ` +
     `reproduce), the school fee spine is untouched and reachable from no college fee read, no derived-id entry makes a ` +
-    `duplicate silent, no non-college route reaches the models, the college-fees segment and its directory landed together, and the ` +
-    `route guard covers every college fee model (7b's four plus 7c's collegeDiscount).`
+    `duplicate silent, no non-college route reaches the models, the college-fees segment and its directory landed together, the ` +
+    `route guard covers every college fee model (7b's four plus 7c's collegeDiscount), the ledger's readers are exactly the ` +
+    `audited ones, and the college entry in that shared ledger is tagged with feeId null + meta.collegeFeeId and writes no ` +
+    `school payment row.`
 );
