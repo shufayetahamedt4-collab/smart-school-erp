@@ -39,8 +39,11 @@
  *   8. THE WIZARD'S CHROME. `wizardStepKeys` / `wizardSubmitLabel` /
  *      `wizardAcceptsFees` — the step list (the profile step belongs to EVERY
  *      shape: a COLLEGE tenant used to lose it and open on the Admin step with
- *      Back dead), the submit label, and the rule that a tenant without a school
- *      half is never given the school-shaped `feeSetting` defaults.
+ *      Back dead), the submit label, the success heading (a COLLEGE is never
+ *      congratulated on a school it does not have), and the rule that a tenant
+ *      without a school half is never given the school-shaped `feeSetting`
+ *      defaults — the wizard, the onboarding route AND the platform console's
+ *      `POST /api/schools`.
  *
  *   node scripts/verify-onboarding-seed.mjs
  */
@@ -54,6 +57,7 @@ const ROOT = resolve(HERE, "..");
 const MODULE_PATH = resolve(ROOT, "src/lib/onboarding-seed.ts");
 const ROUTE_PATH = resolve(ROOT, "src/app/api/onboarding/route.ts");
 const PAGE_PATH = resolve(ROOT, "src/app/onboarding/page.tsx");
+const SCHOOLS_ROUTE_PATH = resolve(ROOT, "src/app/api/schools/route.ts");
 const PROGRAMS_API_PATH = resolve(ROOT, "src/app/api/programs/route.ts");
 const COURSES_API_PATH = resolve(ROOT, "src/app/api/courses/route.ts");
 
@@ -89,6 +93,7 @@ const {
   wizardAcceptsFees,
   wizardStepKeys,
   wizardSubmitLabel,
+  wizardSuccessTitle,
 // Relative specifiers, not the absolute paths above: the default ESM loader only
 // accepts file:// URLs on Windows, and the other offline verifiers import the
 // libs the same way.
@@ -531,6 +536,47 @@ console.log("\n8. the wizard's step table, submit label and fee rule follow the 
   const junkFees = JUNK.filter((v) => wizardAcceptsFees(v) !== true);
   check("an absent or unknown shape still accepts fees (reads as SCHOOL)", junkFees.length === 0, junkFees.map((v) => JSON.stringify(v ?? `${v}`)).join(", "));
 
+  // ---- the SUCCESS heading (7-pre item 2): same table, the screen's copy ----
+  // The export itself is checked first: on the code before this step the symbol
+  // does not exist at all, so the table below is asserted only once it is there
+  // (which keeps the previous-code run a clean red instead of a TypeError).
+  check("the shared table exports the success heading", typeof wizardSuccessTitle === "function");
+  if (typeof wizardSuccessTitle !== "function") {
+    // the heading table cannot be asserted without its export; the wiring checks
+    // below still run, and they are the ones that catch a re-hardcoded string.
+  } else {
+  check(
+    "success heading: SCHOOL and COLLEGE are named for what was created",
+    wizardSuccessTitle("SCHOOL", false) === "Your school is ready!" && wizardSuccessTitle("COLLEGE", false) === "Your college is ready!",
+    `${wizardSuccessTitle("SCHOOL", false)} / ${wizardSuccessTitle("COLLEGE", false)}`
+  );
+  const bothReady = wizardSuccessTitle("BOTH", false);
+  check(
+    "success heading: BOTH is neutral — it names neither half",
+    bothReady !== "Your school is ready!" && bothReady !== "Your college is ready!" && !/\b(school|college)\b/i.test(bothReady) && bothReady.trim().length > 0,
+    bothReady
+  );
+  const extendReady = SHAPES.map((t) => wizardSuccessTitle(t, true));
+  check(
+    "success heading: extend mode keeps its own heading (it creates nothing)",
+    extendReady.every((l) => l === "Setup updated!") && !new Set(extendReady).has(undefined),
+    JSON.stringify(extendReady)
+  );
+  const junkReady = JUNK.filter((v) => wizardSuccessTitle(v, false) !== "Your school is ready!");
+  check("success heading: an absent or unknown shape reads as SCHOOL", junkReady.length === 0, junkReady.map((v) => JSON.stringify(v ?? `${v}`)).join(", "));
+  // It names COLLEGE for a college-only tenant, SCHOOL for a school, and neither
+  // for BOTH (the neutral wording) — never a half the tenant does not run.
+  const readyHalfDisagreement = SHAPES.filter((t) => {
+    const title = wizardSuccessTitle(t, false);
+    return /\bcollege\b/i.test(title) !== (t === "COLLEGE") || /\bschool\b/i.test(title) !== (t === "SCHOOL");
+  });
+  check(
+    "success heading: it names the tenant's own half (and neither for BOTH)",
+    readyHalfDisagreement.length === 0,
+    SHAPES.map((t) => `${t}: ${wizardSuccessTitle(t, false)}`).join(" | ")
+  );
+  }
+
   // ---- wiring: the page must USE the table, not re-derive it ----
   const page = stripComments(read(PAGE_PATH));
   const route = stripComments(read(ROUTE_PATH));
@@ -547,6 +593,26 @@ console.log("\n8. the wizard's step table, submit label and fee rule follow the 
   check(
     "the route refuses school fee defaults for a tenant without a school half",
     /hasSchool\(opts\.institutionType\) && \(monthlyFee > 0 \|\| admissionFee > 0\)/.test(route)
+  );
+  check(
+    "the wizard page takes its success heading from wizardSuccessTitle (no hard-coded Your school is ready!)",
+    /wizardSuccessTitle\(/.test(page) && !/Your school is ready!/.test(page)
+  );
+
+  // ---- 7-pre item 1: the tenant-creation route writes the same school-shaped row
+  // The platform console's POST /api/schools used to raise a `feeSetting` for
+  // EVERY new tenant, a COLLEGE included, while the wizard's own fee step was
+  // already skipped for a tenant with no school half. It now asks the one helper.
+  const schoolsRoute = stripComments(read(SCHOOLS_ROUTE_PATH));
+  check(
+    "the tenant-creation route takes the fee rule from the shared table",
+    /wizardAcceptsFees\(institutionType\)/.test(schoolsRoute),
+    "src/app/api/schools/route.ts"
+  );
+  check(
+    "it writes no feeSetting for a college-only tenant (the nested create is conditional)",
+    /\.\.\.\(wizardAcceptsFees\(institutionType\)[\s\S]{0,260}feeSetting: \{/.test(schoolsRoute) && !/^\s{8}feeSetting: \{$/m.test(schoolsRoute),
+    "nested create must sit inside the spread, never as a bare key"
   );
 }
 

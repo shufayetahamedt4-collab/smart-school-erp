@@ -24,7 +24,11 @@
  *      while refusing the school-shaped fee defaults it used to send behind the
  *      (absent) fee step's back — and still applies them to a SCHOOL or BOTH
  *      tenant;
- *   9. cleans up everything it created.
+ *   9. cleans up everything it created;
+ *  10. the platform console's own tenant creation (`POST /api/schools`) applies
+ *      the same fee rule — a COLLEGE tenant is created with NO school fee
+ *      setting, a SCHOOL/BOTH tenant keeps it, and the college's admin can still
+ *      read the fee-settings surface (7-pre item 1).
  *
  *   SMOKE_PORT=3000 node scripts/verify-onboarding-type.mjs
  */
@@ -317,6 +321,75 @@ async function main() {
         collegeSt.json?.data?.institutionType === "COLLEGE" &&
         bothSt.json?.data?.institutionType === "BOTH",
       JSON.stringify({ SCHOOL: st.json?.data?.institutionType, COLLEGE: collegeSt.json?.data?.institutionType, BOTH: bothSt.json?.data?.institutionType })
+    );
+  }
+
+  /* ------------------- 4b. the platform console's own tenant creation (7-pre 1) */
+  console.log("\n4b. POST /api/schools keeps the school fee defaults for a school half only");
+  {
+    const mk = async (suffix, institutionType, extra) => {
+      const admin = { name: `QA Schools Admin ${suffix}`, email: `qa-schools-${suffix}-${RUN}@qatest.edu`, password: "QaType@12345" };
+      const r = await api("/api/schools", {
+        method: "POST",
+        cookie: superCookie,
+        body: { name: `QA Schools ${suffix} ${RUN}`, institutionType, admin, ...(extra ?? {}) },
+      });
+      if (r.json?.data?.school?.id) createdSchoolIds.push(r.json.data.school.id);
+      return { status: r.status, school: r.json?.data?.school ?? null, admin, json: r.json };
+    };
+
+    const college = await mk("College", "COLLEGE");
+    check(
+      "the platform console creates a COLLEGE tenant (201)",
+      college.status === 201 && !!college.school?.id,
+      `status ${college.status}: ${JSON.stringify(college.json).slice(0, 180)}`
+    );
+    // The create response carries the school row only (no nested relation), so the
+    // STORED state is what is asserted — read back through the same API the console uses.
+    const collegeRead = college.school?.id ? await api(`/api/schools/${college.school.id}`, { cookie: superCookie }) : { json: {} };
+    check(
+      "a college-only tenant has NO school fee setting (stored)",
+      collegeRead.status === 200 && (collegeRead.json?.data?.feeSetting ?? null) === null,
+      `stored feeSetting: ${JSON.stringify(collegeRead.json?.data?.feeSetting ?? null)}`
+    );
+
+    // The reader half: nothing breaks for the college's own admin without the row
+    // (`GET /api/fees/settings` falls back to the app defaults).
+    let collegeSettings = { status: 0, json: null };
+    try {
+      const c = await login(college.admin.email, college.admin.password);
+      collegeSettings = await api("/api/fees/settings", { cookie: c });
+    } catch (e) {
+      collegeSettings = { status: 0, json: { error: String(e.message) } };
+    }
+    check(
+      "the college admin's fee-settings read still answers, from the app defaults (no row needed)",
+      collegeSettings.status === 200 && Number(collegeSettings.json?.data?.monthlyFee) === 1500 && Number(collegeSettings.json?.data?.admissionFee) === 5000,
+      `status ${collegeSettings.status}: ${JSON.stringify(collegeSettings.json?.data ?? collegeSettings.json?.error)}`
+    );
+
+    const school = await mk("School", "SCHOOL", { monthlyFee: 2222, admissionFee: 3333 });
+    const schoolRead = school.school?.id ? await api(`/api/schools/${school.school.id}`, { cookie: superCookie }) : { json: {} };
+    check(
+      "a SCHOOL tenant still gets the fee setting, with the values it was sent",
+      schoolRead.json?.data?.feeSetting?.monthlyFee === 2222 && schoolRead.json?.data?.feeSetting?.admissionFee === 3333,
+      `stored feeSetting: ${JSON.stringify(schoolRead.json?.data?.feeSetting ?? null)}`
+    );
+
+    const both = await mk("Both", "BOTH");
+    const bothRead = both.school?.id ? await api(`/api/schools/${both.school.id}`, { cookie: superCookie }) : { json: {} };
+    check(
+      "a BOTH tenant still gets the school fee setting (the app defaults)",
+      bothRead.json?.data?.feeSetting?.monthlyFee === 1500 && bothRead.json?.data?.feeSetting?.admissionFee === 5000,
+      `stored feeSetting: ${JSON.stringify(bothRead.json?.data?.feeSetting ?? null)}`
+    );
+
+    const list = await api("/api/schools", { cookie: superCookie });
+    const collegeRow = (list.json?.data ?? []).find((s) => s.id === college.school?.id);
+    check(
+      "the platform school list shows the college tenant with no fee setting",
+      !!collegeRow && (collegeRow.feeSetting ?? null) === null,
+      JSON.stringify({ found: !!collegeRow, feeSetting: collegeRow?.feeSetting ?? null })
     );
   }
 

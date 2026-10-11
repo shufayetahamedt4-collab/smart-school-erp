@@ -33,7 +33,7 @@
  * extend it at all").
  *
  * The wizard's own shape rules live here too (`wizardStepKeys`,
- * `wizardSubmitLabel`, `wizardAcceptsFees`) — they are the same decision table
+ * `wizardSubmitLabel`, `wizardSuccessTitle`, `wizardAcceptsFees`) — they are the same decision table
  * applied to the wizard's chrome instead of its data, and keeping them beside the
  * seed is what makes all three provable offline by the one verifier.
  */
@@ -117,6 +117,28 @@ export function wizardSubmitLabel(value: unknown, extendMode: boolean): string {
   if (extendMode) return "Save setup";
   const type = normalizeTenantType(value);
   return type === "SCHOOL" ? "Create school" : type === "COLLEGE" ? "Create college" : "Create institution";
+}
+
+/**
+ * The wizard's success heading — the same decision table as the submit label,
+ * applied to the screen a tenant lands on after its one POST.
+ *
+ * It used to say **"Your school is ready!"** for every tenant, so a COLLEGE or
+ * BOTH tenant was congratulated on a school it does not have. The wording is
+ * decided here so the wizard's chrome has ONE source: SCHOOL → "Your school is
+ * ready!", COLLEGE → "Your college is ready!", BOTH → the neutral "Your
+ * institution is ready!" (neither half is the whole tenant). Extend mode creates
+ * nothing, so it keeps its own heading — the same split `wizardSubmitLabel` uses.
+ * An absent or unknown shape reads as SCHOOL, like everywhere else.
+ */
+export function wizardSuccessTitle(value: unknown, extendMode: boolean): string {
+  if (extendMode) return "Setup updated!";
+  const type = normalizeTenantType(value);
+  return type === "SCHOOL"
+    ? "Your school is ready!"
+    : type === "COLLEGE"
+      ? "Your college is ready!"
+      : "Your institution is ready!";
 }
 
 /**

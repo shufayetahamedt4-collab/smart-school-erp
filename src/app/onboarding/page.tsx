@@ -23,6 +23,7 @@ import {
   wizardAcceptsFees,
   wizardStepKeys,
   wizardSubmitLabel,
+  wizardSuccessTitle,
   type DegreeLevel,
   type SeedCollege,
   type SeedTermSystem,
@@ -237,7 +238,10 @@ export default function OnboardingPage() {
       <Centered>
         <div className="text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600"><PartyPopper size={26} /></div>
-          <h1 className="text-xl font-black text-slate-900">{done.extended ? "Setup updated!" : "Your school is ready!"}</h1>
+          {/* The heading names this tenant's own shape from the shared table
+              (`wizardSuccessTitle`) — a college is never congratulated on a
+              school it does not have. Extend mode keeps its own heading. */}
+          <h1 className="text-xl font-black text-slate-900">{wizardSuccessTitle(institutionType, !!done.extended)}</h1>
           <p className="mt-2 text-sm text-slate-500">
             {done.classesCreated} class(es), {done.sectionsCreated} section(s) and {done.subjectsCreated} subject(s) configured.
             {done.departmentsCreated

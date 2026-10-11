@@ -6,6 +6,7 @@ import { slugify } from "@/lib/utils";
 import { audit } from "@/lib/auth";
 import { notifySuperAdmins } from "@/lib/notify";
 import { isInstitutionType, normalizeInstitutionType } from "@/lib/institution";
+import { wizardAcceptsFees } from "@/lib/onboarding-seed";
 
 function addDays(date: Date, days: number) {
   const copy = new Date(date);
@@ -93,12 +94,25 @@ export async function POST(req: NextRequest) {
         plan: currentPlan?.name || body?.plan || "Pro",
         themeColor: body?.themeColor || "#4f46e5",
         logoUrl: body?.logoUrl || null,
-        feeSetting: {
-          create: {
-            monthlyFee: Number(body?.monthlyFee || 1500),
-            admissionFee: Number(body?.admissionFee || 5000),
-          },
-        },
+        // 7-pre item 1 — the school-shaped fee defaults (one monthly + one
+        // admission figure) belong to a tenant with a SCHOOL half only, and the
+        // decision is the wizard's own fee rule (`wizardAcceptsFees`), not a
+        // second rule written here. A COLLEGE-only tenant is created WITHOUT a
+        // `feeSetting`, exactly like the wizard's fee step skips it; every reader
+        // tolerates the absence (GET /api/fees/settings falls back to the app
+        // defaults, `admissionFeeDefaults` uses `?? APP_DEFAULT_…`, the platform
+        // console's est. MRR reads ৳0, and an enrolment raises the row on demand
+        // through `enrollStudent`).
+        ...(wizardAcceptsFees(institutionType)
+          ? {
+              feeSetting: {
+                create: {
+                  monthlyFee: Number(body?.monthlyFee || 1500),
+                  admissionFee: Number(body?.admissionFee || 5000),
+                },
+              },
+            }
+          : {}),
       },
     });
 
