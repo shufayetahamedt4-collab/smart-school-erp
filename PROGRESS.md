@@ -339,3 +339,6 @@ its own branch until the merge below):
 11. **Go-live: role probe on a production build** — not yet done.
 12. **Go-live: production line decision** — `origin/main` vs `deploy/app-hosting` is still undecided
     (**NOT PROVEN**).
+13. **Go-live: check whether the in-process read cache can serve stale data across multiple App
+    Hosting instances (maxInstances 10)** — the per-instance memo (`src/lib/db.ts`, ~30 s TTL + 120 s
+    stale-while-revalidate grace) can answer a read with data another instance has already replaced.

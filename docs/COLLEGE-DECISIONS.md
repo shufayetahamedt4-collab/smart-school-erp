@@ -1987,8 +1987,8 @@ explicit allow-list module (D-7-18).
   A careless mode test here stops billing school students, or starts billing a college student a
   school's monthly fee — and both are money failures that no existing suite would notice on its own.
   **BINDING REQUIREMENT: the step must prove that no school behaviour changed, with every baseline
-  recorded BEFORE the change** — `verify-fees-totals` (**15**), `verify-enroll-paths` (**18**),
-  `verify-admission-intake` (**53 from a clean state**), `scripts/qa-phase23.mjs` (**36 / 0**), and a
+  recorded BEFORE the change** — `verify-fees-totals` (**15**), `verify-enroll-paths` (**17**),
+  `verify-admission-intake` (**52 from a clean state**), `scripts/qa-phase23.mjs` (**36 / 0**), and a
   **rendered-text before/after comparison of a school fee receipt and a school invoice** (the two print
   pages that carry a school's money to a family), so the school's paper comes out identical. New checks
   for the college path are ADDITIONS to those suites, never edits of them. **The rule itself:** the
@@ -1998,6 +1998,29 @@ explicit allow-list module (D-7-18).
   the identity: a COLLEGE tenant can never raise school default fees, and a SCHOOL tenant's behaviour is
   byte-identical to today. A `BOTH` tenant keeps today's behaviour on its school half and only a
   college enrolment skips it.
+
+  **DONE 2026-10-11 — what the step actually ran, with the corrected baselines.** The change is ONE
+  gate in `createStudentFees` (`src/lib/enroll.ts`), placed BEFORE the `feeSetting` upsert, driven by
+  the enrolment (`programId`/`termNumber`) and cross-checked against an exactly-`COLLEGE`
+  `institutionType`; a SCHOOL tenant and a BOTH tenant's school half are untouched, and the college
+  path writes nothing at all. The college-side checks are **new additions, never edits**:
+  `scripts/verify-enrollment-fees.mjs` (**19 checks** — SCHOOL + class ⇒ the two default rows,
+  COLLEGE + program ⇒ none and no `feeSetting`, COLLEGE without the identity ⇒ still none, BOTH +
+  class ⇒ the two rows, BOTH + program ⇒ none, and a SCHOOL tenant naming a program is still 403).
+  **Every count in this document is a CHECK count** — the verifier's own printed check lines, with its
+  summary line (`✅ …`, `PASS — …`, `===== RESULT: … =====`, `TOTAL: …`) excluded — and two of the
+  baselines above were wrong when first recorded: **`verify-enroll-paths` prints 17** (not 18) and
+  **`verify-admission-intake` prints 52 from a clean state** (not 53; the extra line was its summary).
+  The school baselines re-ran to those counts with the school path byte-identical (the fee list, the
+  fee settings, a school enrolment's two rows, the admission receipt and the rendered invoice all
+  compared before/after).
+  **Recorded open items (found now, NOT fixed by this step):** (i) the bulk-import fast path
+  (`src/lib/import/write.ts`, `ensureFeeSetting()`) raises the school's default fee setting and rows
+  itself, OUTSIDE `enrollStudent` — a college import (Phase 9c) would still bill a college's students a
+  school's 1500/5000; (ii) `POST /api/schools` still writes the fixed `feeSetting` for every new
+  tenant, a COLLEGE included (the 7-pre item 1); (iii) the in-process read cache can serve STALE data
+  (~30 s + 120 s grace, `src/lib/db.ts`) — a multi-instance go-live question, recorded in
+  `PROGRESS.md`.
 
 - **7a — pure logic first.** `src/lib/college-fees.ts`: head and structure validation, the preset
   table (D-7-4), the cadence→billing-events rule (D-7-7), term totals, per-student charge derivation
@@ -2145,9 +2168,13 @@ no phase changed meaning).
   at `9c1f96d` (file reads and targeted searches) or a count already recorded in a verifier run.
 - **The new verifier counts do not exist yet.** 7-pre/7-pre-2 and 7a–7f owe them, with the school
   baselines recorded **before** their additions: `verify-fees-totals` **15**, `verify-enroll-paths`
-  **18**, `verify-admission-intake` **53 from a clean state**, `qa-phase23` **36 / 0**,
+  **17**, `verify-admission-intake` **52 from a clean state**, `qa-phase23` **36 / 0**,
   `verify-nav-scope` 8, `verify-tenant-isolation` 97, `verify-branch-isolation` 65. Phase 8's `8-pre`
-  and ca-1..ca-6 owe theirs in the same shape.
+  and ca-1..ca-6 owe theirs in the same shape. **Corrected and partly delivered 2026-10-11:** these
+  are **check** counts (printed check lines, the summary line excluded — `verify-enroll-paths` is 17,
+  `verify-admission-intake` 52), and **7-pre-2's college-side additions now exist** as
+  `scripts/verify-enrollment-fees.mjs` (**19 checks**). 7-pre, 7a–7f and Phase 8's `8-pre`/ca-1..ca-6
+  still owe theirs in the same shape.
 - Whether a BOTH tenant's **stats / dashboard payloads** need a mode dimension **for fee money** is
   **NOT PROVEN** here: the delta's §2 flags the stats cache as mode-sensitive and it is still
   un-dimensioned today. The v1 college fee screens of D-7-16 do not read `/api/stats`, so 7a–7f do not
