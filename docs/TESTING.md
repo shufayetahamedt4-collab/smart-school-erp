@@ -124,6 +124,17 @@ The institution-type-aware onboarding change adds two verifiers, with deliberate
   no socket, writes nothing, and needs neither the emulator nor a server:
   `node scripts/verify-onboarding-seed.mjs`.
 
+Phase 7a (the pure college fee logic) adds one more **unguarded, offline** verifier:
+
+- `scripts/verify-college-fees-logic.mjs` — **deliberately unguarded and offline**, in the shape of
+  `verify-college-grading-logic.mjs`. It exercises only the pure decision table in
+  `src/lib/college-fees.ts` (head and structure validation, the cadence → billing-events rule, the term
+  totals, the charge derivation from an enrolment plus its APPROVED registrations, the discount/waiver
+  arithmetic and the dues/payment rules), and it *reads* `src/lib/college-terms.ts` and
+  `src/app/api/fee-categories/route.ts` only to pin the term model and the school's own bucket/cadence
+  lists against it. It opens no socket, writes nothing, and needs neither the emulator nor a server:
+  `node scripts/verify-college-fees-logic.mjs` (**21 checks**).
+
 Already guarded: `smoke-all.mjs` and the full `verify-*.mjs` suite.
 
 ## 5. Never agent-runnable — production-targeted scripts
