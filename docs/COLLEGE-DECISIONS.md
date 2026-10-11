@@ -1836,6 +1836,15 @@ explicit allow-list module (D-7-18).
   rows; a student's term bill is those rows for the student's own programme and term. The term number
   is bounded by the programme's own `durationYears`/`termSystem`, through the same
   `isValidTermNumber` the transcript uses (`src/lib/college-terms.ts`).
+
+- **D-7-6 (dated note, 2026-10-11 — the row stores two more fields, `unit` and `basis`).** The owner
+  ruled that `collegeFeeStructure` carries `unit: `STUDENT` | `COURSE`` and `basis: `FLAT` | `PER_CREDIT``
+  alongside `amount`/`required`/`note`. `basis` is the 7a hook D-7-8 keeps: it is **stored but never
+  priced in v1** — a `PER_CREDIT` row is refused by name, not silently treated as flat. `unit` is what
+  makes §24.7's own 7a sentence expressible: a `COURSE` row bills once per **APPROVED** registration, so a
+  student with no approved registration bills nothing for that head. Both fields default to the flat/course-
+  agnostic v1 behaviour (`unit: STUDENT`, `basis: FLAT`), so the product this phase describes is unchanged;
+  they exist so the sentence above is checkable rather than aspirational.
 - **D-7-7 — the structure stores what ONE billing event charges, and the head's `frequency` decides how
   many events a term produces.** A `MONTHLY` head inside a 6-month term bills six times unless the
   admin marks it `TERM`; a `TERM` head bills once; `YEARLY` bills once per year. This keeps one
@@ -2035,6 +2044,33 @@ explicit allow-list module (D-7-18).
   change that creates the directory** (D-A). Evidence: `verify-college-routes` still passes (a listed
   segment with no directory fails it by design) plus a `verify-college-fees-data` in the
   `verify-college-results-data` shape.
+
+  **DONE 2026-10-11 — what the step actually ran.** The four rows are registered in `src/lib/db.ts`: the
+  MODELS are `collegeFeeHead`, `collegeFeeStructure`, `collegeFee` and `collegeFeeConfig` (the names §24
+  uses), and the COLLECTIONS follow the repository's own model → collection convention (`feeCategory` →
+  `feeCategories`, `courseResult` → `courseResults`), so they are **`collegeFeeHeads`,
+  `collegeFeeStructures`, `collegeFees`, `collegeFeeConfigs`** — four NEW collections. No school
+  collection is touched (`fee`, `feeSettings`, `feeCategories`, `feeTemplates`, `discounts`, `payments`,
+  `ledger` all still map where they did), no `mode` field is added anywhere, and every college fee row stays
+  out of every school fee read (Q3). `COLLEGE_API_SEGMENTS` deliberately gains NOTHING in 7b: the
+  `college-fees` segment lands with 7c's directory, in the one change that creates it (§8 D-A). There is
+  **no `idFor`/`idForCreate` entry** for any of the four, so a duplicate — `(programId, termNumber, headId)`
+  for a structure row, the `cf_…` charge id 7a derives for a charge — is a 7c refusal, never a silent
+  overwrite. New evidence: `scripts/verify-college-fees-data.mjs` (**9 checks**, offline — no DB, no
+  server, no network), which reproduces the recorded pre-7b checksums of the `COLS` entry list, the `RELS`
+  key list, **every pre-existing `RELS` body** and the prisma accessor list once the four new entries are
+  dropped, and which scans every school fee route, lib, page, print page and `verify-fees-totals` for a
+  college fee model. `verify-college-routes` stays **3/0** with the four model names added to
+  `COLLEGE_MODEL_RE` (a strengthening — no allowlist, no relaxed check). **No Firestore index is added:**
+  the repo declares none for the comparable college uniqueness queries (`courseRegistration`,
+  `courseResult`), and 7b ships no query at all.
+
+  **One existing verifier was re-scoped, deliberately.** `verify-college-results-data` (6b's) keeps its
+  own 8 checks and its three recorded pre-6b baselines; what changed is that it now drops the four
+  `collegeFee*` models alongside its own `courseResult` before comparing (`LATER_MODELS`, documented in
+  that script), so 7b's legitimate addition cannot read as a 6b regression. Only those NAMES are dropped:
+  an edit, rename or removal of any pre-existing `COLS`/`RELS`/prisma entry still fails it, and it was
+  re-probed by renaming `fee: "fees"` (it fails) and restoring it (it passes, 8 checks).
 - **7c — API.** Heads CRUD, structure CRUD, `POST /api/college-fees/generate` (dryRun + idempotent),
   the payment route (`confirmCollegePayment` → the shared ledger), the discount route and the dues
   read. Every handler `requireCollege` first, then the allow-list; the full 403/400/404 matrix; a

@@ -135,6 +135,22 @@ Phase 7a (the pure college fee logic) adds one more **unguarded, offline** verif
   lists against it. It opens no socket, writes nothing, and needs neither the emulator nor a server:
   `node scripts/verify-college-fees-logic.mjs` (**21 checks**).
 
+Phase 7b (the college fee data layer) adds one more **unguarded, offline** verifier:
+
+- `scripts/verify-college-fees-data.mjs` — **deliberately unguarded and offline**, in the shape of
+  `verify-college-results-data.mjs`. It reads `src/lib/db.ts` as text (that module imports firebase-admin)
+  and pins the four college fee collections, the additive proof (the recorded pre-7b checksums of the `COLS`
+  entry list, the `RELS` key list, *every pre-existing `RELS` body* and the prisma accessor list must all
+  reproduce once the four new entries are dropped), the relations, the no-derived-id rule, and that no school
+  fee route, lib, page, print page or school-fee verifier names a college fee model. It opens no socket, writes
+  nothing, and needs neither the emulator nor a server:
+  `node scripts/verify-college-fees-data.mjs` (**9 checks**).
+
+Also in 7b: `verify-college-results-data.mjs` (6b's) keeps its **8 checks** and its pre-6b baselines,
+but now drops the four later-phase college-fee models (its `LATER_MODELS`) alongside its own `courseResult`,
+so a later phase's legitimate addition is not misread as a 6b regression while an edit to a pre-existing
+entry still fails it.
+
 Already guarded: `smoke-all.mjs` and the full `verify-*.mjs` suite.
 
 ## 5. Never agent-runnable — production-targeted scripts
