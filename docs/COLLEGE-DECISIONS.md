@@ -2077,6 +2077,55 @@ explicit allow-list module (D-7-18).
   document-count bracket around every refusal so "writes nothing" is counted rather than assumed (the
   §17 Q2 pattern); `writeGuard` on mutations. Evidence: a new
   `scripts/verify-college-fees-api.mjs` (HTTP).
+
+  **DONE 2026-10-11 — what 7c actually ran.** The eight routes are
+  `src/app/api/college-fees/{heads,structure,generate,charges,payments,discounts,dues,config}/route.ts` —
+  **17 handlers**, every one gated session → tenant → `requireCollege` → the D-7-18 allow-list
+  (`src/lib/college-fees-access.ts`; a dependency-free rule module, so 7d's pages can consult the same
+  rule) → `writeGuard` on a mutation, with every money-changing action audited. `COLLEGE_API_SEGMENTS`
+  gains `college-fees` in the same change that creates its directory, so `verify-college-routes` moves
+  from **14 route files / 30 gated handlers** to **22 / 47** (it re-counts what it covers; still 3/0
+  checks). The change is ADDITIVE to the school's money code: `git diff 41d4f41~1 41d4f41 --
+  src/lib/ledger.ts` is **121 added / 0 removed** — the two new exported functions (`collegeReceiptNo`,
+  `confirmCollegePayment`) and their two types are appended after the school's own code, and the only
+  other edit is one added import, so `postToLedger`, `confirmPayment`, `applyLateFees`,
+  `ledgerForStudent` and `ledgerForSchool` are byte-identical. New evidence:
+  `scripts/verify-college-fees-api.mjs` (**86 checks** over HTTP against the college fixture).
+
+- **7c-follow-up — the ledger audit and the permanent staff matrix (2026-10-11).** Two debts 7c left,
+  closed in one change, with no new feature and no school-side behaviour change:
+  1. **The ledger audit (Q3's practical edge).** D-7-12/D-7-13 post a college payment and an approved
+     award into the SAME central ledger, TAGged (`feeId: null` plus `meta.collegeFeeId` /
+     `meta.collegeDiscountId`), so every reader of that ledger had to be enumerated and RULED ON rather
+     than discovered later. The audit found exactly **three** code-level readers: `ledgerForSchool` /
+     `ledgerForStudent` in `src/lib/ledger.ts`, `src/app/api/ledger/route.ts` (the tenant-wide read and
+     a guardian/student's own-child read) and `/api/export?type=ledger` (the CSV), plus one
+     string-keyed WRITE that only nulls a foreign key (`DELETE /api/students/[id]`). All three reads are
+     tenant-wide reads the college's own staff already reach, so a college entry belongs on them and the
+     tag is what lets a school viewer tell it apart — the intended inclusion, not a leak. **No school
+     report, total, day book, cash book or receivable/outstanding read reaches the ledger at all** (no
+     such report exists in this app), and `confirmCollegePayment` writes NO school `payment` row, so no
+     school fee or payments surface can show college money. **The audit found NO school report that
+     includes college money: the stop-and-report condition was not triggered**, and no school file was
+     changed. The reader list is now pinned by a check that FAILS when a new reader appears, and the tag
+     by two more, so a future reader is a decision in the same change rather than a discovery.
+  2. **The staff matrix is permanent.** The ACCOUNTANT / REGISTRAR / BRANCH_ADMIN probe that had lived in
+     a scratch script is now **three committed checks** inside `scripts/verify-college-fees-api.mjs`
+     (the ACCOUNTANT reaches all 17 handlers; the REGISTRAR reaches every read and is 403 on EVERY write;
+     the BRANCH_ADMIN reaches all 17 on its own branch), so D-7-18 is enforced by the suite that runs
+     with every other verifier instead of by hand.
+
+  Both halves are pinned where they can be re-run: `scripts/verify-college-fees-data.mjs` moves **9 →
+  11 checks** (the ledger-reader set; the college entry's tag — `feeId: null` + `meta.collegeFeeId`, no
+  school `payment` row, its own `CRCP-` receipt sequence) and `scripts/verify-college-fees-api.mjs`
+  **86 → 95** (the 3-check staff matrix plus 6 ledger-reader checks). Every new check was
+  **mutation-proved**: a new ledger reader, a de-tagged college entry, a school `payment` row written by
+  the college path, the school's own `RCP-` receipt prefix, an injected college-tagged `payments` row, and
+  REGISTRAR added to the write allow-list each make the suite fail, and restoring the file makes it pass
+  again. The full suite re-ran to the same counts as the 7b pass — `verify-read-cache` 0/1,
+  `verify-routine-config` 32/3, `qa-certificates` 39/1, `tsc` 0 errors, `next build` 185/185 pages —
+  the three deltas being this phase's own additions and 7c's eight routes.
+
 - **7d — pages + nav.** The screens of D-7-16, the print pages of D-7-17, **one** nav entry behind
   `requires:"COLLEGE"`, **plus the open item that a COLLEGE tenant's sidebar still lists school items**
   — the same registry edit and the same snapshot re-record, which is exactly why 7-pre leaves it here —
@@ -2197,6 +2246,19 @@ result view (§23.6) need it; building the register first would mean rebuilding 
 later. (ii) **The dashboard / reports / import trio is now 9a / 9b / 9c** — recorded as a dated
 correction to §10's phase table (the table itself is left as written, and only unstarted work moved, so
 no phase changed meaning).
+
+**Recorded 2026-10-11 (7c-follow-up) — Q3's read rule, made checkable.** Q3's binding condition
+("the two modes' money must never mix in a read") has a second half that only shows up once money is
+being posted: WHO reads the shared ledger, and what a school viewer sees on it. The audit enumerated
+every reader — the tenant-wide ledger read, the guardian/student's own-child read and the
+`?type=ledger` CSV export, all of which a college's own staff legitimately use, with the college row
+**tagged** (`feeId: null` + `meta.collegeFeeId`) rather than untagged or hidden — and found **no**
+school-facing report, total, day book or stats read that reaches the ledger, so no school money surface
+can show college money. That is now pinned by checks rather than asserted: a new ledger reader fails the
+suite until it is added to the audited list in the same change, and the tag itself is proved
+(`src/lib/ledger.ts` must keep `feeId: null` + `meta.collegeFeeId`, write no school `payment` row and
+issue its own `CRCP-` receipt sequence). The reader inventory, the audit's verdict and the mutation
+proofs are in §24.7's **7c-follow-up** note.
 
 ### 24.10 What this preflight could NOT prove
 

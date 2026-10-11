@@ -144,7 +144,13 @@ Phase 7b (the college fee data layer) adds one more **unguarded, offline** verif
   reproduce once the four new entries are dropped), the relations, the no-derived-id rule, and that no school
   fee route, lib, page, print page or school-fee verifier names a college fee model. It opens no socket, writes
   nothing, and needs neither the emulator nor a server:
-  `node scripts/verify-college-fees-data.mjs` (**9 checks**).
+  `node scripts/verify-college-fees-data.mjs` (**11 checks**). Two of those eleven were added by
+  7c-follow-up and read the ONE shared ledger as TEXT: the code-level readers of that ledger are exactly
+  `src/lib/ledger.ts` (its two query helpers), `src/app/api/ledger/route.ts` and
+  `src/app/api/export/route.ts` (`?type=ledger`) — a new reader fails until it is added to that list,
+  which is what makes the inclusion of college money a reviewed decision — and `confirmCollegePayment`
+  must keep writing `feeId: null` + `meta.collegeFeeId`, no school `payment` row, and its own `CRCP-`
+  receipt sequence.
 
 Also in 7b: `verify-college-results-data.mjs` (6b's) keeps its **8 checks** and its pre-6b baselines,
 but now drops the four later-phase college-fee models (its `LATER_MODELS`) alongside its own `courseResult`,
@@ -165,7 +171,12 @@ propose/approve award flow with no self-approval, the shared ledger entries, and
 any school fee read. It deletes its own rows on the way out, and it is documented as **run once per app start**:
 it resets the tenant through firebase-admin, which cannot invalidate the app's in-process pull memo
 (`src/lib/db.ts`, 30 s + 120 s of stale-while-revalidate).
-  `SMOKE_PORT=3000 node scripts/verify-college-fees-api.mjs` (**86 checks**).
+  `SMOKE_PORT=3000 node scripts/verify-college-fees-api.mjs` (**95 checks** — 86 at 7c plus the
+  7c-follow-up additions: the three-check staff matrix, where the ACCOUNTANT and the BRANCH_ADMIN reach
+  all 17 handlers and the REGISTRAR reaches every read and is 403 on every write, and six ledger-reader
+  checks that pin what a school-facing ledger read shows of college money: the tenant's ledger and the
+  `?type=ledger` CSV include the college row TAGGED (`feeId: null` + `meta.collegeFeeId`), a student's
+  own ledger shows their own college payment, and no school `payment` row is written).
 
 **One ordering rule the college fee verifiers share with the demo-school ones.** A verifier that reads a row an
 earlier verifier created *through the app* is safe (the app's own writes clear its memo), but one that reads a row
