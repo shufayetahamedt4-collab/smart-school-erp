@@ -526,6 +526,103 @@ console.log("\n### college course results — branch admin confinement");
 }
 
 /* --------------------------------------------------------------- cleanup */
+console.log("\n### college fees — branch admin confinement (7c)");
+{
+  const TRACK = new URL(".qa-fixtures.json", import.meta.url);
+  if (!existsSync(TRACK)) {
+    check("the isolation fixture is present (scripts/.qa-fixtures.json)", false, "run: node scripts/isolation-fixture.mjs create");
+  } else {
+    const creds = (JSON.parse(readFileSync(TRACK, "utf8")).creds) || {};
+    const collegeAdmin = await login(HOSTS.school, "zz-iso-college-admin@test.local", creds.collegeAdmin);
+    const collegeBranchAdmin = await login(HOSTS.school, "zz-iso-college-br-admin@test.local", creds.collegeBranchAdmin);
+
+    const C1 = `${P}college`;
+    const brA = `${P}col-br-a`;
+    const brB = `${P}col-br-b`;
+    const progA = `${P}col-prog-a`;
+    const progB = `${P}col-prog-b`;
+    // Deterministic, prefix-tagged ids: each run OVERWRITES its own seed (so the
+    // charge's paidAmount starts at 0 again) and the fixture's prefix sweep cleans
+    // them up. `headNone` is the branch-less row no BRANCH scope may reach.
+    const headA = `${P}col-fee-head-a`;
+    const headB = `${P}col-fee-head-b`;
+    const headNone = `${P}col-fee-head-none`;
+    const chargeA = `cf_${P}col-stu-a_${headA}_1_1`;
+    const chargeB = `cf_${P}col-stu-b_${headB}_1_1`;
+    const headDoc = (id, branchId, name) => ({
+      id, schoolId: C1, branchId, name, bucket: "TUITION", frequency: "TERM",
+      optional: false, active: true, dueDay: null, note: null,
+    });
+    const chargeDoc = (id, branchId, studentId, programId, headId, title) => ({
+      id, schoolId: C1, branchId, studentId, programId, termNumber: 1, headId, headName: title,
+      bucket: "TUITION", title, amount: 10000, grossAmount: 10000, discount: 0, paidAmount: 0,
+      status: "UNPAID", sequence: 1, unit: "STUDENT", dueDay: null, dueDate: null,
+      billedAt: new Date().toISOString(),
+    });
+    await db.collection("collegeFeeHeads").doc(headA).set(headDoc(headA, brA, "ZZ Iso Fee Head A"));
+    await db.collection("collegeFeeHeads").doc(headB).set(headDoc(headB, brB, "ZZ Iso Fee Head B"));
+    await db.collection("collegeFeeHeads").doc(headNone).set(headDoc(headNone, null, "ZZ Iso Fee Head None"));
+    await db.collection("collegeFeeStructures").doc(`${P}col-fee-row-a`).set({
+      id: `${P}col-fee-row-a`, schoolId: C1, branchId: brA, programId: progA, termNumber: 1,
+      headId: headA, amount: 10000, required: true, unit: "STUDENT", basis: "FLAT", note: null,
+    });
+    await db.collection("collegeFeeStructures").doc(`${P}col-fee-row-b`).set({
+      id: `${P}col-fee-row-b`, schoolId: C1, branchId: brB, programId: progB, termNumber: 1,
+      headId: headB, amount: 10000, required: true, unit: "STUDENT", basis: "FLAT", note: null,
+    });
+    await db.collection("collegeFees").doc(chargeA).set(chargeDoc(chargeA, brA, `${P}col-stu-a`, progA, headA, "ZZ Iso Fee Head A — Year 1"));
+    await db.collection("collegeFees").doc(chargeB).set(chargeDoc(chargeB, brB, `${P}col-stu-b`, progB, headB, "ZZ Iso Fee Head B — Year 1"));
+
+    // 1. The branch admin's head list holds its OWN branch's head and neither
+    //    another branch's nor the branch-less one.
+    const bHeads = (await req(HOSTS.school, "/api/college-fees/heads", { cookie: collegeBranchAdmin })).data || [];
+    const bHeadIds = bHeads.map((h) => h.id);
+    check(
+      "a branch admin's college fee heads hold ONLY its own branch's rows",
+      bHeadIds.includes(headA) && !bHeadIds.includes(headB) && !bHeadIds.includes(headNone),
+      JSON.stringify(bHeadIds)
+    );
+
+    // 2. A programme in another branch cannot be priced or read (403), while its own
+    //    branch's programme reads normally (the positive control).
+    const ownStructure = await req(HOSTS.school, `/api/college-fees/structure?programId=${encodeURIComponent(progA)}&termNumber=1`, { cookie: collegeBranchAdmin });
+    const foreignStructure = await req(HOSTS.school, `/api/college-fees/structure?programId=${encodeURIComponent(progB)}&termNumber=1`, { cookie: collegeBranchAdmin });
+    check("the branch admin CAN read its own branch's structure (200)", ownStructure.status === 200, `HTTP ${ownStructure.status}`);
+    check("…and is refused on another branch's programme (403)", foreignStructure.status === 403, `HTTP ${foreignStructure.status}`);
+
+    // 3. The MONEY write: another branch's charge cannot be paid (403) and is left
+    //    untouched; the branch's own charge can be (201 — the positive control).
+    const foreignPay = await post(HOSTS.school, "/api/college-fees/payments", { chargeId: chargeB, amountMinor: 100, method: "CASH" }, collegeBranchAdmin);
+    check("a branch admin CANNOT pay another branch's college charge (403)", foreignPay.status === 403, `HTTP ${foreignPay.status}`);
+    const untouched = (await db.collection("collegeFees").doc(chargeB).get()).data();
+    check(
+      "…and that charge is UNCHANGED (paidAmount still 0)",
+      untouched?.paidAmount === 0 && untouched?.amount === 10000,
+      `paidAmount=${untouched?.paidAmount}`
+    );
+    const ownPay = await post(HOSTS.school, "/api/college-fees/payments", { chargeId: chargeA, amountMinor: 100, method: "CASH" }, collegeBranchAdmin);
+    check("…but CAN pay its own branch's charge (201)", ownPay.status === 201, `HTTP ${ownPay.status} ${JSON.stringify(ownPay.body?.error)}`);
+
+    // 4. The SCHOOL-scoped admin still sees every branch (the confinement is scope,
+    //    not a tenant-wide hiding of rows), and the branch-less row is only theirs.
+    const aHeads = (await req(HOSTS.school, "/api/college-fees/heads", { cookie: collegeAdmin })).data || [];
+    const aHeadIds = aHeads.map((h) => h.id);
+    check(
+      "a SCHOOL-scoped admin sees every branch's college fee head, the branch-less one included",
+      aHeadIds.includes(headA) && aHeadIds.includes(headB) && aHeadIds.includes(headNone),
+      JSON.stringify(aHeadIds)
+    );
+
+    // The ledger entry the positive-control payment wrote is THIS script's own
+    // residue (the shared ledger is not a swept collection), so it is removed — the
+    // ledger is left exactly as this section found it.
+    const led = await db.collection("ledger").where("schoolId", "==", C1).get();
+    for (const d of led.docs) {
+      if (d.data()?.meta?.collegeFeeId === chargeA) await d.ref.delete();
+    }
+  }
+}
+
 console.log("\n### cleanup");
 const wantedAdm = new Set(createdAdmissionNos);
 const studentDocs = (await db.collection("students").get()).docs.filter((d) => wantedAdm.has(d.data().admissionNo));

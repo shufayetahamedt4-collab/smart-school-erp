@@ -208,6 +208,17 @@ const COLS: Record<string, string> = {
   collegeFeeStructure: "collegeFeeStructures",
   collegeFee: "collegeFees",
   collegeFeeConfig: "collegeFeeConfigs",
+  // ---- College support (Phase 7c) ----
+  // The D-7-13 award row: ONE discount/waiver proposed against a charge set (a
+  // percentage of a term's charges, or a fixed amount per head), carrying who
+  // proposed it and who approved it. It is its own collection for the same reason
+  // the school's own `discount` row is its own collection — an award is a record
+  // with a lifecycle (PROPOSED -> APPROVED/REJECTED), not a field on a charge —
+  // and it is NOT the school's `discounts`, because that row hangs off an
+  // `admissionId` a college charge does not have (Q3: the two modes' money must
+  // never mix). Ordinary random ids, exactly like `courseRegistration`: no
+  // `idFor`/`idForCreate` entry.
+  collegeDiscount: "collegeDiscounts",
   // ---- Certificates (origin/main) ----
   // Custom per-school certificate templates. The union keeps this next to the
   // college collections above (integration 1, docs/INTEGRATION-LOG.md).
@@ -815,6 +826,15 @@ const RELS: Record<string, Record<string, Rel>> = {
   },
   collegeFeeConfig: {
     school: { to: "school", fk: "schoolId", kind: "one" },
+  },
+  // The D-7-13 award. `branchId` is STORED (inherited like every other college
+  // row) so `scopeWhere`/`canAccessBranch` filter it directly; the programme it
+  // targets is nullable (an award may cover the whole tenant), and the proposer
+  // and the approver are recorded as ids, never looked up.
+  collegeDiscount: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    program: { to: "program", fk: "programId", kind: "one" },
   },
   certificateTemplate: { school: { to: "school", fk: "schoolId", kind: "one" } },
 };
@@ -2258,6 +2278,93 @@ async function releaseOwned(
   }
 }
 
+/**
+ * The answer to a conditional write (Phase 7c, docs/COLLEGE-DECISIONS.md §24).
+ */
+export interface GuardedResult {
+  /** True when `decide` accepted the row and the write landed. */
+  ok: boolean;
+  /** Why it was refused: the row is gone, `decide` said no, or the store failed. */
+  reason?: "MISSING" | "REFUSED" | "ERROR";
+  /** The refusal message `decide` returned (REFUSED only). */
+  error?: string;
+  /** The row as written, on success. */
+  row?: any;
+  /** The row left UNTOUCHED, on a refusal. */
+  holder?: any;
+}
+
+/**
+ * Atomically read ONE document and write it back ONLY IF `decide` accepts what it
+ * found — the conditional money write (Phase 7c, D-7-12/D-7-13).
+ *
+ * Why this primitive exists, and why it is the only new one 7c adds: every other
+ * write in this shim is unconditional. `$transaction`'s ARRAY form is a single
+ * `WriteBatch` — one atomic commit, but no read, so it cannot express "pay this
+ * charge only while it still owes enough"; its CALLBACK form is merely sequential
+ * (`arg(prisma)`), which is exactly the check-then-act race a concurrent payment
+ * needs to lose. `$claim` is conditional, but only in the one fixed sense "take
+ * this row if it is free", and it REPLACES the row — useless for accumulating a
+ * `paidAmount`.
+ *
+ * So this is a real Firestore `runTransaction`: the read that inspects the row and
+ * the write that changes it are ONE atomic step, and a racer that lands in between
+ * is re-read and re-decided against the winner's value. Two payments that together
+ * exceed the outstanding amount therefore cannot both succeed: whichever the store
+ * serialises second re-reads the new `paidAmount`, `decide` sees the smaller
+ * remaining balance and refuses it — which is the D-7-12 "over-payment is refused,
+ * never silently clamped into a credit" rule, and it is a property of the STORE,
+ * not of the caller remembering to check.
+ *
+ * `decide` runs INSIDE the transaction and so MUST be pure: it may not read or
+ * write anything else (Firestore requires every read before every write in a
+ * transaction, and this function performs exactly one of each). It returns either
+ * `{ ok: true, data }` — merged onto the row as found, so nothing is dropped — or
+ * `{ ok: false, error }`, which writes NOTHING and hands the untouched row back as
+ * `holder` so the caller can answer with a visible refusal.
+ *
+ * A row that is **not there yet** is passed to `decide` as `null` and `reason`
+ * stays `"MISSING"` only when `decide` declines to create. This one extension is
+ * what makes a deterministic-id CREATE atomic too: the 7c charge generation writes
+ * `cf_…` rows that must be created once and never overwritten, and two concurrent
+ * generations must not both create the same charge nor wipe a row that already
+ * carries a payment. `decide(null)` returning `{ ok: true, data }` therefore
+ * inserts, and `decide(null)` returning `{ ok: false, error }` declines — the
+ * store serialises the two racers and the loser re-reads the winner's row.
+ *
+ * `model` is a MODEL name (`COLS` maps it to the collection), like every other
+ * function here — not a raw collection name.
+ */
+async function guardedUpdate(
+  model: string,
+  id: string,
+  decide: (current: any) => { ok: true; data: Record<string, any> } | { ok: false; error: string }
+): Promise<GuardedResult> {
+  try {
+    const ref = col(model).doc(id);
+    const result = await getDb().runTransaction(async (tx): Promise<GuardedResult> => {
+      const snap = await tx.get(ref);
+      const row = snap.exists ? conv(snap.data()) : null;
+      const decision = decide(row);
+      if (!decision || decision.ok !== true) {
+        return {
+          ok: false,
+          reason: row ? "REFUSED" : "MISSING",
+          error: decision && decision.ok === false ? decision.error : "The row cannot take this change.",
+          ...(row ? { holder: row } : {}),
+        };
+      }
+      const next = clean({ ...(row ?? {}), ...decision.data });
+      tx.set(ref, next);
+      return { ok: true, row: { id, ...next } };
+    });
+    invalidateDbCacheScope({ model });
+    return result;
+  } catch {
+    return { ok: false, reason: "ERROR" };
+  }
+}
+
 export const prisma = {
   school: model("school"),
   user: model("user"),
@@ -2355,10 +2462,20 @@ export const prisma = {
   collegeFeeStructure: model("collegeFeeStructure"),
   collegeFee: model("collegeFee"),
   collegeFeeConfig: model("collegeFeeConfig"),
+  // ---- College support (Phase 7c) ----
+  // The D-7-13 award row, addressed through the shim like every other model. It
+  // is in COLLEGE_MODEL_RE, so a NON-college route that reached for it fails the
+  // route guard rather than mixing the two modes' money.
+  collegeDiscount: model("collegeDiscount"),
   // ---- Certificates (origin/main) ----
   certificateTemplate: model("certificateTemplate"),
   $transaction: transaction,
   $claim: claim,
+  // ---- College support (Phase 7c) ----
+  // The ONE primitive a MONEY write needs on top of `$claim`: a conditional
+  // write decided from the row's CURRENT stored value, inside a real
+  // transaction. See the doc block above it.
+  $guardedUpdate: guardedUpdate,
   // ---- College support (Phase 6-pre 4) ----
   // The two ownership-scoped writes the lease needs on top of `$claim`: a heartbeat
   // that only renews a row this run still owns, and a release that only finalises one

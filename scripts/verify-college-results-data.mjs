@@ -84,9 +84,12 @@ const PRE_6B = {
  * still fails the proof.
  *
  * Phase 7b (the college fee spine, docs/COLLEGE-DECISIONS.md §24) added the four
- * `collegeFee*` models in its own change; 6b's baseline predates them.
+ * `collegeFee*` models in its own change; 6b's baseline predates them. Phase 7c
+ * added ONE more — `collegeDiscount`, the D-7-13 award row — so it joins them.
+ * `courseResult` itself and every other pre-existing entry stay INSIDE the hashed
+ * projection: only these NAMES are dropped, so 6b's own coverage is unchanged.
  */
-const LATER_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "collegeFeeConfig"];
+const LATER_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "collegeFeeConfig", "collegeDiscount"];
 
 /** Blank out comments and string literals, PRESERVING LENGTH, so a scan sees code only. */
 function maskCommentsAndStrings(text) {

@@ -41,6 +41,13 @@
 // `/api/students`, because that segment is frozen non-college: check 3 forbids a
 // file there from calling `requireCollege` or touching a college model, and this
 // list has no allowlist to weaken. A college surface belongs in a college segment.
+// Phase 7c (§24.7) adds `college-fees` the same way, in the change that creates
+// `src/app/api/college-fees` — the college MONEY segment: fee heads, the
+// programme × term structure, charge generation, payments, awards (discounts and
+// waivers), dues and the college's own payment config (D-7-1…D-7-19). It is a
+// separate segment from the school's `/api/fees*` because the two modes' money
+// must never mix in a read (D-7-12, Q3) and because check 3 forbids a school fee
+// file from reaching a college fee model at all (7b's `verify-college-fees-data`).
 export const COLLEGE_API_SEGMENTS = [
   "departments",
   "programs",
@@ -48,6 +55,7 @@ export const COLLEGE_API_SEGMENTS = [
   "course-registrations",
   "college-promotion",
   "course-results",
+  "college-fees",
 ] as const;
 
 export type CollegeApiSegment = (typeof COLLEGE_API_SEGMENTS)[number];

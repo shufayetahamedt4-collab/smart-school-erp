@@ -151,7 +151,7 @@ const AFTER_GATE_TOKENS = [
  * `collegeFee` is listed shortest-last so a longer name is matched in its own
  * right and `\b` keeps the shorter one from matching a longer one.
  */
-const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course|courseResult|collegeFeeHead|collegeFeeStructure|collegeFeeConfig|collegeFee)\b/;
+const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course|courseResult|collegeFeeHead|collegeFeeStructure|collegeFeeConfig|collegeFee|collegeDiscount)\b/;
 
 let failures = 0;
 const ok = (msg) => console.log(`  ✅ ${msg}`);

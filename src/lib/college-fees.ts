@@ -166,9 +166,37 @@ export function isCollegeFeeUnit(value: unknown): value is CollegeFeeUnit {
   return typeof value === "string" && (COLLEGE_FEE_UNITS as readonly string[]).includes(value);
 }
 
-/** An unknown unit reads as STUDENT (charging once, not once per course). */
+/**
+ * An unknown unit reads as STUDENT (charging once, not once per course). This is
+ * the READ path only: `validateCollegeFeeStructure` REFUSES an unknown unit at
+ * write time, so a typo can never be stored as STUDENT and then priced (7c).
+ */
 export function normalizeCollegeFeeUnit(value: unknown): CollegeFeeUnit {
   return isCollegeFeeUnit(value) ? value : "STUDENT";
+}
+
+/** The refusal for an unknown pricing basis (7c) — nothing is silently defaulted. */
+export function collegeFeeBasisRefusal(value: unknown): string {
+  return `A structure row's basis must be ${COLLEGE_FEE_BASES.join(" or ")} — got ${describeValue(value)}.`;
+}
+
+/** The refusal for an unknown billing unit (7c). */
+export function collegeFeeUnitRefusal(value: unknown): string {
+  return `A structure row's unit must be ${COLLEGE_FEE_UNITS.join(" or ")} — got ${describeValue(value)}.`;
+}
+
+/** A short, safe rendering of a rejected value for an error message. */
+function describeValue(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value.slice(0, 40));
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return "an array";
+  return typeof value === "object" ? "an object" : String(value);
+}
+
+/** Is the field simply absent, so the writer's default applies? (7c) */
+function isAbsent(value: unknown): boolean {
+  return value === undefined || value === null || value === "";
 }
 
 /** A head as it is stored and read back (D-7-2). */
@@ -396,8 +424,19 @@ export function validateCollegeFeeStructure(
     };
   }
 
-  // The pricing hook is present and deliberately refused in v1 (D-7-8).
+  // Basis (D-7-8 + the owner's 7c answer): an absent basis means FLAT, the one
+  // supported value; `PER_CREDIT` is refused by name; anything else is refused
+  // rather than silently stored as FLAT.
+  if (!isAbsent(raw.basis) && !isCollegeFeeBasis(raw.basis)) {
+    return { ok: false, error: collegeFeeBasisRefusal(raw.basis) };
+  }
   if (raw.basis === "PER_CREDIT") return { ok: false, error: PER_CREDIT_NOT_IN_V1 };
+
+  // Unit (the owner's 7c answer): absent means STUDENT, and an unknown unit is a
+  // refusal — a typo must never be stored as STUDENT and priced.
+  if (!isAbsent(raw.unit) && !isCollegeFeeUnit(raw.unit)) {
+    return { ok: false, error: collegeFeeUnitRefusal(raw.unit) };
+  }
 
   const amount = Number(safeMoney(raw.amount));
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Set an amount greater than 0." };

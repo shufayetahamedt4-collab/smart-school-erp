@@ -249,6 +249,19 @@ async function create() {
   });
   mark("users", colRegistrarUserId);
 
+  // A permanent ACCOUNTANT (Phase 7c) — the ONE staff role the college fee
+  // allow-list (D-7-18) admits as a WRITER alongside the admin-level roles, and
+  // the role that may PROPOSE an award but may never approve one (D-7-13/§24.1).
+  // Without it the college fee role probe could only show admin vs refused.
+  track.creds.collegeAccountant = newPw();
+  const colAccountantUserId = `${P}user-col-accountant`;
+  await db.collection("users").doc(colAccountantUserId).set({
+    email: "zz-iso-college-accountant@test.local", name: "ZZ Iso College Accountant",
+    role: "ACCOUNTANT", schoolId: collegeSchoolId, scope: null, branchId: null,
+    active: true, passwordHash: hash(track.creds.collegeAccountant),
+  });
+  mark("users", colAccountantUserId);
+
   const colDeptA = `${P}col-dept-a`;
   const colDeptB = `${P}col-dept-b`;
   const colDeptNone = `${P}col-dept-none`;
@@ -572,9 +585,28 @@ async function clean() {
   const owned = ["users", "students", "classes", "sections", "subjects", "teachers",
     "attendance", "homeworks", "fees", "exams", "routines", "meetingSlots", "conversations", "schools",
     "branches", "departments", "programs", "courses", "programCourses", "courseRegistrations",
-    "courseResults"];
+    "courseResults",
+    // Phase 7c: the college fee spine. The school's own `fees`/`feeSettings`/
+    // `payments`/`ledger` rows are NEVER swept here (a college payment writes only
+    // a ledger entry, and that row belongs to the verifier's activity, not the
+    // fixture — exactly like the login audit rows above).
+    "collegeFeeHeads", "collegeFeeStructures", "collegeFees", "collegeFeeConfigs", "collegeDiscounts"];
   for (const col of owned) {
     const snap = await db.collection(col).where("__name__", ">=", P).where("__name__", "<=", P + "\uf8ff").get();
+    for (const d of snap.docs) {
+      await d.ref.delete();
+      deleted++;
+    }
+  }
+  // Phase 7c backstop: a college fee row created THROUGH THE APP carries a
+  // server-generated id (`cf_…` charge, `r_…` head/award, `cfc_…` config) that the
+  // `zziso-` prefix sweep above cannot reach, so a verifier that builds a fee spine
+  // over HTTP would leave it behind. Every fixture tenant's own schoolId starts
+  // with the same prefix, so sweep the five college fee collections by schoolId
+  // too — and ONLY where the schoolId is a fixture one, so a real tenant's fee rows
+  // can never be touched.
+  for (const col of ["collegeFeeHeads", "collegeFeeStructures", "collegeFees", "collegeFeeConfigs", "collegeDiscounts"]) {
+    const snap = await db.collection(col).where("schoolId", ">=", P).where("schoolId", "<=", P + "\uf8ff").get();
     for (const d of snap.docs) {
       await d.ref.delete();
       deleted++;

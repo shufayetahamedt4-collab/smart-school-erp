@@ -149,7 +149,37 @@ Phase 7b (the college fee data layer) adds one more **unguarded, offline** verif
 Also in 7b: `verify-college-results-data.mjs` (6b's) keeps its **8 checks** and its pre-6b baselines,
 but now drops the four later-phase college-fee models (its `LATER_MODELS`) alongside its own `courseResult`,
 so a later phase's legitimate addition is not misread as a 6b regression while an edit to a pre-existing
-entry still fails it.
+entry still fails it. 7c adds `collegeDiscount` to that later-phase drop list and to 7b's
+`verify-college-fees-data.mjs`, so both offline proofs stay additive: the pre-7b checksums still reproduce
+**courseResult included**.
+
+Phase 7c (the college fee API) adds one **guarded, HTTP** verifier:
+
+- `scripts/verify-college-fees-api.mjs` — **guarded** (`requireEmulator()`), and it needs the app running and
+the college fixture tenant created (`node scripts/isolation-fixture.mjs create`). Unlike the offline pair above,
+it drives the eight `/api/college-fees` routes over HTTP against the shared fixture: the D-7-18 role matrix and
+its 403/400/404 refusals (each bracketed by a document count), 7a's unit/basis refusals at the API, the visible
+`(program, term, head)` 409, idempotent generation with a late-registration top-up, payments in integer minor
+units with over-payment refused, **two simultaneous payments that together exceed the due**, the school's
+propose/approve award flow with no self-approval, the shared ledger entries, and that no college row appears in
+any school fee read. It deletes its own rows on the way out, and it is documented as **run once per app start**:
+it resets the tenant through firebase-admin, which cannot invalidate the app's in-process pull memo
+(`src/lib/db.ts`, 30 s + 120 s of stale-while-revalidate).
+  `SMOKE_PORT=3000 node scripts/verify-college-fees-api.mjs` (**86 checks**).
+
+**One ordering rule the college fee verifiers share with the demo-school ones.** A verifier that reads a row an
+earlier verifier created *through the app* is safe (the app's own writes clear its memo), but one that reads a row
+created **and deleted** by an earlier verifier can still see the deleted row in the memo for up to 150 s. That is
+why `verify-tenant-isolation.mjs` now builds its cross-tenant college fee spine **over HTTP** instead of seeding
+it raw — raw seeding is invisible to the very read used as the positive control — and why the demo-school
+verifiers (`verify-bulk-import.mjs`, `verify-admission-intake.mjs`) must run **before** the onboarding verifiers,
+which create and delete `ONB-*` students in the demo school. The same rule as "restart the app after an emulator
+wipe".
+
+Also in 7c: `isolation-fixture.mjs` gains a college `ACCOUNTANT` (the one staff role D-7-18 admits as a writer and
+the role that may propose but never approve) and a **school-scoped** sweep of the five college fee collections, so
+a fee spine built over HTTP (server-generated `cf_…`/`r_…`/`cfc_…` ids) is cleaned as well as the
+`zziso-`-prefixed rows.
 
 Already guarded: `smoke-all.mjs` and the full `verify-*.mjs` suite.
 

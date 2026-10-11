@@ -50,13 +50,31 @@
  *   7. THE MODEL IS REACHABLE ONLY FROM A LISTED COLLEGE SEGMENT. 7b builds no
  *      route, so no route may reach the models yet; when 7c adds the API it must
  *      live inside a LISTED college segment (check 3 keeps it there).
- *   8. THE SEGMENT LIST IS DELIBERATELY UNSHIPPED. `COLLEGE_API_SEGMENTS` still
- *      holds exactly the six pre-7b segments — `college-fees` lands with 7c's
- *      directory, in the one change that creates it (§8 D-A) — and
- *      `src/app/api/college-fees` does not exist yet. The two must agree.
+ *   8. THE SEGMENT LANDS WITH ITS DIRECTORY (7c). `COLLEGE_API_SEGMENTS` holds
+ *      the six pre-7b segments plus `college-fees`, and `src/app/api/college-fees`
+ *      exists — both added in the one change that created the directory (§8 D-A).
+ *      A listed segment with no directory (or the reverse) still fails here.
  *   9. THE GUARD COVERS THE NEW MODELS. `verify-college-routes.mjs`'s
- *      `COLLEGE_MODEL_RE` includes all four (a strengthening: no allowlist, no
- *      relaxed check), and `college-routes.ts` stays dependency-free.
+ *      `COLLEGE_MODEL_RE` includes all four — and 7c's `collegeDiscount`
+ *      (a strengthening: no allowlist, no relaxed check) — and `college-routes.ts`
+ *      stays dependency-free.
+ *
+ * TWO DELIBERATE RE-SCOPES, both documented here because both are additions that
+ * must not read as regressions:
+ *
+ *   - **7c's `collegeDiscount` joins the dropped set** in check 2's baseline
+ *     comparison, exactly as 7b's four models were dropped from 6b's verifier. Only
+ *     those NAMES are dropped: `courseResult` — the entry 6b owns — and every other
+ *     pre-existing COLS/RELS/prisma entry stay INSIDE the shared projections, so
+ *     `verify-college-fees-data`'s pre-7b proof still covers them and no coverage
+ *     is lost.
+ *   - **`src/lib/ledger.ts` is exempt from the check-6 college-model scan for ONE
+ *     function.** D-7-12 BINDS the college payment helper (`confirmCollegePayment`)
+ *     into the SHARED ledger module, so the file necessarily names `prisma.collegeFee`.
+ *     The exemption is not a skip: every college fee reference in the file must sit
+ *     at or after that function's declaration, so the school's own writers and
+ *     readers (`postToLedger`, `confirmPayment`, `applyLateFees`, `ledgerForStudent`,
+ *     `ledgerForSchool`) still fail the check if one ever names a college row.
  *
  *   node scripts/verify-college-fees-data.mjs
  */
@@ -95,6 +113,22 @@ const PRE_7B = {
 };
 
 const NEW_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "collegeFeeConfig"];
+
+/**
+ * The models registered by a phase AFTER 7b: 7c's `collegeDiscount` (the D-7-13
+ * award row). It is dropped alongside 7b's own four before the pre-7b baseline
+ * comparison — the same deliberate re-scope 7b applied to 6b's verifier — and
+ * ONLY its name is dropped, so `courseResult` and every other pre-existing entry
+ * remain inside the hashed projections.
+ */
+const LATER_MODELS = ["collegeDiscount"];
+
+/** Any college fee model reached through the shim — check 6's needle. */
+const COLLEGE_REF_RE = /\bprisma\.college(?:Fee(?:Head|Structure|Config)?|Discount)\b/g;
+
+/** The ONE shared-ledger file, and the ONE function D-7-12 mandates in it. */
+const LEDGER_FILE = "src/lib/ledger.ts";
+const LEDGER_COLLEGE_MARKER = "export async function confirmCollegePayment(";
 const WANT_COLS = {
   collegeFeeHead: "collegeFeeHeads",
   collegeFeeStructure: "collegeFeeStructures",
@@ -353,7 +387,7 @@ console.log("\n1. the collections — the four §24 models map to four distinct 
 
 console.log("\n2. additive only — dropping the four entries reproduces every pre-7b checksum");
 {
-  const head = hashesWithout(NEW_MODELS);
+  const head = hashesWithout([...NEW_MODELS, ...LATER_MODELS]);
   const wrong = Object.keys(PRE_7B).find((k) => head[k] !== PRE_7B[k]);
   const missing = NEW_MODELS.filter(
     (m) => !pairs.includes(`${m}=${WANT_COLS[m]}`) || !relKeys.includes(m) || !accessors.includes(m)
@@ -361,14 +395,14 @@ console.log("\n2. additive only — dropping the four entries reproduces every p
   if (wrong) {
     bad(
       "additive",
-      `the ${wrong} projection differs from the recorded pre-7b baseline beyond the four new models ` +
+      `the ${wrong} projection differs from the recorded pre-7b baseline beyond the ${NEW_MODELS.length + LATER_MODELS.length} later-phase models ` +
         `(computed ${head[wrong]}, recorded ${PRE_7B[wrong]}) — an existing entry was added, renamed, removed or edited`
     );
   } else if (missing.length) bad("additive", `a new model is missing from one of the three maps: ${JSON.stringify(missing)}`);
   else
     ok(
       `COLS ${pairs.length} entries, RELS ${relKeys.length} models (${Object.keys(bodies).length} bodies), ` +
-        `prisma ${accessors.length} accessors — dropping the four reproduces all four recorded baselines, so no existing entry moved (bodies included)`
+        `prisma ${accessors.length} accessors — dropping the ${NEW_MODELS.length} 7b models and 7c's ${LATER_MODELS.length} reproduces all four recorded baselines, so no existing entry moved (bodies included), courseResult included`
     );
 }
 
@@ -514,7 +548,20 @@ console.log("\n6. no school fee surface names a college fee model (libs, pages, 
       continue;
     }
     for (const f of files) {
-      if (/collegeFee/.test(maskCommentsAndStrings(readFileSync(`${root}${f}`, "utf8")))) offenders.push(f);
+      const code = maskCommentsAndStrings(readFileSync(`${root}${f}`, "utf8"));
+      if (!(code.match(COLLEGE_REF_RE) || []).length) continue;
+      if (f !== LEDGER_FILE) {
+        offenders.push(f);
+        continue;
+      }
+      // The ONE exempt file, for the ONE function D-7-12 binds into it: every
+      // college fee reference must sit AT OR AFTER `confirmCollegePayment`'s
+      // declaration, so the school's own ledger readers and writers (all of which
+      // come before it) still fail the moment one names a college row.
+      const marker = code.indexOf(LEDGER_COLLEGE_MARKER);
+      if (marker < 0 || (code.slice(0, marker).match(COLLEGE_REF_RE) || []).length) {
+        offenders.push(`${f} (a college fee reference outside confirmCollegePayment — D-7-12 allows it nowhere else)`);
+      }
     }
   }
   if (missingPaths.length)
@@ -526,7 +573,7 @@ console.log("\n6. no school fee surface names a college fee model (libs, pages, 
     );
   else
     ok(
-      `none of the ${targets.length} school fee surfaces (routes, libs, pages, print pages, verify-fees-totals) names a college fee model`
+      `none of the ${targets.length} school fee surfaces (routes, libs, pages, print pages, verify-fees-totals) names a college fee model, and the ONE shared-ledger exception (D-7-12's confirmCollegePayment) names it nowhere else in src/lib/ledger.ts`
     );
 }
 
@@ -544,7 +591,7 @@ console.log("\n7. the models are reachable only from a listed college segment �
       if (entry.isDirectory()) walk(full);
       else if (entry.isFile() && entry.name.endsWith(".ts")) {
         const code = maskCommentsAndStrings(readFileSync(full, "utf8"));
-        if (!/\bprisma\.collegeFee(Head|Structure|Config)?\b/.test(code)) continue;
+        if (!(code.match(COLLEGE_REF_RE) || []).length) continue;
         const rel = full.slice(apiDir.length + 1).split("\\").join("/");
         const segment = rel.split("/")[0];
         owners.add(segment);
@@ -565,32 +612,33 @@ console.log("\n7. the models are reachable only from a listed college segment �
 
 /* ------------------------------------------------------------------------ 8 */
 
-console.log("\n8. the segment list is deliberately unshipped — the list and the directory still agree");
+console.log("\n8. the segment lands WITH its directory — 7c adds both in one change (§8 D-A)");
 {
   const listed = [...segments.COLLEGE_API_SEGMENTS];
   const dirExists = existsSync(fileURLToPath(new URL("../src/app/api/college-fees", import.meta.url)));
-  const same = listed.length === PRE_7B_SEGMENTS.length && PRE_7B_SEGMENTS.every((s) => listed.includes(s));
+  const expected = [...PRE_7B_SEGMENTS, "college-fees"];
+  const keptPre = PRE_7B_SEGMENTS.every((s) => listed.includes(s));
   const guardPinsStale = /staleSegments/.test(guardText);
   if (!guardPinsStale)
     bad("segment", "the guard no longer pins the stale-list rule — check 1 could then accept a listed segment with no directory");
-  else if (!same)
+  else if (!keptPre)
+    bad("segment", `a pre-7b segment was dropped: ${JSON.stringify(listed)}`);
+  else if (listed.length !== expected.length || !expected.every((s) => listed.includes(s)))
     bad(
       "segment",
-      `COLLEGE_API_SEGMENTS changed: ${JSON.stringify(listed)}, expected the six pre-7b segments ${JSON.stringify(PRE_7B_SEGMENTS)}`
+      `COLLEGE_API_SEGMENTS is ${JSON.stringify(listed)}, expected the six pre-7b segments plus "college-fees" ${JSON.stringify(expected)}`
     );
-  else if (listed.includes("college-fees"))
-    bad("segment", '"college-fees" is listed but 7b builds no route — 7c lands the entry with the directory');
-  else if (dirExists)
-    bad("segment", "src/app/api/college-fees exists but the segment is not listed — check 1 would fail an unclassified directory");
+  else if (!dirExists)
+    bad("segment", "src/app/api/college-fees is listed but the directory does not exist — check 1 would fail it as a stale segment");
   else
     ok(
-      `COLLEGE_API_SEGMENTS holds the same ${listed.length} segments and "college-fees" is not among them: 7c lands the entry with the directory`
+      `COLLEGE_API_SEGMENTS holds the six pre-7b segments plus "college-fees" (${listed.length}), and src/app/api/college-fees exists — the directory and its entry landed in one change (§8 D-A)`
     );
 }
 
 /* ------------------------------------------------------------------------ 9 */
 
-console.log("\n9. the guard covers the four new models, and the segment list stays dependency-free");
+console.log("\n9. the guard covers the new models (7b's four and 7c's collegeDiscount), and the segment list stays dependency-free");
 {
   const covers = /COLLEGE_MODEL_RE = \/\\bprisma\\\.\(([^)]*)\)/.exec(guardText);
   const names = covers ? covers[1].split("|").map((s) => s.trim()) : [];
@@ -598,8 +646,8 @@ console.log("\n9. the guard covers the four new models, and the segment list sta
     !/\bimport\b/.test(maskCommentsAndStrings(segmentsText)) && !/\brequire\s*\(/.test(maskCommentsAndStrings(segmentsText));
   const keptPreExisting = ["department", "program", "programCourse", "course", "courseResult"].every((n) => names.includes(n));
   if (!covers) bad("guard", "COLLEGE_MODEL_RE could not be read from verify-college-routes.mjs");
-  else if (!NEW_MODELS.every((m) => names.includes(m)))
-    bad("guard", `COLLEGE_MODEL_RE does not cover all four college fee models: ${JSON.stringify(names)}`);
+  else if (![...NEW_MODELS, ...LATER_MODELS].every((m) => names.includes(m)))
+    bad("guard", `COLLEGE_MODEL_RE does not cover every college fee model (7b's four plus 7c's collegeDiscount): ${JSON.stringify(names)}`);
   else if (!keptPreExisting) bad("guard", `COLLEGE_MODEL_RE lost a pre-existing model: ${JSON.stringify(names)}`);
   else if (!importFree) bad("guard", "college-routes.ts gained an import — it must stay dependency-free");
   else {
@@ -613,7 +661,7 @@ console.log("\n9. the guard covers the four new models, and the segment list sta
     else if (!exact) bad("guard", `the regex does not match the four model names exactly: ${JSON.stringify(names)}`);
     else
       ok(
-        `COLLEGE_MODEL_RE covers ${names.length} models (the five pre-existing + the four new), matches each model name exactly, and college-routes.ts is dependency-free`
+        `COLLEGE_MODEL_RE covers ${names.length} models (the five pre-existing + 7b's four + 7c's collegeDiscount), matches each model name exactly, and college-routes.ts is dependency-free`
       );
   }
 }
@@ -629,6 +677,6 @@ console.log(
   `✅ COLLEGE FEES DATA LAYER OK — ${checks} check(s): the four college fee collections are registered in ` +
     `COLS/RELS/prisma as a purely additive change (the four recorded pre-7b baselines, RELS bodies included, still ` +
     `reproduce), the school fee spine is untouched and reachable from no college fee read, no derived-id entry makes a ` +
-    `duplicate silent, no route reaches the models yet, the college-fees segment is deliberately unshipped, and the ` +
-    `route guard covers all four new models.`
+    `duplicate silent, no non-college route reaches the models, the college-fees segment and its directory landed together, and the ` +
+    `route guard covers every college fee model (7b's four plus 7c's collegeDiscount).`
 );

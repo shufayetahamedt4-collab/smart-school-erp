@@ -821,5 +821,137 @@ console.log("\n### COLLEGE registrations-only → SCHOOL downgrade (5-pre)");
   );
 }
 
+/* ---------- college fees: cross-tenant isolation (Phase 7c) ---------- */
+// The college FEE spine is the fourth college surface (after departments,
+// programs/courses and course results). C1's own rows are created THROUGH THE APP
+// here, not seeded raw like every other section above: the app memoises a
+// collection pull for 30 s and then keeps serving the previous answer for up to a
+// further 120 s of stale-while-revalidate (`src/lib/db.ts`), so a row written
+// behind the app's back can be invisible to the very read this section uses as its
+// positive control, while a write THROUGH the app clears that memo. What is
+// asserted is the 7c contract: a tenant's fee rows are invisible AND untouchable
+// from every other tenant, on both reads and the money write. The BOTH tenant's
+// charge is raw-seeded for the cross-tenant PAYMENT probe only (nothing reads it as
+// its own row), and every row this section creates is deleted on the way out — with
+// `isolation-fixture.mjs`'s school-scoped sweep of the five college fee collections
+// as the backstop.
+console.log("\n### college fees — a COLLEGE tenant's fee rows are invisible and untouchable elsewhere");
+{
+  const C1 = `${P}college`;
+  const BOTH = `${P}both`;
+  const colProgA = `${P}col-prog-a`;
+  const bothStu = `${P}both-stu`;
+  const bHead = `${P}both-fee-head`;
+  const bCharge = `cf_${bothStu}_${bHead}_1_1`;
+  const NOTE = "ZZ iso college fee note";
+  /** Everything this section writes through the app, deleted again at the end. */
+  const mine = [];
+
+  const collegeCookie = await login("zz-iso-college-admin@test.local", CRED.collegeAdmin);
+  const bothCookie = await login("zz-iso-both-admin@test.local", CRED.bothAdmin);
+  const sCookie = await login("zz-iso-admin@test.local", CRED.admin);
+
+  // The BOTH tenant's charge: a PAYMENT target for C1's session, read by nobody.
+  await db.collection("collegeFeeHeads").doc(bHead).set({
+    id: bHead, schoolId: BOTH, branchId: null, name: "ZZ Iso Both Fee Head",
+    bucket: "TUITION", frequency: "TERM", optional: false, active: true, dueDay: null, note: null,
+  });
+  await db.collection("collegeFees").doc(bCharge).set({
+    id: bCharge, schoolId: BOTH, branchId: null, studentId: bothStu, programId: `${P}both-prog`,
+    termNumber: 1, headId: bHead, headName: "ZZ Iso Both Fee Head — Year 1", bucket: "TUITION",
+    title: "ZZ Iso Both Fee Head — Year 1", amount: 100, grossAmount: 100, discount: 0,
+    paidAmount: 0, status: "UNPAID", sequence: 1, unit: "STUDENT", dueDay: null, dueDate: null,
+    billedAt: new Date().toISOString(),
+  });
+
+  // (1) C1's own spine, through the app: a head, its structure row, the derived
+  //     charge, an award and the tenant's own payment note.
+  const hRes = await postJSON(collegeCookie, "/api/college-fees/heads", { name: "ZZ Iso College Fee Head", bucket: "TUITION", frequency: "TERM" });
+  const headId = hRes.body?.data?.id || null;
+  if (headId) mine.push(["collegeFeeHeads", headId]);
+  const stRes = await postJSON(collegeCookie, "/api/college-fees/structure", { programId: colProgA, termNumber: 1, headId, amount: 100 });
+  if (stRes.body?.data?.id) mine.push(["collegeFeeStructures", stRes.body.data.id]);
+  const genRes = await postJSON(collegeCookie, "/api/college-fees/generate", { programId: colProgA, termNumber: 1 });
+  const chargeId = genRes.body?.data?.students?.[0]?.newCharges?.[0]?.id || null;
+  if (chargeId) mine.push(["collegeFees", chargeId]);
+  const awardRes = await postJSON(collegeCookie, "/api/college-fees/discounts", { kind: "PERCENT", percent: 10, headIds: [headId], programId: colProgA, termNumber: 1 });
+  const awardId = awardRes.body?.data?.id || null;
+  if (awardId) mine.push(["collegeDiscounts", awardId]);
+  const bHeadRes = await postJSON(bothCookie, "/api/college-fees/heads", { name: "ZZ Iso Both Tenant Fee Head", bucket: "TUITION", frequency: "TERM" });
+  const bHeadId = bHeadRes.body?.data?.id || null;
+  if (bHeadId) mine.push(["collegeFeeHeads", bHeadId]);
+  const cfgRes = await patchJSON(collegeCookie, "/api/college-fees/config", { paymentNote: NOTE });
+  mine.push(["collegeFeeConfigs", `cfc_${C1}`]);
+  check(
+    !!headId && !!chargeId && !!awardId && !!bHeadId && cfgRes.status === 200,
+    `C1's spine is built through the app (head=${headId} charge=${chargeId} award=${awardId} bothHead=${bHeadId} cfg=${cfgRes.status})`
+  );
+
+  // (2) C1 sees its own head, charge, award and config — the positive controls.
+  const ownHeads = await getJSON(collegeCookie, "/api/college-fees/heads");
+  const ownCharges = await getJSON(collegeCookie, "/api/college-fees/charges");
+  const ownAwards = await getJSON(collegeCookie, "/api/college-fees/discounts");
+  const ownCfg = await getJSON(collegeCookie, "/api/college-fees/config");
+  const ownHeadIds = (ownHeads.body.data || []).map((h) => h.id);
+  const ownChargeIds = (ownCharges.body.data || []).map((c) => c.id);
+  check(
+    ownHeads.status === 200 && ownHeadIds.includes(headId) && ownChargeIds.includes(chargeId),
+    `a COLLEGE tenant reads its own fee head and charge (${ownHeads.status}/${ownCharges.status})`
+  );
+  check(
+    ownAwards.status === 200 && (ownAwards.body.data || []).some((a) => a.id === awardId) && ownCfg.status === 200 && ownCfg.body.data?.paymentNote === NOTE,
+    `…and its own award and college fee config (${ownAwards.status}/${ownCfg.status})`
+  );
+
+  // (3) No OTHER tenant's college fee row appears anywhere in C1's payloads, and
+  //     C1's own ids are absent from the BOTH tenant's reads.
+  const c1Payload = JSON.stringify([ownHeads.body, ownCharges.body, ownAwards.body, ownCfg.body]);
+  check(
+    !c1Payload.includes(bHead) && !c1Payload.includes(bCharge) && !c1Payload.includes("ZZ Iso Both"),
+    "C1's college fee reads carry NO row, id or name from the other college-capable tenant"
+  );
+  const bHeads = await getJSON(bothCookie, "/api/college-fees/heads");
+  const bHeadIds = (bHeads.body.data || []).map((h) => h.id);
+  check(
+    bHeads.status === 200 && bHeadIds.includes(bHeadId) && !bHeadIds.includes(headId),
+    `the BOTH tenant sees only its own fee head, never C1's (${JSON.stringify(bHeadIds)})`
+  );
+
+  // (4) A SCHOOL tenant hits the COLLEGE gate: 403 with ZERO data, head/charge/config alike.
+  const sHeads = await getJSON(sCookie, "/api/college-fees/heads");
+  const sCharges = await getJSON(sCookie, "/api/college-fees/charges");
+  const sCfg = await getJSON(sCookie, "/api/college-fees/config");
+  check(
+    sHeads.status === 403 && sCharges.status === 403 && sCfg.status === 403 &&
+      sHeads.body?.data === undefined && sCharges.body?.data === undefined && sCfg.body?.data === undefined,
+    `a SCHOOL tenant is gated on every college fee read — 403 with zero data (${sHeads.status}/${sCharges.status}/${sCfg.status})`
+  );
+
+  // (5) A cross-tenant WRITE on C1's rows is refused and changes nothing.
+  const pay = await postJSON(bothCookie, "/api/college-fees/payments", { chargeId, amountMinor: 100, method: "CASH" });
+  const patchHead = await patchJSON(bothCookie, "/api/college-fees/heads", { id: headId, name: "ZZ hijacked" });
+  const delHead = await delJSON(bothCookie, `/api/college-fees/heads?id=${encodeURIComponent(headId)}`);
+  const patchAward = await patchJSON(bothCookie, "/api/college-fees/discounts", { id: awardId, state: "APPROVED" });
+  check(
+    pay.status === 404 && patchHead.status === 404 && delHead.status === 404 && patchAward.status === 404,
+    `another tenant's payment / head PATCH / head DELETE / award PATCH on a C1 row are all NOT FOUND (${pay.status}/${patchHead.status}/${delHead.status}/${patchAward.status})`
+  );
+  const headAfter = (await db.collection("collegeFeeHeads").doc(headId).get()).data();
+  const chargeAfter = (await db.collection("collegeFees").doc(chargeId).get()).data();
+  check(
+    headAfter?.name === "ZZ Iso College Fee Head" && chargeAfter?.amount === 100 && chargeAfter?.paidAmount === 0,
+    `…and C1's head and charge are UNCHANGED (paidAmount ${chargeAfter?.paidAmount})`
+  );
+
+  // (6) …and the reverse direction: C1 cannot pay the BOTH tenant's charge.
+  const cPay = await postJSON(collegeCookie, "/api/college-fees/payments", { chargeId: bCharge, amountMinor: 100, method: "CASH" });
+  check(cPay.status === 404, `the reverse direction is NOT FOUND too (${cPay.status})`);
+
+  // Cleanup: the spine this section built, plus the two raw BOTH rows.
+  for (const [col, id] of [...mine, ["collegeFeeHeads", bHead], ["collegeFees", bCharge]]) {
+    await db.collection(col).doc(id).delete().catch(() => null);
+  }
+}
+
 console.log(failures === 0 ? "\n✅ ISOLATION CONFIRMED — no cross-school data in any of the 13 swept routes" : `\n❌ ${failures} isolation failure(s)`);
 process.exit(failures === 0 ? 0 : 1);

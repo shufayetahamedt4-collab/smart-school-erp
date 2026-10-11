@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import type { PaymentMethod } from "./db";
 import { notifyUsers } from "./notify";
 import { money } from "./utils";
+import { acceptCollegePayment, fromMinor, toMinor } from "./college-fees";
 
 /**
  * PRD §10.1 — Central Ledger System.
@@ -158,6 +159,126 @@ export async function refAlreadyProcessed(schoolId: string, refNo: string): Prom
     select: { id: true },
   });
   return !!hit;
+}
+
+/* ---------------------------------------------------- college payments (7c) */
+
+/**
+ * The college receipt sequence (D-7-12): `CRCP-…`.
+ *
+ * It is deliberately a different prefix from the school's `RCP-…`, so the two
+ * modes' receipt numbers cannot interleave: a number a family is holding always
+ * says which half of a BOTH tenant issued it, and no school receipt number can
+ * ever be re-issued by a college payment (or the other way round).
+ */
+export function collegeReceiptNo(now: number = Date.now()): string {
+  return `CRCP-${now.toString().slice(-8)}${Math.floor(Math.random() * 90 + 10)}`;
+}
+
+export interface ConfirmCollegePaymentInput {
+  schoolId: string;
+  /** The `collegeFee` charge the payment is against. */
+  chargeId: string;
+  /** The amount in INTEGER MINOR UNITS (paisa) — never a typed currency amount. */
+  amountMinor: number;
+  method: PaymentMethod;
+  refNo?: string | null;
+  actorId?: string | null;
+  date?: Date;
+}
+
+export type CollegePaymentOutcome =
+  | {
+      ok: true;
+      receiptNo: string;
+      chargeId: string;
+      applied: number;
+      paidAmount: number;
+      due: number;
+      status: "UNPAID" | "PARTIAL" | "PAID";
+    }
+  | { ok: false; error: string };
+
+/**
+ * Confirm a payment against ONE college charge (D-7-12) — the college counterpart
+ * of `confirmPayment()`, posting to the SAME central ledger.
+ *
+ * Three rules, and each one is load-bearing:
+ *
+ *  1. **Over-payment is refused.** `acceptCollegePayment` (7a) refuses any payment
+ *     larger than what the charge still owes, by name — it is never clamped into a
+ *     credit.
+ *  2. **The decision is made atomically.** The amount is re-decided INSIDE
+ *     `$guardedUpdate`'s real Firestore transaction, against the row as it is at
+ *     that instant — so two simultaneous payments that together exceed the
+ *     outstanding balance cannot both succeed. The loser re-reads the winner's
+ *     `paidAmount`, sees the smaller balance and is refused. (The school's own
+ *     `confirmPayment` clamps instead, and its callback `$transaction` is only
+ *     sequential; this is the D-7-12 path and it is proved by
+ *     `scripts/verify-college-fees-api.mjs`.)
+ *  3. **The ledger is shared, not duplicated.** ONE `PAYMENT` entry is appended,
+ *     with `feeId: null` and a `meta` naming the college charge, programme and
+ *     term — so the entry is in the same ledger the school uses, and 7e can prove
+ *     no school-mode read shows it (Q3).
+ *
+ * It writes NO `payment` row: the school's `payments` collection is read by the
+ * school's own screens, and a college payment must not appear there (D-7-12
+ * records only the ledger entry and the charge's own receipt number).
+ */
+export async function confirmCollegePayment(input: ConfirmCollegePaymentInput): Promise<CollegePaymentOutcome> {
+  const charge: any = await prisma.collegeFee.findUnique({ where: { id: input.chargeId } });
+  if (!charge || charge.schoolId !== input.schoolId) return { ok: false, error: "College charge not found." };
+
+  const amountMinor = Math.trunc(Number(input.amountMinor));
+  if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+    return { ok: false, error: "Payment must be a positive whole number of minor units." };
+  }
+
+  // A courtesy refusal BEFORE the transaction, so an obvious over-payment gets a
+  // clean message; the transaction below is the authoritative decision.
+  const preview = acceptCollegePayment(charge, { amount: fromMinor(amountMinor) });
+  if (!preview.ok) return { ok: false, error: preview.error };
+
+  const stamp = (input.date || new Date()).toISOString();
+  const written = await prisma.$guardedUpdate("collegeFee", input.chargeId, (current) => {
+    if (!current) return { ok: false, error: "College charge not found." };
+    const decision = acceptCollegePayment(current, { amount: fromMinor(amountMinor) });
+    if (!decision.ok) return { ok: false, error: decision.error };
+    return { ok: true, data: { paidAmount: decision.paidAmount, status: decision.status, lastPaidAt: stamp } };
+  });
+  if (!written.ok || !written.row) {
+    return { ok: false, error: written.error || "Payment refused — the charge changed while it was being paid." };
+  }
+
+  const receiptNo = collegeReceiptNo();
+  await postToLedger({
+    schoolId: input.schoolId,
+    kind: "PAYMENT",
+    amount: fromMinor(amountMinor),
+    method: input.method,
+    refNo: input.refNo || receiptNo,
+    status: "CONFIRMED",
+    studentId: charge.studentId ?? null,
+    feeId: null,
+    actorId: input.actorId || null,
+    description: `College payment — ${String(charge.title ?? "charge")}`,
+    meta: {
+      receiptNo,
+      collegeFeeId: input.chargeId,
+      programId: charge.programId ?? null,
+      termNumber: charge.termNumber ?? null,
+    },
+  });
+
+  return {
+    ok: true,
+    receiptNo,
+    chargeId: input.chargeId,
+    applied: fromMinor(amountMinor),
+    paidAmount: Number(written.row.paidAmount) || 0,
+    due: fromMinor(Math.max(0, toMinor(written.row.amount) - toMinor(written.row.paidAmount))),
+    status: written.row.status,
+  };
 }
 
 /** PRD §10.3 — automatic late fee after due date (called by reminder/job run). */

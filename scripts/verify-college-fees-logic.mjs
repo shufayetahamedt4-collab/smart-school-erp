@@ -320,6 +320,8 @@ console.log("\n5. the structure row — a positive amount, the programme's own t
   const perCredit = F.validateCollegeFeeStructure({ ...base, basis: "PER_CREDIT" });
   const outsideRange = F.validateCollegeFeeStructure({ ...base, termNumber: 7 });
   const junkUnit = F.validateCollegeFeeStructure({ ...base, unit: "nope" });
+  const junkBasis = F.validateCollegeFeeStructure({ ...base, basis: "CREDIT" });
+  const absentFields = F.validateCollegeFeeStructure({ ...base, basis: null, unit: "" });
 
   if (!good.ok) bad("structure", `a valid row was refused: ${good.error}`);
   else if (good.row.amount !== 2500 || good.row.required !== false || good.row.unit !== "COURSE" || good.row.basis !== "FLAT" || good.row.note !== "lab")
@@ -332,7 +334,11 @@ console.log("\n5. the structure row — a positive amount, the programme's own t
   else if (perCredit.ok) bad("structure", "a PER_CREDIT row was accepted in v1");
   else if (perCredit.error !== F.PER_CREDIT_NOT_IN_V1) bad("structure", `the PER_CREDIT refusal is not the pinned one: ${perCredit.error}`);
   else if (!outsideRange.ok || outsideRange.row.termNumber !== 7) bad("structure", "a term is no longer accepted when no programme bounds are given");
-  else if (!junkUnit.ok || junkUnit.row.unit !== "STUDENT") bad("structure", "a junk unit did not fall back to STUDENT");
+  else if (junkUnit.ok || junkBasis.ok) bad("structure", `a junk unit/basis was accepted instead of refused: ${JSON.stringify([junkUnit, junkBasis])}`);
+  else if (!/STUDENT or COURSE/.test(junkUnit.error) || !/FLAT or PER_CREDIT/.test(junkBasis.error))
+    bad("structure", `the junk unit/basis refusals do not name the allowed values: ${junkUnit.error} / ${junkBasis.error}`);
+  else if (!absentFields.ok || absentFields.row.unit !== "STUDENT" || absentFields.row.basis !== "FLAT")
+    bad("structure", "an absent unit/basis did not default to STUDENT/FLAT");
   else {
     const junk = [null, undefined, "x", 1, []].filter((v) => F.validateCollegeFeeStructure(v).ok);
     const normalised = F.normalizeCollegeFeeStructure({ termNumber: 0, amount: "abc", basis: "PER_CREDIT", unit: "nope" });
@@ -340,7 +346,7 @@ console.log("\n5. the structure row — a positive amount, the programme's own t
     else if (normalised.termNumber !== 1 || normalised.amount !== 0 || normalised.unit !== "STUDENT")
       bad("structure", `the lenient reader did not fall back: ${JSON.stringify(normalised)}`);
     else if (normalised.basis !== "PER_CREDIT") bad("structure", "the lenient reader dropped an explicit PER_CREDIT basis — the billing path must be able to refuse it");
-    else ok("a valid row normalises; a missing programme/head, a non-positive amount, a fractional or out-of-range term and PER_CREDIT are refused by name; a junk unit falls back to STUDENT");
+    else ok("a valid row normalises; an unknown unit/basis is refused by name (only absent fields default), and a missing programme/head, a non-positive amount, a fractional or out-of-range term and PER_CREDIT are all refused");
   }
 }
 
