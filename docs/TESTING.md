@@ -187,6 +187,41 @@ verifiers (`verify-bulk-import.mjs`, `verify-admission-intake.mjs`) must run **b
 which create and delete `ONB-*` students in the demo school. The same rule as "restart the app after an emulator
 wipe".
 
+**Why `verify-college-fees-api` runs LAST — stated here, because 7d makes it load-bearing.** The suite's order
+(`docs/COLLEGE-STATUS.md` §3 records the exact sequence) puts the 7c HTTP verifier **last**, and the reason is
+mechanical rather than stylistic: it **resets its own tenant**. Its teardown deletes, through `firebase-admin`,
+the fee heads, structure rows, charges, awards and config rows its checks created (and it rebuilds the fixture
+tenant's spine). Writing through `firebase-admin` goes straight to Firestore and therefore **cannot invalidate
+the app's in-process pull memo** (`src/lib/db.ts`, ~30 s TTL plus 120 s stale-while-revalidate). A verifier that
+ran *after* it would therefore be able to read a row the reset had just deleted and fail for a reason that has
+nothing to do with the code under test. The same rule is why the demo-school verifiers run before the
+onboarding verifiers, and why the app is restarted after every emulator wipe. **Add new college fee verifiers
+before it, never after.**
+
+Phase 7d (the college fee screens, the ledger's college badge and the college sidebar) adds one more
+**unguarded, offline** verifier:
+
+- `scripts/verify-college-fees-page.mjs` — deliberately unguarded and offline, in the shape of
+  `verify-college-results-page.mjs`. It exercises only the pure page layer in `src/lib/college-fees-view.ts`:
+  the ONE money helper over integer minor units (zero, one paisa, odd amounts, a huge amount, junk, a negative
+  and both currency label shapes), the typed-money reader, the D-7-18 write-control map and the page-state
+  gate, the shared ledger's college TAG and its split (never summed) totals, the wizard success screen's
+  per-half lines, and the double-submit/refusal rules. It *reads* the three pages, the nav registry
+  (`src/components/nav.ts`), the two fee routes and `college-fees-access.ts` as text to pin what the screens
+  call and what they must not re-inline. `node scripts/verify-college-fees-page.mjs` (**214 checks**), and it
+  is **mutation-proved** — each of these makes it fail, and restoring the file makes it pass again: a REGISTRAR
+  shown a write control, a money form that is not disabled while its request is in flight, float arithmetic on
+  money in a page, a write control rendered without its `controls.<id>` guard, the ledger's two halves summed
+  together, a "School settings" button on a college tenant's success screen, the fee nav entry's
+  `requires:"COLLEGE"` marker removed, and the structure read's additive `programmes` payload dropped.
+
+**One additive 7c payload, named here so nobody hunts for it.** `GET /api/college-fees/structure` now also
+returns `programmes` (id, name, term shape) — the picker the 7d screens need. The college fee pages may not use
+the school catalogue's `GET /api/programs`: the **ACCOUNTANT**, a D-7-18 writer who owns the college's money,
+holds no `programs` permission there, so the ONE college read that owns the programme dimension serves what its
+screens pick from. Nothing else about that route changed, and `scripts/verify-college-fees-api.mjs`'s assertions
+about it (row counts, rows total, bill total, heads) are unchanged.
+
 Also in 7c: `isolation-fixture.mjs` gains a college `ACCOUNTANT` (the one staff role D-7-18 admits as a writer and
 the role that may propose but never approve) and a **school-scoped** sweep of the five college fee collections, so
 a fee spine built over HTTP (server-generated `cf_…`/`r_…`/`cfc_…` ids) is cleaned as well as the

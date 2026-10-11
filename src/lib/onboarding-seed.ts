@@ -142,6 +142,65 @@ export function wizardSuccessTitle(value: unknown, extendMode: boolean): string 
 }
 
 /**
+ * The success screen's count lines, one per half this tenant actually HAS.
+ *
+ * 7-pre named the tenant correctly (`wizardSuccessTitle`) but still printed the
+ * school half's arithmetic for everyone: a COLLEGE tenant read "0 class(es), 0
+ * section(s) and 0 subject(s) configured", which is a school it does not run
+ * (docs/COLLEGE-DECISIONS.md §24.7, 7-pre item 2, and the leftover list's
+ * "wizard success screen" item — closed here in 7d). So the lines are decided by
+ * the same `missing = SCHOOL` shape rule the wizard's steps already use:
+ *
+ *   - a tenant with a school half prints its class/section/subject counts;
+ *   - a tenant with a college half prints its department/programme/course counts
+ *     (only when there is at least one, exactly as before);
+ *   - a college-only tenant therefore never reads a class/section/subject line,
+ *     and a BOTH tenant reads both halves, which is what it has.
+ */
+export function wizardSuccessLines(
+  value: unknown,
+  counts: {
+    classesCreated?: unknown;
+    sectionsCreated?: unknown;
+    subjectsCreated?: unknown;
+    departmentsCreated?: unknown;
+    programsCreated?: unknown;
+    coursesCreated?: unknown;
+  } = {}
+): string[] {
+  const n = (v: unknown) => {
+    const num = Number(v);
+    return Number.isFinite(num) ? num : 0;
+  };
+  const lines: string[] = [];
+  if (tenantHasSchool(value)) {
+    lines.push(
+      `${n(counts.classesCreated)} class(es), ${n(counts.sectionsCreated)} section(s) and ${n(counts.subjectsCreated)} subject(s) configured.`
+    );
+  }
+  if (tenantHasCollege(value) && n(counts.departmentsCreated) > 0) {
+    lines.push(
+      `College: ${n(counts.departmentsCreated)} department(s), ${n(counts.programsCreated)} programme(s), ${n(counts.coursesCreated)} course(s).`
+    );
+  }
+  return lines;
+}
+
+/**
+ * The success screen's second button, or `null` when the tenant has no school
+ * half to configure.
+ *
+ * `/dashboard/settings` is the SCHOOL panel's settings (its classes, subjects,
+ * fee settings and academic sessions live there), so offering it to a college
+ * tenant was the same mistake as the counts line — and the same fix: ask the
+ * tenant's own shape. A SCHOOL or BOTH tenant keeps the button it has always
+ * had, label included, so nothing about a school's wizard changes.
+ */
+export function wizardSettingsLink(value: unknown): { href: string; label: string } | null {
+  return tenantHasSchool(value) ? { href: "/dashboard/settings", label: "School settings" } : null;
+}
+
+/**
  * May this tenant carry the school-shaped `feeSetting` defaults?
  *
  * `feeSetting` is one monthly + one admission default — school semantics, and

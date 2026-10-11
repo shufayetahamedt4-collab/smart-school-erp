@@ -114,9 +114,28 @@ export async function GET(req: NextRequest) {
   // (D-7-7) — the two differ for a MONTHLY head on a six-month term.
   const termSystem = programme && programme.ok ? programme.program.termSystem : null;
   const months = collegeTermMonths(termSystem);
+
+  // 7d (additive): the programme picker's own data. The college fee screens may
+  // not use `/api/programs` — the ACCOUNTANT, a D-7-18 writer who owns the
+  // college's money, holds no `programs` permission there — so the ONE college
+  // read that owns the programme dimension serves the id, the name and the term
+  // shape its screens pick from. Nothing else on this route changed, and a
+  // caller's own branch scope still decides what it may see.
+  const programmes = ((await prisma.program.findMany({ where: { schoolId } })) as any[])
+    .filter((p) => canAccessBranch(session as any, p.branchId))
+    .map((p) => ({
+      id: String(p.id),
+      name: String(p.name ?? ""),
+      termSystem: p.termSystem ?? null,
+      durationYears: Number.isFinite(Number(p.durationYears)) ? Number(p.durationYears) : null,
+      termCount: collegeTermCount(Number(p.durationYears), p.termSystem),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+
   const data = {
     rows,
     heads,
+    programmes,
     termNumber,
     programId: programId || null,
     termSystem,

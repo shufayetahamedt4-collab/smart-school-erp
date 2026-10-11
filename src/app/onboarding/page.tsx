@@ -21,8 +21,10 @@ import {
   TERM_SYSTEMS,
   cloneCollege,
   wizardAcceptsFees,
+  wizardSettingsLink,
   wizardStepKeys,
   wizardSubmitLabel,
+  wizardSuccessLines,
   wizardSuccessTitle,
   type DegreeLevel,
   type SeedCollege,
@@ -205,6 +207,13 @@ export default function OnboardingPage() {
     }
   };
 
+  // The success screen's two shape decisions, both pure and both pinned by the
+  // offline verifier: which halves' counts it prints, and whether a settings
+  // button is offered at all (docs/COLLEGE-DECISIONS.md §24.7, 7d's half of the
+  // "wizard success screen" open item).
+  const successLines = done ? wizardSuccessLines(institutionType, done) : [];
+  const settingsLink = done ? wizardSettingsLink(institutionType) : null;
+
   if (loading) return <LoadingScreen label="Loading setup wizard…" />;
 
   if (!authed) {
@@ -242,16 +251,24 @@ export default function OnboardingPage() {
               (`wizardSuccessTitle`) — a college is never congratulated on a
               school it does not have. Extend mode keeps its own heading. */}
           <h1 className="text-xl font-black text-slate-900">{wizardSuccessTitle(institutionType, !!done.extended)}</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            {done.classesCreated} class(es), {done.sectionsCreated} section(s) and {done.subjectsCreated} subject(s) configured.
-            {done.departmentsCreated
-              ? ` College: ${done.departmentsCreated} department(s), ${done.programsCreated} programme(s), ${done.coursesCreated} course(s).`
-              : ""}
-            {done.fees ? ` Fees: ${fmtMoney((done.fees as any).monthlyFee)}/month.` : ""}
-          </p>
+          {/* The counts are decided per half (`wizardSuccessLines`): a college is
+              never congratulated on classes it does not run, and a BOTH tenant
+              reads both of its halves. The settings button follows the same
+              rule (`wizardSettingsLink`) — it is the SCHOOL panel's settings, so
+              a college-only tenant is offered no such thing. */}
+          {(successLines.length > 0 || done.fees) && (
+            <p className="mt-2 text-sm text-slate-500">
+              {successLines.join(" ")}
+              {done.fees ? ` Fees: ${fmtMoney((done.fees as any).monthlyFee)}/month.` : ""}
+            </p>
+          )}
           <div className="mt-5 flex justify-center gap-2">
             <Link href="/dashboard" className="btn btn-primary">Open dashboard <ArrowRight size={14} /></Link>
-            <Link href="/dashboard/settings" className="btn btn-secondary">School settings</Link>
+            {settingsLink && (
+              <Link href={settingsLink.href} className="btn btn-secondary">
+                {settingsLink.label}
+              </Link>
+            )}
           </div>
         </div>
       </Centered>

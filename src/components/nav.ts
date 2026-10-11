@@ -69,19 +69,26 @@ export interface NavItem {
   icon: LucideIcon;
   /**
    * Optional visibility marker: shown only to a tenant that can run this mode at
-   * all, and only while that mode is the active one. Phase 2e is the first phase
+   * all, and only while that mode is the active one. Phase 2e was the first phase
    * to use it — the college destinations (`/dashboard/departments`,
    * `/dashboard/programs`, `/dashboard/courses`, `/dashboard/registration`)
-   * carry `COLLEGE` for the three
-   * college-facing roles (SCHOOL_ADMIN, BRANCH_ADMIN, REGISTRAR). Nothing else
-   * is marked, and an item without a marker is visible in every mode, so a
-   * SCHOOL tenant's sidebar is still the registry's school items exactly.
+   * carry `COLLEGE` for the college-facing roles.
+   *
+   * **An item with NO marker is a SCHOOL item** (Phase 7d, docs/COLLEGE-DECISIONS
+   * §8 deviation 3: "a COLLEGE-only tenant's nav is the college list"): a
+   * college-capable tenant whose active mode is COLLEGE lists its marked college
+   * items and nothing else, so an institution that runs no school half is never
+   * offered Classes & Sections, Exams, the school's Fees or its Promotion. A
+   * SCHOOL tenant — and any absent/unknown institution type or mode — keeps the
+   * whole list exactly as before, so the school sidebar is still the registry's
+   * own array.
    *
    * Mode is UI context and never authorization: this decides what a sidebar
    * lists, not what a user may reach (`can()` and the tenant gate in
    * `requireCollege()` remain the only enforcement). The tenant half of the
    * check is defence in depth: a SCHOOL tenant lists no college link even if a
-   * stale `ss_mode` cookie ever asked for one.
+   * stale `ss_mode` cookie ever asked for one, and a SCHOOL tenant never loses a
+   * school link to a stale `COLLEGE` mode.
    */
   requires?: Mode;
 }
@@ -122,6 +129,10 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
     { href: "/dashboard/college-promotion", label: "College Promotion", icon: TrendingUp, requires: "COLLEGE" },
     { href: "/dashboard/college-results", label: "College Results", icon: BarChart3, requires: "COLLEGE" },
+    // 7d (D-7-16): the ONE nav entry of the college fee screens — the same four-role
+    // face as the rest of the college money surface (the D-7-18 writers, plus the
+    // registrar read-only one). It is what makes "the college list" above real.
+    { href: "/dashboard/college-fees", label: "College Fees", icon: Wallet, requires: "COLLEGE" },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/timetable", label: "Timetable Builder", icon: CalendarRange },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
@@ -168,6 +179,10 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
     { href: "/dashboard/college-promotion", label: "College Promotion", icon: TrendingUp, requires: "COLLEGE" },
     { href: "/dashboard/college-results", label: "College Results", icon: BarChart3, requires: "COLLEGE" },
+    // 7d (D-7-16): the ONE nav entry of the college fee screens — the same four-role
+    // face as the rest of the college money surface (the D-7-18 writers, plus the
+    // registrar read-only one). It is what makes "the college list" above real.
+    { href: "/dashboard/college-fees", label: "College Fees", icon: Wallet, requires: "COLLEGE" },
     { href: "/dashboard/routine", label: "Routine", icon: CalendarDays },
     { href: "/dashboard/timetable", label: "Timetable Builder", icon: CalendarRange },
     { href: "/dashboard/live-classes", label: "Live Classes", icon: Radio },
@@ -207,6 +222,7 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
     { href: "/dashboard/college-promotion", label: "College Promotion", icon: TrendingUp, requires: "COLLEGE" },
     { href: "/dashboard/college-results", label: "College Results", icon: BarChart3, requires: "COLLEGE" },
+    { href: "/dashboard/college-fees", label: "College Fees", icon: Wallet, requires: "COLLEGE" },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
     { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
@@ -216,6 +232,7 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { href: "/dashboard/admissions", label: "Admissions", icon: ClipboardList },
     { href: "/dashboard/students", label: "Students", icon: GraduationCap },
+    { href: "/dashboard/college-fees", label: "College Fees", icon: Wallet, requires: "COLLEGE" },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
     { href: "/dashboard/fees/structure", label: "Fee structure", icon: Wallet },
     { href: "/dashboard/fees/payments", label: "Payment channels", icon: CreditCard },
@@ -275,14 +292,20 @@ export const NAVS: Record<string, NavItem[]> = {
  *
  * Phase 1 (docs/COLLEGE-DECISIONS.md §8) installed the mechanism as a no-op;
  * Phase 2e is the phase that consumes it, marking the two college destinations
- * for the three college-facing roles. The result now depends on the data:
+ * for the three college-facing roles; **Phase 7d completes it**: a
+ * college-capable tenant in COLLEGE mode lists its college items ONLY ("a
+ * COLLEGE-only tenant's nav is the college list", §8 deviation 3), because an
+ * unmarked item is a school item. The result therefore depends on the data:
  *   - an item whose `requires` is not the active mode, or whose tenant cannot run
  *     that mode at all, is dropped;
+ *   - an unmarked item is dropped when the tenant runs a college AND the active
+ *     mode is COLLEGE — the sidebar cleanup 7-pre left to this phase;
  *   - an item with an override for this type/mode is returned under that label.
- * When neither changes anything the function still returns `NAVS[role]` **by
- * reference** — which is now true for the six roles with no college items, not
- * for the three that carry them (dropping a marked item necessarily returns a
- * copy, so a marked role's array is no longer the registry's own).
+ * A tenant that cannot run a college keeps the whole list — a stale `COLLEGE`
+ * mode cookie can never empty a school's sidebar — and when nothing changes the
+ * function still returns `NAVS[role]` **by reference**. That reference survives
+ * for a SCHOOL tenant (and for an absent type/mode), which is why the school
+ * sidebar is still literally the registry's own array.
  * `scripts/verify-nav-scope.mjs` asserts exactly that split, and that a SCHOOL
  * tenant's list is still the frozen pre-Phase-1 registry.
  */
@@ -299,12 +322,22 @@ export function navForRole(
   // and the tenant must be able to run that mode (COLLEGE = the college-capable
   // types). Absent/unknown types normalize to SCHOOL, so they never qualify.
   const collegeCapable = hasCollege(normalizeInstitutionType(institutionType));
+  // 7d: in COLLEGE mode a college-capable tenant shows its college items ONLY.
+  // The `collegeCapable` half is what keeps a SCHOOL tenant's sidebar whole even
+  // if a stale `ss_mode` cookie ever said COLLEGE (allowedModes(SCHOOL) = [SCHOOL]).
+  const collegeList = active === "COLLEGE" && collegeCapable;
   let changed = false;
   const out: NavItem[] = [];
 
   for (const item of items) {
     const tenantSupports = item.requires !== "COLLEGE" || collegeCapable;
-    if (item.requires && (item.requires !== active || !tenantSupports)) {
+    if (item.requires) {
+      if (item.requires !== active || !tenantSupports) {
+        changed = true;
+        continue;
+      }
+    } else if (collegeList) {
+      // An unmarked item is a school item, and this tenant is showing its college.
       changed = true;
       continue;
     }
@@ -365,6 +398,11 @@ const SCHOOL_GROUP_OF: Record<string, string> = {
   "/dashboard/registration": "academics",
   "/dashboard/college-promotion": "academics",
   "/dashboard/college-results": "academics",
+  // 7d: the college's MONEY lives beside the school's, in `finance` — the module
+  // the fee screens already belong to. It is the one college href outside
+  // `academics`, and `verify-nav-scope.mjs` now asserts the exact group per href
+  // rather than "every college item is academics".
+  "/dashboard/college-fees": "finance",
   "/dashboard/routine": "academics",
   "/dashboard/live-classes": "academics",
   "/dashboard/exams": "academics",
