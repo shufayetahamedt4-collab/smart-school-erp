@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { findExistingSibling, linkSiblingFamily } from "@/lib/family";
+import { normalizeInstitutionType } from "@/lib/institution";
 
 /**
  * Shared enrollment kernel (Phase 1).
@@ -23,6 +24,10 @@ import { findExistingSibling, linkSiblingFamily } from "@/lib/family";
  *  - fee rows are either the school's default admission+monthly pair
  *    (POST /api/students) or an explicit, ordered row list (intake / enrollment),
  *    with branchId included only when the caller asks for it;
+ *  - the default pair is raised for SCHOOL enrolments only: a college enrolment
+ *    (the student carries `programId`/`termNumber`, or the tenant is COLLEGE)
+ *    raises no school default and creates no school `feeSetting` (7-pre-2, see
+ *    `createStudentFees` below);
  *  - duplicate checks stay in each caller (they differ in rule and message).
  */
 
@@ -158,8 +163,9 @@ export async function enrollStudent(opts: EnrollStudentOptions): Promise<EnrollS
     }
   }
 
-  // 4) Fees — the caller's plan, nothing more.
-  const fees = await createStudentFees(schoolId, student.id, opts.fees);
+  // 4) Fees — the caller's plan, nothing more. The enrolment's own fields are
+  // passed along because the SCHOOL default pair is mode-aware (7-pre-2).
+  const fees = await createStudentFees(schoolId, student.id, opts.fees, opts.student);
 
   return {
     student,
@@ -171,18 +177,50 @@ export async function enrollStudent(opts: EnrollStudentOptions): Promise<EnrollS
   };
 }
 
+/**
+ * 7-pre-2 — is this enrolment a COLLEGE one, which must raise no school default?
+ *
+ * The decision comes from the ENROLMENT first: a student created carrying the
+ * college identity (`programId` / `termNumber`, Phase 4a) is a college enrolment
+ * whoever the caller is. The target tenant's `institutionType` is the
+ * cross-check that keeps it honest when a caller forgets the identity — a
+ * COLLEGE tenant has no school half, so it can never raise a school's defaults.
+ *
+ * A SCHOOL tenant and a `BOTH` tenant's school half are deliberately left alone:
+ * only an exactly-COLLEGE tenant trips the cross-check, and a missing or unknown
+ * `institutionType` normalises to SCHOOL — so their behaviour is unchanged, and
+ * a `BOTH` tenant's school-side student still gets the default pair.
+ *
+ * docs/COLLEGE-DECISIONS.md §24.7 (7-pre-2).
+ */
+async function isCollegeEnrolment(
+  schoolId: string,
+  student: Record<string, any> | null | undefined
+): Promise<boolean> {
+  if (student?.programId != null || student?.termNumber != null) return true;
+  const school = await prisma.school
+    .findUnique({ where: { id: schoolId }, select: { institutionType: true } })
+    .catch(() => null);
+  return normalizeInstitutionType((school as any)?.institutionType) === "COLLEGE";
+}
+
 /** Raise the fee rows a caller asked for. Returns the admission/monthly row ids. */
 async function createStudentFees(
   schoolId: string,
   studentId: string,
-  fees: EnrollFeesInput | null | undefined
+  fees: EnrollFeesInput | null | undefined,
+  /** The enrolment's own fields — the college identity lives here (7-pre-2). */
+  student?: Record<string, any> | null
 ): Promise<{ admissionFeeId: string | null; monthlyFeeId: string | null }> {
   if (!fees) return { admissionFeeId: null, monthlyFeeId: null };
   const branch = fees.includeBranch ? { branchId: fees.branchId ?? null } : {};
 
   // POST /api/students mode: ensure the school's fee setting, then bill its
-  // default admission + monthly pair exactly as before.
+  // default admission + monthly pair exactly as before — unless this is a
+  // college enrolment, which raises NO school default and writes nothing at all
+  // (the gate sits BEFORE the upsert so not even a `feeSetting` is created).
   if (fees.ensureDefaults) {
+    if (await isCollegeEnrolment(schoolId, student)) return { admissionFeeId: null, monthlyFeeId: null };
     await prisma.feeSetting.upsert({
       where: { schoolId },
       update: {},
