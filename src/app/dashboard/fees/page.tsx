@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Wallet, Plus, Search, Save, Receipt, Scale, Coins } from "lucide-react";
 import { api, qs } from "@/lib/client";
 import { Badge, Field, TextInput, Select, Modal, PageHeader, LoadingScreen, ErrorNote, KpiCard, statusTone, prettyStatus } from "@/components/ui";
@@ -15,6 +15,22 @@ interface FeeRow {
 interface StudentLite { id: string; name: string; admissionNo: string; classRoom?: { name: string } | null }
 
 const EMPTY_ADD = { studentId: "", title: "", feeType: "MONTHLY", amount: "", dueDate: "", installments: "1" };
+
+/**
+ * pilot P2 — a fresh key for ONE payment attempt.
+ *
+ * The key belongs to the ATTEMPT, not to a request: the form generates it when a
+ * submit first needs it, keeps it across a retry or a dropped response, and
+ * throws it away only after a success (or when a new fee is opened). The server
+ * then answers every repeat of that attempt from the payment the first request
+ * wrote, so a double submit, a second tab and a retry can only ever produce one
+ * payment. Same shape as the college Collect form's key.
+ */
+function newPaymentKey(): string {
+  const c: any = typeof crypto !== "undefined" ? crypto : null;
+  if (c && typeof c.randomUUID === "function") return String(c.randomUUID());
+  return `pk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
 
 export default function FeesPage() {
   const [fees, setFees] = useState<FeeRow[]>([]);
@@ -33,6 +49,10 @@ export default function FeesPage() {
   const [addForm, setAddForm] = useState<any>(EMPTY_ADD);
   const [students, setStudents] = useState<StudentLite[]>([]);
   const [busy, setBusy] = useState(false);
+  // pilot P2 — the in-flight flag for the Collect dialog and the key of the
+  // payment attempt it is currently recording.
+  const [payBusy, setPayBusy] = useState(false);
+  const payKey = useRef("");
 
   const load = (filters = { status: status || undefined, q: q || undefined, branchId: branchId || undefined }) =>
     api<{ fees: FeeRow[]; settings: any }>(`/api/fees${qs(filters)}`).then((d) => { setFees(d.fees); setSettings(d.settings); }).finally(() => setLoading(false));
@@ -49,21 +69,40 @@ export default function FeesPage() {
   const apply = () => { setLoading(true); load(); };
 
   const pay = async () => {
+    // A second click while the first request is in flight is ignored outright:
+    // the button is disabled too, but the guard is what makes it one request.
+    if (payBusy) return;
     setError("");
     const amt = Number(payAmount) || 0;
     const rowDoc = fees.find((f) => f.id === payOpen);
     const rowDue = rowDoc ? feeDue(rowDoc) : 0;
     if (amt <= 0) { setError("Enter the amount collected."); return; }
     // Part-payment is normal (৳200 against a ৳500 fee); over-paying is not, and
-    // the ledger must never record more than the school billed.
+    // the ledger must never record more than the school billed. This is a
+    // courtesy check — the server decides against the current row — and it is
+    // skipped for a retry, whose key may already have settled the fee.
     if (amt > rowDue) { setError(`That is more than the ${fmtMoney(rowDue)} still due on this fee.`); return; }
+    // ONE key per attempt: minted on the first submit and KEPT if the request
+    // fails, so repeating this attempt can only replay the payment the first
+    // call wrote. A success starts a fresh attempt; so does opening another fee.
+    const idempotencyKey = payKey.current || (payKey.current = newPaymentKey());
+    setPayBusy(true);
     try {
-      await api(`/api/fees/${payOpen}/pay`, { method: "POST", body: JSON.stringify({ amount: amt, method: payMethod }) });
+      await api(`/api/fees/${payOpen}/pay`, {
+        method: "POST",
+        body: JSON.stringify({ amount: amt, method: payMethod, idempotencyKey }),
+      });
+      payKey.current = ""; // this attempt is done — the next one is a new payment
       setPayOpen(null);
       setPayAmount("");
       load();
     } catch (e: any) {
+      // A refusal — an over-payment, a fee that settled first, a key already
+      // spent — is the API's own message, shown as written. The key is
+      // deliberately KEPT, and nothing retries on its own.
       setError(e.message);
+    } finally {
+      setPayBusy(false);
     }
   };
 
@@ -256,7 +295,7 @@ export default function FeesPage() {
                     <td className="td">
                       <div className="flex justify-end">
                         {due > 0 && (
-                          <button className="btn btn-primary btn-sm" onClick={() => { setPayOpen(f.id); setPayAmount(String(due)); }}>
+                          <button className="btn btn-primary btn-sm" onClick={() => { payKey.current = ""; setError(""); setPayOpen(f.id); setPayAmount(String(due)); }}>
                             <Wallet size={13} /> Collect
                           </button>
                         )}
@@ -311,7 +350,7 @@ export default function FeesPage() {
       </Modal>
 
       {/* payment modal */}
-      <Modal open={!!payOpen} onClose={() => setPayOpen(null)} title="Collect payment">
+      <Modal open={!!payOpen} onClose={() => { setPayOpen(null); payKey.current = ""; setError(""); }} title="Collect payment">
         {paying && (
           <div className="space-y-4">
             {error && <ErrorNote message={error} />}
@@ -342,9 +381,9 @@ export default function FeesPage() {
               </p>
             )}
             <div className="flex justify-end gap-2">
-              <button className="btn btn-secondary" onClick={() => { setPayOpen(null); setError(""); }}>Cancel</button>
-              <button className="btn btn-primary" onClick={pay} disabled={payAmt <= 0 || payOver}>
-                Record {payAmt > 0 ? fmtMoney(payAmt) : "payment"}
+              <button className="btn btn-secondary" onClick={() => { setPayOpen(null); payKey.current = ""; setError(""); }} disabled={payBusy}>Cancel</button>
+              <button className="btn btn-primary" onClick={pay} disabled={payBusy || payAmt <= 0 || payOver}>
+                {payBusy ? "Recording…" : <>Record {payAmt > 0 ? fmtMoney(payAmt) : "payment"}</>}
               </button>
             </div>
           </div>

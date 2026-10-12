@@ -303,6 +303,37 @@ export function collegePaymentLedgerId(schoolId: string, key: string): string {
   return `le_cp_${sha1(`${String(schoolId)}|${String(key)}`)}`;
 }
 
+/**
+ * Deterministic ids for a SCHOOL fee payment attempt (pilot P2): one `payment`
+ * row and one shared-ledger entry per (tenant, fee, client idempotency key).
+ *
+ * `confirmPayment` changes the fee and then appends TWO rows — a `payment` row
+ * and a ledger entry — and neither had an identity, so a retry, a second tab or
+ * a double submit appended a SECOND row and minted a second receipt. The P2
+ * reproduction made it visible: two simultaneous ৳500 payments against a ৳1000
+ * fee left two payment rows, two receipts and a ledger of ৳1000 while the fee
+ * itself still read ৳500/PARTIAL (the lost update). Give each appended row the
+ * identity of the attempt it belongs to and the invariant becomes structural:
+ * the second write lands on the SAME document, and the pre-read that looks the
+ * ledger entry up by this id answers a repeat from the payment the first request
+ * wrote.
+ *
+ * The key belongs to a tenant AND a fee, so the same key under two schools — or
+ * against two fees — derives a different pair of ids, and a key can never see or
+ * block another tenant's (or another fee's) payment.
+ *
+ * Only a KEYED payment derives ids. A keyless write (the gateway webhook, a cash
+ * intent, an admissions intake) keeps the random ids it has always had.
+ */
+export function schoolPaymentIds(
+  schoolId: string,
+  feeId: string,
+  key: string
+): { paymentId: string; ledgerId: string } {
+  const base = sha1(`${String(schoolId)}|${String(feeId)}|${String(key)}`);
+  return { paymentId: `pay_${base}`, ledgerId: `le_${base}` };
+}
+
 /** Deterministic doc id for models with a unique key (upsert-friendly). */
 function idFor(model: string, where: Record<string, any>): string | undefined {
   if (typeof where.id === "string") return where.id;
