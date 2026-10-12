@@ -11,7 +11,6 @@ import {
   AlertCircle,
   Check,
   ShieldCheck,
-  KeyRound,
   QrCode,
   Crown,
   School as SchoolIcon,
@@ -109,9 +108,26 @@ export default function LoginForm({
   // 2FA challenge state (PRD §14.1)
   const [challenge, setChallenge] = useState<{ challengeId: string; email: string | null } | null>(null);
   const [totp, setTotp] = useState("");
-  // forgot-password flow (PRD §3.2)
-  const [mode, setMode] = useState<"login" | "forgot">("login");
-  const [forgotMsg, setForgotMsg] = useState("");
+  /**
+   * pilot P1b item B — the product used to offer "Forgot password?", which took
+   * an email, POSTed `purpose:"forgot"` and showed "we sent a reset code".
+   * Nothing in this app ever verified a reset code, so that flow ended at a code
+   * no screen could accept: a dead end that looked like a working feature.
+   *
+   * It is gone. What replaces it is the TRUTH per app: a school administrator can
+   * really reset a staff or teacher password (Staff & Roles → Reset password), so
+   * those apps say so. A guardian password has NO school-side reset — the
+   * guardian's real credential is the child's QR token + PIN, which the school
+   * re-issues from the student's page — so the Parents App points at the QR code
+   * instead of promising a reset nobody can perform. The Platform Console has no
+   * school administrator at all, so it promises nothing.
+   */
+  const passwordHelp =
+    sectorKey === "guardian"
+      ? "Forgot your password? Use the QR code on your child's ID card — your school can print a new one."
+      : sectorKey === "super"
+        ? ""
+        : "Forgot your password? Ask your school administrator to reset it.";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,23 +174,6 @@ export default function LoginForm({
       router.replace(next || res.redirect);
     } catch (err: any) {
       setError(err?.message || "Login failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const submitForgot = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const res = await api<{ message: string }>("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ purpose: "forgot", identifier }),
-      });
-      setForgotMsg(res.message || "Check your email for the reset code.");
-    } catch (err: any) {
-      setError(err?.message || "Could not send reset code");
     } finally {
       setLoading(false);
     }
@@ -296,52 +295,6 @@ export default function LoginForm({
                 ← Back to login
               </button>
             </form>
-          ) : mode === "forgot" ? (
-            /* ---------------- forgot password step ---------------- */
-            <form onSubmit={submitForgot} className="space-y-4">
-              <div className="flex items-center gap-3 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3">
-                <KeyRound size={20} className="shrink-0 text-sky-600" />
-                <p className="text-xs text-slate-600">Enter your account email — we&apos;ll send a one-time reset code.</p>
-              </div>
-              {forgotMsg && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-700">
-                  {forgotMsg}
-                </div>
-              )}
-              {error && (
-                <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
-                  <AlertCircle size={16} className="mt-0.5 shrink-0" /> {error}
-                </div>
-              )}
-              <div>
-                <label htmlFor="fEmail" className="label">
-                  Email
-                </label>
-                <input
-                  id="fEmail"
-                  className="input"
-                  type="email"
-                  value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
-                  required
-                />
-              </div>
-              <button type="submit" disabled={loading} className="btn btn-primary w-full !py-3">
-                {loading ? <Spinner className="h-4 w-4 border-white/40 border-t-white" /> : <KeyRound size={16} />}
-                Send reset code
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("login");
-                  setForgotMsg("");
-                  setError("");
-                }}
-                className="btn btn-ghost w-full"
-              >
-                ← Back to login
-              </button>
-            </form>
           ) : (
             <form onSubmit={submit} className="space-y-4">
               {error && (
@@ -393,18 +346,7 @@ export default function LoginForm({
                 {loading ? <Spinner className="h-4 w-4 border-white/40 border-t-white" /> : <LogIn size={16} />}
                 {loading ? "Signing in…" : "Sign in"}
               </button>
-              <div className="flex items-center justify-end text-xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode("forgot");
-                    setError("");
-                  }}
-                  className="font-semibold text-indigo-600 hover:underline"
-                >
-                  Forgot password?
-                </button>
-              </div>
+              <p className="text-center text-xs leading-relaxed text-slate-500">{passwordHelp}</p>
 
               {/* QR login is a guardian, credential-free entry point — it only
                   appears inside the Parents App, never on staff consoles. */}

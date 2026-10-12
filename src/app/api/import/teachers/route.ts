@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import { TEACHER_PASSWORD_NOTICE, unusableTeacherPassword } from "@/lib/import/write";
 import { prisma, invalidateReferenceCache } from "@/lib/db";
 import { getSession, audit } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -12,6 +13,15 @@ import { parseCsv, rowsToRecords, toCsv } from "@/lib/csv";
  *   GET                        → CSV template (headers + example row)
  *   POST { dryRun: true  }     → validate only, no writes (preview)
  *   POST { csv, dryRun:false } → import (transactional, duplicate-safe)
+ *
+ * pilot P1b item D — the import used to give EVERY new teacher account the same
+ * password (`Teacher@123`) and then print it back in the response. That is the
+ * worst possible arrangement: one platform-wide known credential, handed out in
+ * bulk by an endpoint. The account is now created with an unknown random secret
+ * (so no shared literal exists and nobody can sign in with one) and the response
+ * no longer carries a password at all — it says what the school must do instead.
+ * Both live in `src/lib/import/write.ts`, the import write layer that already
+ * owns the guardian equivalent.
  */
 
 export async function GET() {
@@ -103,7 +113,7 @@ export async function POST(req: NextRequest) {
         role: "TEACHER",
         schoolId,
         phone: rec.phone || null,
-        passwordHash: bcrypt.hashSync("Teacher@123", 10),
+        passwordHash: bcrypt.hashSync(unusableTeacherPassword(), 10),
       },
       teacherData: {
         userId: existingUserId || "", // resolved at commit for existing users
@@ -157,7 +167,9 @@ export async function POST(req: NextRequest) {
       total: records.length, created,
       errors: results.filter((r) => r.status === "ERROR").length,
       skipped: results.filter((r) => r.status === "SKIP").length,
-      defaultPassword: "Teacher@123",
+      // No password is returned: there is no default to return any more, and the
+      // per-account secret is unknowable by design (see unusableTeacherPassword).
+      passwordNotice: created ? TEACHER_PASSWORD_NOTICE : undefined,
       results,
     },
   });

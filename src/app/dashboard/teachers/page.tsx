@@ -23,7 +23,9 @@ export default function TeachersPage() {
   const [open, setOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ name: "", email: "", designation: "", qualification: "", phone: "", password: "Teacher@123" });
+  // pilot P1b item D — no built-in default password: the operator sets one, and
+  // the field starts empty so nobody can create an account by accident.
+  const [form, setForm] = useState({ name: "", email: "", designation: "", qualification: "", phone: "", password: "" });
   const [assignForm, setAssignForm] = useState({ classId: "", sectionId: "", subjectId: "" });
   const [branchId, setBranchId] = useState("");
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
@@ -47,10 +49,11 @@ export default function TeachersPage() {
 
   const create = async () => {
     setError("");
+    if (!form.name.trim() || !form.email.trim() || form.password.length < 8) return;
     try {
       await api("/api/teachers", { method: "POST", body: JSON.stringify(form) });
       setOpen(false);
-      setForm({ name: "", email: "", designation: "", qualification: "", phone: "", password: "Teacher@123" });
+      setForm({ name: "", email: "", designation: "", qualification: "", phone: "", password: "" });
       load();
     } catch (e: any) {
       setError(e.message);
@@ -146,10 +149,12 @@ export default function TeachersPage() {
             <Field label="Qualification"><TextInput value={form.qualification} onChange={(e) => setForm({ ...form, qualification: e.target.value })} placeholder="M.A." /></Field>
           </div>
           <Field label="Phone"><TextInput value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
-          <Field label="Password" hint="Teacher login password"><TextInput value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+          <Field label="Password *" hint="At least 8 characters. Share it with the teacher once — there is no default password.">
+            <TextInput type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••••" />
+          </Field>
           <div className="flex justify-end gap-2">
             <button className="btn btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={create} disabled={!form.name || !form.email}>Add teacher</button>
+            <button className="btn btn-primary" onClick={create} disabled={!form.name || !form.email || form.password.length < 8}>Add teacher</button>
           </div>
         </div>
       </Modal>

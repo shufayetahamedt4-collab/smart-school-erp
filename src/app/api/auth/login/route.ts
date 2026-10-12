@@ -5,10 +5,12 @@ import { prisma } from "@/lib/db";
 import { signSession, SESSION_COOKIE } from "@/lib/auth";
 import { homeForRole } from "@/lib/auth";
 import { needsTwoFactor, verifyChallenge, twoFactorStatus } from "@/lib/twoFactor";
-import { sendOtpEmail } from "@/lib/notify";
+import { sendOtpEmail, getEmailProvider } from "@/lib/notify";
 import { resolveSector, sectorForRole, requestHost } from "@/lib/sectors";
 import { firebaseConfigProblem } from "@/lib/firebase";
 import { SESSION_SECRET_MISSING, sessionSecretFatal } from "@/lib/pilot-guards";
+import { LOCKOUT_MESSAGE, normalizeIdentifier } from "@/lib/login-attempts";
+import { checkAttemptLimit, clearAttempts, noteFailedAttempt } from "@/lib/login-attempts-store";
 
 /**
  * Each app only accepts the accounts that belong to it. The check is skipped on
@@ -60,6 +62,20 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/**
+ * The ONE refusal for a rate-limited request (pilot P1b item A).
+ *
+ * Identical for every caller — a known identifier, an unknown one, and every
+ * address — because the message may not reveal whether an account exists, and a
+ * different shape for a known account would turn the limiter into exactly the
+ * enumeration oracle the sign-in route avoids elsewhere. `Retry-After` says how
+ * long the caller must wait.
+ */
+function lockedOut(retryAfterSec: number): NextResponse {
+  const wait = Math.max(1, Math.ceil(retryAfterSec || 0));
+  return NextResponse.json({ error: LOCKOUT_MESSAGE }, { status: 429, headers: { "Retry-After": String(wait) } });
+}
+
 async function signIn(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const identifier = String(body?.identifier || "").trim();
@@ -69,7 +85,7 @@ async function signIn(req: NextRequest) {
 
   // ---------------------------------------------------------------- forgot password (email OTP)
   if (purpose === "forgot") {
-    return forgotPassword(String(body?.identifier || ""));
+    return forgotPassword(String(body?.identifier || ""), req);
   }
 
   // ---------------------------------------------------------------- step 2: 2FA challenge
@@ -101,6 +117,13 @@ async function signIn(req: NextRequest) {
     return NextResponse.json({ error: "Email/phone and password are required." }, { status: 400 });
   }
 
+  // pilot P1b item A — the rate limit, checked BEFORE the account is looked up, so
+  // a locked identifier costs one read, is refused even when the password is
+  // right, and is refused in exactly the same way whether or not it exists.
+  const attemptId = normalizeIdentifier(identifier);
+  const gate = await checkAttemptLimit("login", attemptId, req.headers);
+  if (gate.locked) return lockedOut(gate.retryAfterSec);
+
   // An email has a deterministic document id (`u_<sha1(email)>`), so an email
   // sign-in is ONE document read. The old `OR: [email, phone]` had no pushdown
   // and pulled the whole users collection — 0.5–4s cold on every single login.
@@ -116,8 +139,18 @@ async function signIn(req: NextRequest) {
     }));
 
   if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
+    // Only a FAILED attempt counts (an unknown identifier and a wrong password
+    // are the same failure, and are counted identically). The attempt that brings
+    // the count to the limit is already a refusal.
+    const after = await noteFailedAttempt("login", attemptId, req.headers);
+    if (after.locked) return lockedOut(after.retryAfterSec);
     return NextResponse.json({ error: "Invalid credentials." }, { status: 401 });
   }
+
+  // The credentials were right: clear THIS identifier's failure count. The
+  // address counter is deliberately left alone — one account signing in must not
+  // wipe the evidence of a spray against other accounts from the same host.
+  if (gate.tracked) await clearAttempts("login", attemptId);
 
   if (!user.active) {
     return NextResponse.json({ error: "This account has been deactivated." }, { status: 403 });
@@ -237,13 +270,37 @@ const hashResetCode = (email: string, code: string) =>
  * Delivery goes through the transactional email provider in lib/notify
  * (HTTP provider when EMAIL_API_KEY is set, dev-console adapter otherwise).
  */
-async function forgotPassword(identifier: string) {
+async function forgotPassword(identifier: string, req: NextRequest) {
   const email = identifier.trim().toLowerCase();
   if (!email) return NextResponse.json({ error: "Email is required." }, { status: 400 });
+
+  // pilot P1b item A — this request is limited too, and it is counted as a REQUEST
+  // rather than as a "failure", because there is no failure here: the resource
+  // being protected is the mail send. Counting it for unknown identifiers as well
+  // is what keeps the limit itself from revealing which emails exist.
+  const attemptId = normalizeIdentifier(email);
+  const gate = await checkAttemptLimit("forgot", attemptId, req.headers);
+  if (gate.locked) return lockedOut(gate.retryAfterSec);
+  const counted = await noteFailedAttempt("forgot", attemptId, req.headers);
+  if (counted.locked) return lockedOut(counted.retryAfterSec);
 
   const user = await prisma.user.findUnique({ where: { email } });
   // Always answer the same way — do not leak which emails exist.
   const generic = { data: { ok: true, message: "If the email exists, a reset code has been sent." } };
+
+  // pilot P1b item B — a deployment with no email provider can neither deliver a
+  // code nor be trusted with one: the console adapter refuses to print codes in
+  // production, so the old code wrote a `pw_reset_*` record and then threw the
+  // code away. Nothing consumes that record today either way (there is no
+  // reset-code verifier anywhere in this app), so with no live provider this now
+  // sends nothing AND stores nothing, and still answers the generic message.
+  const provider = getEmailProvider();
+  if (!provider.live) {
+    console.error(
+      "[auth] no email provider is configured on this deployment — the password-reset request was not sent and no reset code was stored"
+    );
+    return NextResponse.json(generic);
+  }
 
   if (!user) return NextResponse.json(generic);
 

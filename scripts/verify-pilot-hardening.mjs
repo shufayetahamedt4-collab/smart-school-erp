@@ -71,6 +71,22 @@ function lineOf(text, needle) {
   return idx === -1 ? -1 : text.slice(0, idx).split("\n").length;
 }
 
+/**
+ * True only when BOTH anchors exist AND `a` comes first.
+ *
+ * Plain `lineOf(a) < lineOf(b)` silently PASSES when `a` is missing, because
+ * `lineOf` answers -1 — which is precisely the shape the previous code had (no
+ * limiter call at all). Every ordering check therefore goes through here: an
+ * absent anchor is a failure, never a pass. The mutation battery for the p1b
+ * checks found this: reverting `src/app/api/auth/login/route.ts` to HEAD left
+ * "the login limit is read BEFORE any password work" passing vacuously.
+ */
+function before(text, a, b) {
+  const ia = lineOf(text, a);
+  const ib = lineOf(text, b);
+  return ia !== -1 && ib !== -1 && ia < ib;
+}
+
 /*
  * The app compiles with bundler-style resolution; Node's ESM resolver wants the
  * extension. Retry a failed relative specifier with `.ts`, exactly as
@@ -455,6 +471,247 @@ check(
   /roles: \["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR",/.test(sectorsSrc)
 );
 
+/* ======================================================================= p1b =
+ * The pilot P1b items: the sign-in attempt limiter (A), the honest
+ * forgot-password surface (B), the first-owner bootstrap (C) and the last
+ * default/shared passwords (D). Same shape as above: real module imports for
+ * everything that is a decision, source pins for what is wiring.
+ * ========================================================================= */
+
+const attempts = await import("../src/lib/login-attempts.ts");
+const {
+  ATTEMPT_WINDOW_MS,
+  IDENTIFIER_LIMIT,
+  IP_LIMIT,
+  LOCKOUT_MESSAGE,
+  normalizeIdentifier,
+  counterKey,
+  clientIp,
+  counterOf,
+  lockoutState,
+  afterFailure,
+  retryAfterSeconds,
+} = attempts;
+
+const bootstrap = await import("./bootstrap-super-admin.mjs");
+const { bootstrapProblems } = bootstrap;
+
+const teachersSrc = read("src/app/api/teachers/route.ts");
+const teachersPageSrc = read("src/app/dashboard/teachers/page.tsx");
+const importTeachersSrc = read("src/app/api/import/teachers/route.ts");
+const writeSrc = read("src/lib/import/write.ts");
+/** Comments quote the literals this stage removed; judge the CODE, not the prose. */
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+
+/** A `Headers`-shaped reader over a literal map, lower-cased like the real one. */
+const headerReader = (map) => ({ get: (name) => map[String(name).toLowerCase()] ?? null });
+/** A fixed clock: the decision table must not depend on when it runs. */
+const T0 = 1_700_000_000_000;
+
+console.log("\nP1b-A) sign-in attempt limiting — the pure decision table");
+
+check("p1b-a", "the identifier limit is 8 failures per 15 minutes", IDENTIFIER_LIMIT.max === 8 && IDENTIFIER_LIMIT.windowMs === 15 * 60 * 1000, `${IDENTIFIER_LIMIT.max}/${IDENTIFIER_LIMIT.windowMs}`);
+check("p1b-a", "the address limit is 30 failures per 15 minutes", IP_LIMIT.max === 30 && IP_LIMIT.windowMs === 15 * 60 * 1000, `${IP_LIMIT.max}/${IP_LIMIT.windowMs}`);
+check("p1b-a", "the identifier limit is the tighter one (it is the primary defence)", IDENTIFIER_LIMIT.max < IP_LIMIT.max);
+check("p1b-a", "one window length is exported and shared", ATTEMPT_WINDOW_MS === IDENTIFIER_LIMIT.windowMs && ATTEMPT_WINDOW_MS === IP_LIMIT.windowMs);
+
+check("p1b-a", "an email identifier is trimmed and lower-cased", normalizeIdentifier("  Principal@Sunrise.EDU ") === "principal@sunrise.edu");
+check("p1b-a", "a typed phone number collapses to one form", normalizeIdentifier("+880 1712-345678") === "+8801712345678");
+check("p1b-a", "two spellings of the same phone are the same counter", normalizeIdentifier("+880 (1712) 345678") === normalizeIdentifier("+8801712345678"));
+check("p1b-a", "an empty identifier normalises to nothing (it is never counted)", normalizeIdentifier("   ") === "" && normalizeIdentifier(undefined) === "");
+
+const keyA = counterKey("login", "identifier", "principal@sunrise.edu");
+check("p1b-a", "a counter key is stable for the same scope/kind/value", keyA === counterKey("login", "identifier", "principal@sunrise.edu"));
+check("p1b-a", "a different scope, kind or value is a different counter", new Set([keyA, counterKey("qr", "identifier", "principal@sunrise.edu"), counterKey("login", "ip", "principal@sunrise.edu"), counterKey("login", "identifier", "other@sunrise.edu")]).size === 4);
+check("p1b-a", "the stored key is a hash, not the identifier", /^rl:login:identifier:[0-9a-f]{64}$/.test(keyA) && !keyA.includes("principal"));
+check("p1b-a", "the key is namespaced by the entry point", counterKey("qr", "identifier", "tok").startsWith("rl:qr:") && counterKey("forgot", "ip", "1.2.3.4").startsWith("rl:forgot:"));
+
+check("p1b-a", "a single client address is used as-is", clientIp(headerReader({ "x-forwarded-for": "203.0.113.9" })) === "203.0.113.9");
+check("p1b-a", "the LAST forwarded entry wins — a client cannot name itself", clientIp(headerReader({ "x-forwarded-for": "1.2.3.4, 198.51.100.7" })) === "198.51.100.7");
+check("p1b-a", "junk to the left of the trusted hop is skipped", clientIp(headerReader({ "x-forwarded-for": "attacker, 1.2.3.4, 198.51.100.7" })) === "198.51.100.7");
+check("p1b-a", "a bracketed IPv6 address is unwrapped", clientIp(headerReader({ "x-forwarded-for": "[::1]" })) === "::1");
+check("p1b-a", "no header at all is one shared \"unknown\" bucket, never an exemption", clientIp(headerReader({})) === "unknown" && clientIp(null) === "unknown");
+check("p1b-a", "an unusable header falls back to the same bucket", clientIp(headerReader({ "x-forwarded-for": "not-an-ip" })) === "unknown");
+check("p1b-a", "an out-of-range IPv4 is not accepted as an address", clientIp(headerReader({ "x-forwarded-for": "999.1.1.1" })) === "unknown");
+
+check("p1b-a", "no row means no counter", counterOf(null) === null && counterOf({}) === null);
+check("p1b-a", "a junk row is not read as a live counter", counterOf({ value: { count: 0, firstAtMs: T0 } }) === null && counterOf({ value: { count: "x", firstAtMs: T0 } }) === null && counterOf({ value: "8" }) === null);
+check("p1b-a", "a stored counter is read back exactly", counterOf({ value: { count: 3, firstAtMs: T0 } })?.count === 3);
+
+check("p1b-a", "7 failures do not lock an identifier", lockoutState({ value: { count: 7, firstAtMs: T0 } }, T0 + 1000, IDENTIFIER_LIMIT).locked === false);
+const locked8 = lockoutState({ value: { count: 8, firstAtMs: T0 } }, T0 + 1000, IDENTIFIER_LIMIT);
+check("p1b-a", "the 8th failure locks the identifier", locked8.locked === true);
+check("p1b-a", "a lockout reports how long to wait (Retry-After)", locked8.retryAfterSec > 0 && locked8.retryAfterSec <= 900, String(locked8.retryAfterSec));
+check("p1b-a", "a window that has run out is NOT a lockout", lockoutState({ value: { count: 8, firstAtMs: T0 } }, T0 + ATTEMPT_WINDOW_MS, IDENTIFIER_LIMIT).locked === false);
+check("p1b-a", "ten attempts from one address are not a lockout (the limit is 30)", lockoutState({ value: { count: 10, firstAtMs: T0 } }, T0 + 1, IP_LIMIT).locked === false);
+check("p1b-a", "30 attempts from one address lock that address", lockoutState({ value: { count: 30, firstAtMs: T0 } }, T0 + 1, IP_LIMIT).locked === true);
+check("p1b-a", "Retry-After is never negative", retryAfterSeconds({ count: 8, firstAtMs: T0 }, T0 + ATTEMPT_WINDOW_MS * 2, IDENTIFIER_LIMIT) === 0);
+
+const firstFailure = afterFailure(null, T0, IDENTIFIER_LIMIT);
+check("p1b-a", "the first failure opens a window at now with count 1", firstFailure.value.count === 1 && firstFailure.value.firstAtMs === T0 && firstFailure.locked === false);
+check("p1b-a", "a failure inside a live window increments it", afterFailure({ value: { count: 2, firstAtMs: T0 } }, T0 + 5000, IDENTIFIER_LIMIT).value.count === 3);
+check("p1b-a", "the failure that reaches the limit is itself the lockout", afterFailure({ value: { count: 7, firstAtMs: T0 } }, T0 + 5000, IDENTIFIER_LIMIT).locked === true);
+const reopened = afterFailure({ value: { count: 8, firstAtMs: T0 } }, T0 + ATTEMPT_WINDOW_MS, IDENTIFIER_LIMIT);
+check("p1b-a", "after the window runs out the next failure starts a NEW one", reopened.value.count === 1 && reopened.value.firstAtMs === T0 + ATTEMPT_WINDOW_MS && reopened.locked === false);
+check("p1b-a", "an increment never rewrites the window's start", afterFailure({ value: { count: 4, firstAtMs: T0 } }, T0 + 900_000 - 1, IDENTIFIER_LIMIT).value.firstAtMs === T0);
+
+check("p1b-a", "the refusal is ONE generic sentence", typeof LOCKOUT_MESSAGE === "string" && LOCKOUT_MESSAGE.length > 20 && LOCKOUT_MESSAGE.trim() === LOCKOUT_MESSAGE);
+check("p1b-a", "the refusal names no account, identifier or address", !/@|http|school|admin|email/i.test(LOCKOUT_MESSAGE), LOCKOUT_MESSAGE);
+
+console.log("\nP1b-A) the three entry points, wired");
+
+const attemptsStoreSrc = read("src/lib/login-attempts-store.ts");
+check("p1b-a", "the login route checks the limit", loginSrc.includes('checkAttemptLimit("login"'));
+check(
+  "p1b-a",
+  "the login limit is read BEFORE any password work",
+  before(loginSrc, 'checkAttemptLimit("login"', "bcrypt.compareSync"),
+  `limit at line ${lineOf(loginSrc, 'checkAttemptLimit("login"')}, bcrypt at ${lineOf(loginSrc, "bcrypt.compareSync")}`
+);
+check("p1b-a", "ONLY a failed credential counts against the login identifier", /if \(!user \|\| !bcrypt\.compareSync[\s\S]{0,400}noteFailedAttempt\("login"/.test(loginSrc));
+check("p1b-a", "a correct password clears the identifier's counter", loginSrc.includes('clearAttempts("login"'));
+check("p1b-a", "the reset is driven by the check, so a clean sign-in pays nothing", /gate\.tracked[\s\S]{0,80}clearAttempts\("login"/.test(loginSrc));
+check("p1b-a", "the login refusal is a 429 with a Retry-After header", /status: 429, headers: \{ "Retry-After"/.test(loginSrc));
+check(
+  "p1b-a",
+  "the refusal is one shared helper, not three messages",
+  (loginSrc.match(/error: LOCKOUT_MESSAGE/g) || []).length === 1 && (loginSrc.match(/return lockedOut\(/g) || []).length >= 3,
+  `message sites ${(loginSrc.match(/error: LOCKOUT_MESSAGE/g) || []).length}, call sites ${(loginSrc.match(/return lockedOut\(/g) || []).length}`
+);
+
+const qrSrc = read("src/app/api/qr/verify/route.ts");
+check("p1b-a", "the QR entry point is limited too", qrSrc.includes('checkAttemptLimit("qr"'));
+check("p1b-a", "the QR limit is read before the token is looked up", before(qrSrc, 'checkAttemptLimit("qr"', "prisma.student.findUnique"), "limit must precede the lookup, and both must exist");
+check("p1b-a", "an unknown token counts as a failed guess", /!student \|\| !student\.school[\s\S]{0,300}noteFailedAttempt\("qr"/.test(qrSrc));
+check("p1b-a", "a wrong PIN counts as a failed guess", /!pinOk && !phoneOk[\s\S]{0,300}noteFailedAttempt\("qr"/.test(qrSrc));
+check("p1b-a", "a valid slip clears the token's counter", qrSrc.includes('clearAttempts("qr"'));
+check("p1b-a", "the QR refusal is the same 429 shape", qrSrc.includes("LOCKOUT_MESSAGE") && /status: 429, headers: \{ "Retry-After"/.test(qrSrc));
+
+check("p1b-a", "the store writes through $guardedUpdate (a real transaction)", attemptsStoreSrc.includes('prisma.$guardedUpdate("setting"'));
+check("p1b-a", "the store never uses the sequential callback form of $transaction for a counter", !/\$transaction\(/.test(attemptsStoreSrc));
+/**
+ * The BODY of one function, not "the file contains this word somewhere".
+ *
+ * The first version of the two pins below searched the whole file within a
+ * character window, and both were satisfied by the PROSE above the function
+ * (the doc comment names `$guardedUpdate`, and `keysFor` also mentions the
+ * identifier kind) — the mutation battery caught it: replacing readCounter's
+ * body with the memoised `findUnique` still passed. A pin must look at the code
+ * it claims to pin.
+ */
+const bodyOf = (src, header, size = 700) => {
+  const at = src.indexOf(header);
+  return at === -1 ? "" : src.slice(at, at + size);
+};
+const readCounterBody = bodyOf(attemptsStoreSrc, "async function readCounter");
+const clearAttemptsBody = bodyOf(attemptsStoreSrc, "export async function clearAttempts", 1500);
+check(
+  "p1b-a",
+  "the check reads a counter WITHOUT the read memo",
+  /prisma\.\$guardedUpdate/.test(readCounterBody) && !/\.findUnique\(/.test(readCounterBody) && /memo/i.test(attemptsStoreSrc),
+  "readCounter must go through $guardedUpdate itself, not the memoised findUnique path"
+);
+check("p1b-a", "a store failure fails OPEN and says so with an [auth] line", (attemptsStoreSrc.match(/\[auth\]/g) || []).length >= 2 && /console\.error\("\[auth\][\s\S]{0,80}allowing this attempt/.test(attemptsStoreSrc));
+check("p1b-a", "a failed WRITE is never counted as a lockout", /could not be written[\s\S]{0,120}locked: false, retryAfterSec: 0/.test(attemptsStoreSrc));
+check(
+  "p1b-a",
+  "only the identifier counter is ever cleared (never another account's address counter)",
+  /counterKey\(scope, "identifier"/.test(clearAttemptsBody) && !/counterKey\(scope, "ip"/.test(clearAttemptsBody)
+);
+check(
+  "p1b-a",
+  "clearing a counter uses the shim's key-resolving delete",
+  /clearAttempts[\s\S]{0,800}setting\.deleteMany\(\{ where: \{ key \} \}\)/.test(attemptsStoreSrc),
+  "the shim's single-row delete only understands where.id, so it would silently miss the row"
+);
+const settingsSrc = read("src/app/api/settings/route.ts");
+check("p1b-a", "the counter rows can never be read out of /api/settings", /SECRET_SETTING_PREFIXES = \[[^\]]*"rl_"/.test(settingsSrc));
+
+console.log("\nP1b-B) the forgot-password dead end is now honest");
+
+check("p1b-b", "the sign-in form no longer offers a Forgot-password action", !stripComments(loginFormSrc).includes("Forgot password?") && !/setMode\(\s*["']forgot/.test(stripComments(loginFormSrc)));
+check("p1b-b", "the client no longer calls the OTP endpoint", !/purpose:\s*["']forgot["']/.test(stripComments(loginFormSrc)) && !stripComments(loginFormSrc).toLowerCase().includes("send reset code"));
+check("p1b-b", "a staff/teacher app says the truth: a school administrator can reset it", loginFormSrc.includes("Ask your school administrator to reset it."));
+check("p1b-b", "the Parents App points at the QR code instead of promising an admin reset", /sectorKey === "guardian"[\s\S]{0,300}QR code on your child's ID card/.test(loginFormSrc));
+check("p1b-b", "the sentence is chosen per app, not shown everywhere", /sectorKey === "super"/.test(loginFormSrc));
+check("p1b-b", "the API branch itself is kept (no reset flow was rebuilt)", loginSrc.includes('purpose === "forgot"') && loginSrc.includes("forgotPassword("));
+check("p1b-b", "no reset record is written when no email provider can deliver", loginSrc.includes("getEmailProvider()") && /provider\.live[\s\S]{0,400}return NextResponse.json\(generic\)/.test(loginSrc));
+check(
+  "p1b-b",
+  "the provider gate runs BEFORE the reset code is minted",
+  before(loginSrc, "provider.live", "codeHash: hashResetCode"),
+  `gate at line ${lineOf(loginSrc, "provider.live")}, mint at ${lineOf(loginSrc, "codeHash: hashResetCode")}`
+);
+
+console.log("\nP1b-C) the first-owner bootstrap refuses everything it should");
+
+const GOOD = "StrongPass@1";
+const base = { env: { ALLOW_LIVE_FIRESTORE: "1" }, argv: ["--email", "owner@school.com"], email: "owner@school.com", password: GOOD, passwordSource: "env", superAdminExists: false, liveTarget: false };
+check("p1b-c", "the emulator path with a strong password is allowed", bootstrapProblems(base).length === 0, JSON.stringify(bootstrapProblems(base)));
+check("p1b-c", "refuses without ALLOW_LIVE_FIRESTORE=1", bootstrapProblems({ ...base, env: {} }).some((p) => /ALLOW_LIVE_FIRESTORE/.test(p)));
+check("p1b-c", "a whitespace/other flag value is not an acknowledgement", bootstrapProblems({ ...base, env: { ALLOW_LIVE_FIRESTORE: "true" } }).length > 0);
+check("p1b-c", "refuses a password given on the command line", bootstrapProblems({ ...base, argv: ["--email", "owner@school.com", "--password", GOOD] }).some((p) => /command line/.test(p)));
+check("p1b-c", "refuses --password=… too", bootstrapProblems({ ...base, argv: ["--email", "owner@school.com", `--password=${GOOD}`] }).some((p) => /command line/.test(p)));
+check("p1b-c", "refuses without --email", bootstrapProblems({ ...base, email: "" }).some((p) => /--email/.test(p)));
+check("p1b-c", "refuses a malformed --email", bootstrapProblems({ ...base, email: "not-an-email" }).some((p) => /not a valid email/.test(p)));
+check("p1b-c", "refuses with no password at all", bootstrapProblems({ ...base, password: "", passwordSource: "none" }).some((p) => /No password was provided/.test(p)));
+check("p1b-c", "refuses a 7-character password", bootstrapProblems({ ...base, password: "1234567" }).some((p) => /at least 8 characters/.test(p)));
+check("p1b-c", "accepts exactly 8 characters", bootstrapProblems({ ...base, password: "12345678" }).length === 0);
+check("p1b-c", "refuses when a SUPER_ADMIN already exists", bootstrapProblems({ ...base, superAdminExists: true }).some((p) => /SUPER_ADMIN already exists/.test(p)));
+const liveUnconfirmed = bootstrapProblems({ ...base, liveTarget: true, projectId: "amar-e-school", liveConfirmation: "" });
+check("p1b-c", "refuses a LIVE target that has not been confirmed", liveUnconfirmed.some((p) => /LIVE Firestore/.test(p)));
+check("p1b-c", "accepts a LIVE target confirmed by naming the project", bootstrapProblems({ ...base, liveTarget: true, projectId: "amar-e-school", liveConfirmation: "amar-e-school" }).length === 0);
+check("p1b-c", "the refusal list is exhaustive, not first-error-wins", bootstrapProblems({ env: {}, argv: [], email: "", password: "", passwordSource: "none", superAdminExists: true, liveTarget: true }).length >= 4);
+const selfFailures = bootstrap.selfTest();
+check("p1b-c", "the script's own offline self-test passes", selfFailures.length === 0, selfFailures.join("; "));
+const bootSrc = read("scripts/bootstrap-super-admin.mjs");
+check("p1b-c", "the script prints only the email and the id", bootSrc.includes("SUPER_ADMIN created.") && bootSrc.includes("email:") && bootSrc.includes("user id:"));
+const bootSummary = bootSrc.slice(bootSrc.indexOf("SUPER_ADMIN created."), bootSrc.indexOf("Keep the password in the deployment"));
+check(
+  "p1b-c",
+  "the summary prints the email and the id, and never the password",
+  bootSummary.includes("${email}") && bootSummary.includes("${id}") && !bootSummary.includes("${password}") && bootSummary.length > 40,
+  bootSummary.trim().split("\n").join(" | ")
+);
+check("p1b-c", "the script hashes with the app's own bcrypt cost", bootSrc.includes("bcrypt.hashSync(password, 10)"));
+check("p1b-c", "the script reuses the app's user-id rule", bootSrc.includes("userIdForEmail") && bootSrc.includes("createHash(\"sha1\")"));
+check("p1b-c", "the script refuses before it opens a connection", before(bootSrc, "if (early.length)", "initializeApp("));
+check("p1b-c", "the created user is the app's own SUPER_ADMIN shape", bootstrap.superAdminDoc({ email: "a@b.c", name: "n", passwordHash: "h" }).role === "SUPER_ADMIN");
+
+console.log("\nP1b-D) the last default/shared passwords are gone (guardians stay REPORT-ONLY)");
+
+check("p1b-d", "creating a teacher no longer falls back to a shared literal", !stripComments(teachersSrc).includes('|| "Teacher@123"') && !/Teacher@123/.test(stripComments(teachersSrc)));
+check("p1b-d", "creating a teacher REQUIRES a password", teachersSrc.includes("password.length < MIN_ADMIN_PASSWORD") && teachersSrc.includes("TEACHER_PASSWORD_RULE"));
+check("p1b-d", "the rule is the app's own new-account rule", teachersSrc.includes('from "@/lib/pilot-guards"') && teachersSrc.includes("MIN_ADMIN_PASSWORD"));
+check("p1b-d", "the password that is stored is the one supplied", teachersSrc.includes("bcrypt.hashSync(password, 10)"));
+check("p1b-d", "the teacher form starts empty (no default in the page either)", !teachersPageSrc.includes('password: "Teacher@123"') && /password: ""/.test(teachersPageSrc));
+check("p1b-d", "the teacher form requires 8+ characters before it will submit", /password\.length < 8/.test(teachersPageSrc));
+check("p1b-d", "the teacher import hashes a per-account secret", importTeachersSrc.includes("unusableTeacherPassword()"));
+check("p1b-d", "the teacher import returns NO password at all", !importTeachersSrc.includes("defaultPassword") && importTeachersSrc.includes("passwordNotice"));
+check("p1b-d", "the import result tells the school what to do instead", importTeachersSrc.includes("TEACHER_PASSWORD_NOTICE"));
+check("p1b-d", "a provisioned teacher password is random bytes, not a literal", /export function unusableTeacherPassword[\s\S]{0,200}randomBytes\(24\)/.test(writeSrc));
+const importExportPageSrc = read("src/app/dashboard/import-export/page.tsx");
+check(
+  "p1b-d",
+  "the import console no longer prints a teacher default password",
+  importExportPageSrc.includes("passwordNotice") && !/commit\.defaultPassword/.test(stripComments(importExportPageSrc)),
+  "the console still renders commit.defaultPassword"
+);
+check("p1b-d", "no quoted Teacher@123 literal survives in any of the four files", ![
+  importTeachersSrc,
+  teachersSrc,
+  teachersPageSrc,
+  importExportPageSrc,
+].some((src) => /"Teacher@123"/.test(stripComments(src))), "a quoted Teacher@123 literal is still assigned somewhere");
+check("p1b-d", "the old default survived in NONE of the teacher paths (the live proof is behaviour below)", !/Teacher@123/.test(stripComments(importTeachersSrc)) && !/Teacher@123/.test(stripComments(teachersSrc)));
+
+const guardiansSrc = read("src/app/api/guardians/route.ts");
+const enrollSrc = read("src/lib/enroll.ts");
+const importStudentsSrc = read("src/app/api/import/students/route.ts");
+check("p1b-d", "REPORT-ONLY: the guardian default was deliberately NOT changed", guardiansSrc.includes('password || "Guardian@123"') && enrollSrc.includes('DEFAULT_GUARDIAN_PASSWORD = "Guardian@123"'));
+check("p1b-d", "REPORT-ONLY: the students import still reports its guardian default", importStudentsSrc.includes("defaultGuardianPassword"));
+check("p1b-d", "the bulk-import guardian path still refuses a shared password", writeSrc.includes("unusableGuardianPassword"));
+
 /* ------------------------------------------------------------------- live */
 const BASE = process.env.PILOT_BASE || `http://127.0.0.1:${process.env.SMOKE_PORT || 3000}`;
 const PROD_URL = process.env.PILOT_PROD_URL || "";
@@ -626,6 +883,17 @@ if (OFFLINE_ONLY) {
         schoolId, studentId, title: "ZZ PH Fee", amount: 1000, paidAmount: 0, status: "PENDING", feeType: "MONTHLY", createdAt: new Date().toISOString(),
       });
 
+      // The limiter's counters are DISPOSABLE state, and the suite's protocol wipes
+      // the emulator between verifiers. This reproduces exactly that for the
+      // counters alone, BEFORE this run's first sign-in, so the checks below always
+      // measure from zero and a second run in a row (without a wipe) cannot inherit
+      // a spent 30-per-address budget that would fail THIS run's own logins.
+      // Nothing else is touched — no fixture, no user, no fee.
+      const carriedCounters = (await db.collection("settings").get()).docs.filter((d) =>
+        /^rl:(login|qr|forgot):/.test(String(d.data()?.key || ""))
+      );
+      await Promise.all(carriedCounters.map((d) => d.ref.delete()));
+
       try {
         console.log("\n6-live) the role table on the bare host");
         const expected = {
@@ -720,6 +988,245 @@ if (OFFLINE_ONLY) {
           "dev seeds the four demo identities into the page",
           html.includes("principal@sunrise.edu") && html.includes("guardian1@demo.com")
         );
+
+        /* ------------------------------------------------------- pilot P1b, live */
+        const p1bTag = Math.random().toString(36).slice(2, 8);
+        const p1bUsers = [];
+        const p1bStudents = [];
+        const p1bSettingKeys = [];
+        const p1bTeacherEmails = [];
+        try {
+          console.log("\nP1b-A-live) the sign-in limiter, on the running app");
+          const rawLogin = async (identifier, password) => {
+            const r = await fetch(`${BASE}/api/auth/login`, {
+              method: "POST",
+              redirect: "manual",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ identifier, password }),
+            });
+            return {
+              status: r.status,
+              retryAfter: r.headers.get("retry-after"),
+              cookie: (r.headers.get("set-cookie") || "").split(";")[0],
+              body: await r.json().catch(() => null),
+            };
+          };
+
+          // Three throwaway accounts, so no demo login can be locked by this run.
+          const [lockedEmail, otherEmail, resetEmail] = ["a", "b", "c"].map((k) => `zzpb-rate-${k}-${p1bTag}@test.local`);
+          const ratePasswords = {};
+          for (const email of [lockedEmail, otherEmail, resetEmail]) {
+            const password = `RateProbe!${p1bTag}${email.length % 10}`;
+            const id = userDoc(email);
+            await db.collection("users").doc(id).set(
+              { email, name: `ZZ PB Rate ${email}`, role: "SCHOOL_ADMIN", schoolId, active: true, passwordHash: bcrypt.hashSync(password, 10) },
+              { merge: true }
+            );
+            p1bUsers.push(id);
+            ratePasswords[email] = password;
+          }
+          // A signed-in baseline: the limiter must not have broken a good sign-in.
+          const baseline = await rawLogin(lockedEmail, ratePasswords[lockedEmail]);
+          check("p1b-a-live", "a fresh account still signs in (the limiter is not a wall)", baseline.status === 200, `got ${baseline.status}`);
+
+          // Start every probe from a clean counter, so a re-run of this verifier
+          // (or a leftover from an aborted one) cannot move a count under it.
+          /** The settings DOCUMENT id a counter for this login key lives at (`set_<key>`). */
+          const p1bDocFor = (kind, value) => `set_${attempts.counterKey("login", kind, attempts.normalizeIdentifier(value))}`;
+          const lockedDoc = p1bDocFor("identifier", lockedEmail);
+          for (const email of [lockedEmail, otherEmail, resetEmail]) {
+            for (const key of [p1bDocFor("identifier", email), p1bDocFor("ip", email)]) {
+              await db.collection("settings").doc(key).delete();
+              p1bSettingKeys.push(key);
+            }
+          }
+
+          const wrong = [];
+          for (let i = 0; i < 7; i += 1) wrong.push(await rawLogin(lockedEmail, "definitely-not-the-password"));
+          check(
+            "p1b-a-live",
+            "the first 7 wrong passwords answer 401 Invalid credentials",
+            wrong.every((r) => r.status === 401 && /Invalid credentials/.test(String(r.body?.error || ""))),
+            wrong.map((r) => r.status).join(",")
+          );
+          const eighth = await rawLogin(lockedEmail, "definitely-not-the-password");
+          check("p1b-a-live", "the 8th wrong password is refused with 429", eighth.status === 429, `got ${eighth.status}`);
+          check("p1b-a-live", "the refusal carries a Retry-After header", Number(eighth.retryAfter) > 0, String(eighth.retryAfter));
+          check("p1b-a-live", "the refusal is the one generic sentence", eighth.body?.error === attempts.LOCKOUT_MESSAGE, String(eighth.body?.error));
+          const correctWhileLocked = await rawLogin(lockedEmail, ratePasswords[lockedEmail]);
+          check(
+            "p1b-a-live",
+            "a CORRECT password is refused while the identifier is locked",
+            correctWhileLocked.status === 429,
+            `got ${correctWhileLocked.status} ${JSON.stringify(correctWhileLocked.body)}`
+          );
+          check(
+            "p1b-a-live",
+            "the locked account cannot escape by presenting the right password again",
+            (await rawLogin(lockedEmail, ratePasswords[lockedEmail])).status === 429
+          );
+
+          const lockedRow = (await db.collection("settings").doc(lockedDoc).get()).data();
+          check(
+            "p1b-a-live",
+            "the counter lives in Firestore (so all 10 instances share it)",
+            Number(lockedRow?.value?.count) === 8,
+            JSON.stringify(lockedRow?.value)
+          );
+          check(
+            "p1b-a-live",
+            "the stored counter names nothing — it is a hash",
+            String(lockedRow?.key || "").startsWith("rl:login:identifier:") && !String(lockedRow?.key).includes(p1bTag),
+            String(lockedRow?.key)
+          );
+          const allSettings = (await db.collection("settings").get()).docs.map((d) => d.data());
+          const ipRows = allSettings.filter((s) => String(s.key || "").startsWith("rl:login:ip:"));
+          check(
+            "p1b-a-live",
+            "the client address is counted as well (the secondary defence)",
+            ipRows.length >= 1 && Number(ipRows[0].value?.count) >= 8,
+            ipRows.map((r) => JSON.stringify(r.value)).join(" ")
+          );
+
+          const otherLogin = await rawLogin(otherEmail, ratePasswords[otherEmail]);
+          check(
+            "p1b-a-live",
+            "another identifier is untouched while the first is locked",
+            otherLogin.status === 200 && /ss_token=/.test(otherLogin.cookie),
+            `got ${otherLogin.status}`
+          );
+
+          console.log("\nP1b-A-live) a success resets the identifier's counter");
+          const resetKey = p1bDocFor("identifier", resetEmail);
+          p1bSettingKeys.push(resetKey);
+          for (let i = 0; i < 3; i += 1) await rawLogin(resetEmail, "definitely-not-the-password");
+          const beforeReset = (await db.collection("settings").doc(resetKey).get()).data();
+          const recovered = await rawLogin(resetEmail, ratePasswords[resetEmail]);
+          const afterReset = await db.collection("settings").doc(resetKey).get();
+          check("p1b-a-live", "3 failures leave a live counter row", Number(beforeReset?.value?.count) === 3, JSON.stringify(beforeReset?.value));
+          check("p1b-a-live", "the account still signs in below the limit", recovered.status === 200, `got ${recovered.status}`);
+          check("p1b-a-live", "a successful sign-in CLEARS that identifier's counter", afterReset.exists === false, afterReset.exists ? JSON.stringify(afterReset.data()) : "gone");
+          await rawLogin(resetEmail, "definitely-not-the-password");
+          const restarted = (await db.collection("settings").doc(resetKey).get()).data();
+          check(
+            "p1b-a-live",
+            "the next failure starts a fresh window at 1 (not a continued 4)",
+            Number(restarted?.value?.count) === 1,
+            JSON.stringify(restarted?.value)
+          );
+
+          console.log("\nP1b-A-live) the QR/PIN entry point is limited the same way");
+          const qrToken = `zzpb-qr-${p1bTag}`;
+          const qrPin = "4821";
+          // The app stores every student under its token's own id (`st_<token>`) and
+          // resolves `findUnique({ where: { qrToken } })` straight to it, so the
+          // fixture must live at that id or the route cannot find it.
+          const qrStudentId = `st_${qrToken}`;
+          await db
+            .collection("students")
+            .doc(qrStudentId)
+            .set(
+              { schoolId, name: "ZZ PB QR Student", admissionNo: `ZZ-PB-QR-${p1bTag}`, status: "ACTIVE", active: true, qrToken, qrPin, guardianName: "ZZ PB Guardian" },
+              { merge: true }
+            );
+          p1bStudents.push(qrStudentId);
+          const qrPost = async (body) => {
+            const r = await fetch(`${BASE}/api/qr/verify`, {
+              method: "POST",
+              redirect: "manual",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            return { status: r.status, retryAfter: r.headers.get("retry-after"), body: await r.json().catch(() => null) };
+          };
+          const badPins = [];
+          for (let i = 0; i < 7; i += 1) badPins.push(await qrPost({ token: qrToken, pin: "0000" }));
+          check("p1b-a-live", "7 wrong PINs are rejected with 401", badPins.every((r) => r.status === 401), badPins.map((r) => r.status).join(","));
+          const eighthPin = await qrPost({ token: qrToken, pin: "0000" });
+          check("p1b-a-live", "the 8th wrong PIN is refused with 429", eighthPin.status === 429, `got ${eighthPin.status}`);
+          const rightPin = await qrPost({ token: qrToken, pin: qrPin });
+          check("p1b-a-live", "the CORRECT PIN is refused while the token is locked", rightPin.status === 429, `got ${rightPin.status}`);
+          const otherToken = await qrPost({ token: `zzpb-no-such-token-${p1bTag}`, pin: "0000" });
+          check("p1b-a-live", "a different token is not caught by that lockout", otherToken.status === 404, `got ${otherToken.status}`);
+
+          console.log("\nP1b-B-live) the forgot-password request is limited, and stores nothing for an unknown email");
+          const forgotEmail = `zzpb-forgot-${p1bTag}@test.local`;
+          const sends = [];
+          for (let i = 0; i < 7; i += 1) sends.push(await post("/api/auth/login", null, { purpose: "forgot", identifier: forgotEmail }));
+          check(
+            "p1b-b-live",
+            "the first 7 reset requests all answer the same generic message",
+            sends.every((r) => r.status === 200 && r.body?.data?.ok === true),
+            sends.map((r) => r.status).join(",")
+          );
+          const eighthSend = await post("/api/auth/login", null, { purpose: "forgot", identifier: forgotEmail });
+          check("p1b-b-live", "the 8th reset request is refused with 429", eighthSend.status === 429, `got ${eighthSend.status}`);
+          const unknownResetRow = (await db.collection("settings").doc(`set_pw_reset_${forgotEmail}`).get()).exists;
+          check("p1b-b-live", "an unknown email stores no reset record at all", unknownResetRow === false);
+
+          const knownEmail = "guardian1@demo.com";
+          const knownSends = [];
+          for (let i = 0; i < 3; i += 1) knownSends.push(await post("/api/auth/login", null, { purpose: "forgot", identifier: knownEmail }));
+          check(
+            "p1b-b-live",
+            "a KNOWN email answers in exactly the same shape as an unknown one",
+            knownSends.length === 3 && sends.length === 7 && knownSends.every((r) => r.status === 200 && JSON.stringify(r.body) === JSON.stringify(sends[0].body)),
+            JSON.stringify(knownSends[0]?.body)
+          );
+          p1bSettingKeys.push(`set_pw_reset_${knownEmail}`);
+
+          console.log("\nP1b-D-live) a bulk-imported teacher gets no shared password");
+          const admin = await login(creds.SCHOOL_ADMIN.email, creds.SCHOOL_ADMIN.password);
+          const importRows = ["a", "b"].map((k) => `zzpb-teacher-${k}-${p1bTag}@test.local`);
+          importRows.forEach((e) => p1bTeacherEmails.push(e));
+          const imported = await post("/api/import/teachers", admin.cookie, {
+            dryRun: false,
+            csv: ["Name,Email,Phone,Designation", ...importRows.map((e, i) => `ZZ PB Teacher ${i},${e},+88017000000${i},Teacher`)].join("\n"),
+          });
+          check(
+            "p1b-d-live",
+            "the teacher import still creates the accounts",
+            imported.status === 200 && imported.body?.data?.created === 2,
+            `admin login ${admin.status} → HTTP ${imported.status} created=${imported.body?.data?.created} ${JSON.stringify(imported.body?.error || "")}`
+          );
+          check("p1b-d-live", "the import response carries NO password of any kind", !("defaultPassword" in (imported.body?.data || {})));
+          const importedUsers = (await db.collection("users").where("email", "in", importRows).get()).docs.map((d) => d.data());
+          check("p1b-d-live", "both imported teacher accounts exist", importedUsers.length === 2, String(importedUsers.length));
+          check(
+            "p1b-d-live",
+            "neither account can be entered with the old shared literal",
+            importedUsers.length === 2 && importedUsers.every((u) => !bcrypt.compareSync("Teacher@123", String(u.passwordHash || ""))),
+            "Teacher@123 opened an imported account"
+          );
+          check(
+            "p1b-d-live",
+            "the two accounts got different secrets (no shared literal by another name)",
+            importedUsers.length === 2 && importedUsers[0].passwordHash !== importedUsers[1].passwordHash
+          );
+          const noPassword = await post("/api/teachers", admin.cookie, { name: `ZZ PB NoPw ${p1bTag}`, email: `zzpb-nopw-${p1bTag}@test.local` });
+          check(
+            "p1b-d-live",
+            "creating a teacher without a password is refused, with the rule spelled out",
+            noPassword.status === 400 && /at least 8 characters/.test(String(noPassword.body?.error || "")),
+            `got ${noPassword.status} ${JSON.stringify(noPassword.body)}`
+          );
+          const withPassword = await post("/api/teachers", admin.cookie, { name: `ZZ PB Pw ${p1bTag}`, email: `zzpb-pw-${p1bTag}@test.local`, password: `TeacherProbe!${p1bTag}` });
+          check("p1b-d-live", "creating a teacher WITH a password still works", withPassword.status === 201, `got ${withPassword.status} ${JSON.stringify(withPassword.body)}`);
+          p1bTeacherEmails.push(`zzpb-nopw-${p1bTag}@test.local`, `zzpb-pw-${p1bTag}@test.local`);
+        } finally {
+          const teacherUserIds = (await db.collection("users").where("email", "in", p1bTeacherEmails.length ? p1bTeacherEmails : ["zzpb-none@test.local"]).get()).docs.map((d) => d.id);
+          for (const id of teacherUserIds) {
+            await db.collection("users").doc(id).delete();
+            await db.collection("teachers").doc(`t_${id}`).delete();
+          }
+          await Promise.all(p1bUsers.map((id) => db.collection("users").doc(id).delete()));
+          await Promise.all(p1bStudents.map((id) => db.collection("students").doc(id).delete()));
+          await Promise.all(p1bSettingKeys.map((k) => db.collection("settings").doc(k).delete()));
+          const leftovers = (await db.collection("settings").get()).docs.filter((d) =>
+            /^(rl:|pw_reset_zzpb-)/.test(String(d.data()?.key || "")) && String(d.data()?.key || "").includes(p1bTag)
+          );
+          await Promise.all(leftovers.map((d) => d.ref.delete()));
+        }
       } finally {
         await Promise.all(written.map((id) => db.collection("users").doc(id).delete()));
         await db.collection("teachers").doc(`t_${creds.TEACHER.id}`).delete();

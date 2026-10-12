@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { signSession, SESSION_COOKIE } from "@/lib/auth";
 import { sectorHostFor, stripPort, requestHost } from "@/lib/sectors";
+import { LOCKOUT_MESSAGE, normalizeIdentifier } from "@/lib/login-attempts";
+import { checkAttemptLimit, clearAttempts, noteFailedAttempt } from "@/lib/login-attempts-store";
+
+/** The one refusal for a rate-limited QR attempt — see the sign-in route. */
+function lockedOut(retryAfterSec: number): NextResponse {
+  const wait = Math.max(1, Math.ceil(retryAfterSec || 0));
+  return NextResponse.json({ error: LOCKOUT_MESSAGE }, { status: 429, headers: { "Retry-After": String(wait) } });
+}
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -11,12 +19,24 @@ export async function POST(req: NextRequest) {
 
   if (!token) return NextResponse.json({ error: "Missing QR token." }, { status: 400 });
 
+  // pilot P1b item A — a QR token is a credential and a 4-digit PIN is only
+  // 10,000 guesses, so this entry point is limited exactly like the password one.
+  // The TOKEN is the identifier here (that is the thing being guessed), and the
+  // counters are keyed on a hash of it, so a counter row never stores a token.
+  const attemptId = normalizeIdentifier(token);
+  const gate = await checkAttemptLimit("qr", attemptId, req.headers);
+  if (gate.locked) return lockedOut(gate.retryAfterSec);
+
   const student = await prisma.student.findUnique({
     where: { qrToken: token },
     include: { school: true },
   });
 
   if (!student || !student.school || student.school.status === "SUSPENDED") {
+    // An unknown token is a failed guess like any other. Refused in the same
+    // shape as a wrong PIN once either counter is full.
+    const after = await noteFailedAttempt("qr", attemptId, req.headers);
+    if (after.locked) return lockedOut(after.retryAfterSec);
     return NextResponse.json({ error: "Invalid QR code or school suspended." }, { status: 404 });
   }
 
@@ -24,8 +44,13 @@ export async function POST(req: NextRequest) {
   const phoneOk = phone.length > 0 && !!student.guardianPhone && student.guardianPhone.replace(/\s/g, "") === phone.replace(/\s/g, "");
 
   if (!pinOk && !phoneOk) {
+    const after = await noteFailedAttempt("qr", attemptId, req.headers);
+    if (after.locked) return lockedOut(after.retryAfterSec);
     return NextResponse.json({ error: "Verification failed. Check the PIN or guardian phone number." }, { status: 401 });
   }
+
+  // The slip was valid: clear this token's failure count.
+  if (gate.tracked) await clearAttempts("qr", attemptId);
 
   const session = await signSession({
     id: `qr-${student.id}`,

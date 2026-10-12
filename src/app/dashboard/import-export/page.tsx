@@ -26,7 +26,9 @@ interface Preview {
   guardianLoginsToCreate?: number; results: RowResult[];
 }
 interface CommitResult extends Preview {
-  created: number; guardianLoginsCreated?: number; defaultGuardianPassword?: string; defaultPassword?: string;
+  created: number; guardianLoginsCreated?: number; defaultGuardianPassword?: string;
+  /** pilot P1b item D — the teacher import returns NO password, only what to do. */
+  passwordNotice?: string;
 }
 
 const EXPORTS = [
@@ -197,7 +199,7 @@ export default function ImportExportPage() {
               <div className="text-xs text-emerald-700">
                 {commit.errors} error(s) · {commit.skipped} skipped
                 {commit.guardianLoginsCreated ? ` · ${commit.guardianLoginsCreated} guardian login(s) created (default password: ${commit.defaultGuardianPassword})` : ""}
-                {commit.defaultPassword ? ` · Teacher default password: ${commit.defaultPassword}` : ""}
+                {commit.passwordNotice ? ` · ${commit.passwordNotice}` : ""}
               </div>
             </div>
           )}

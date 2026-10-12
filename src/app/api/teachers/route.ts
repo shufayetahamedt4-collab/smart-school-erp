@@ -5,6 +5,18 @@ import { getSession, audit } from "@/lib/auth";
 import { scopeWhere } from "@/lib/permissions";
 import { resolveBranchId } from "@/lib/branches";
 import { writeGuard } from "@/lib/subscription";
+import { MIN_ADMIN_PASSWORD } from "@/lib/pilot-guards";
+
+/**
+ * A teacher account's password is REQUIRED and never defaulted (pilot P1b item D).
+ *
+ * This route used to hash `body.password || "Teacher@123"` — one shared literal
+ * for every teacher account a school ever created, so anybody who had ever seen
+ * this app could sign in as any teacher whose password nobody had changed. The
+ * length rule is the app's own new-account rule (`MIN_ADMIN_PASSWORD`, the same
+ * one the tenant wizard enforces).
+ */
+const TEACHER_PASSWORD_RULE = `Set a password of at least ${MIN_ADMIN_PASSWORD} characters for the teacher — a new account is never created with a built-in default password.`;
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -66,7 +78,13 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const name = String(body?.name || "").trim();
   const email = String(body?.email || "").trim().toLowerCase();
+  const password = String(body?.password || "");
   if (!name || !email) return NextResponse.json({ error: "Name and email are required." }, { status: 400 });
+  // Decided BEFORE the transaction, so a missing/weak password is a clean 400
+  // and no half-created teacher can be left behind.
+  if (password.length < MIN_ADMIN_PASSWORD) {
+    return NextResponse.json({ error: TEACHER_PASSWORD_RULE }, { status: 400 });
+  }
 
   if (await prisma.user.findUnique({ where: { email } })) {
     return NextResponse.json({ error: "Email already in use." }, { status: 400 });
@@ -81,7 +99,7 @@ export async function POST(req: NextRequest) {
         role: "TEACHER",
         schoolId,
         branchId,
-        passwordHash: bcrypt.hashSync(body.password || "Teacher@123", 10),
+        passwordHash: bcrypt.hashSync(password, 10),
         photoUrl: body.photoUrl || null,
       },
     });

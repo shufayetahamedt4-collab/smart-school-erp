@@ -12,10 +12,13 @@ const PUBLIC_SETTING_KEYS = new Set(["site_name", "support_email"]);
 /**
  * Transient machine state that must never leave the server, whoever asks.
  * The `settings` collection doubles as short-lived state storage for the
- * password-reset OTP and the 2FA challenge; GET used to return all of it
- * (including reset codes) to any unauthenticated caller.
+ * password-reset OTP, the 2FA challenge and the sign-in attempt counters
+ * (`rl:…`, pilot P1b item A); GET used to return all of it (including reset
+ * codes) to any unauthenticated caller.
+ * The attempt counters hold only a SHA-256 hash, but they are still
+ * operator-internal state: they name nothing and belong to nobody's settings.
  */
-const SECRET_SETTING_PREFIXES = ["pw_reset_", "2fa_challenge_", "otp_", "grading_scheme_"];
+const SECRET_SETTING_PREFIXES = ["pw_reset_", "2fa_challenge_", "otp_", "grading_scheme_", "rl_"];
 const isSecretKey = (key: string) => SECRET_SETTING_PREFIXES.some((p) => key.startsWith(p));
 
 export async function GET() {

@@ -57,6 +57,30 @@ export function unusableGuardianPassword(): string {
 }
 
 /**
+ * A random, unusable password for a provisioned TEACHER account (pilot P1b item
+ * D). The teacher import used to create every account with the one shared
+ * literal `Teacher@123` and then print it back; now the account is created with
+ * a secret nobody knows and the response carries no password at all.
+ *
+ * Same reasoning as the guardian case: an account that no human chose a password
+ * for must not be reachable with a password every other tenant also has.
+ */
+export function unusableTeacherPassword(): string {
+  return randomBytes(24).toString("hex");
+}
+
+/**
+ * What the teacher import tells the school INSTEAD of a default password.
+ *
+ * Unlike a guardian — who has the QR/PIN slip — an imported teacher has no
+ * handover credential, and there is no way to mail one. The school sets each one
+ * from Staff & Roles (the reset an administrator already has for a teacher), so
+ * the response says exactly that rather than shipping a secret in bulk.
+ */
+export const TEACHER_PASSWORD_NOTICE =
+  "Each imported teacher account was created without a password you know — open Staff & Roles, reset the password and share it with the teacher once.";
+
+/**
  * The guardian account id a row will reference: a matched account, or the
  * deterministic id its email will produce. `null` when the row has no account.
  */
