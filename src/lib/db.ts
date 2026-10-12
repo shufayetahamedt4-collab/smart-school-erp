@@ -279,6 +279,30 @@ export function generatedFeeId(studentId: string, categoryId: string, period: st
   return `fee_${studentId}_${sha1(`${categoryId}|${period}`).slice(0, 16)}`;
 }
 
+/**
+ * Deterministic id for a COLLEGE payment's ledger entry: one entry per
+ * (tenant, client idempotency key).
+ *
+ * A college payment is written in two steps — the charge is updated inside the
+ * guarded transaction, then the shared-ledger entry is appended. A retry, a
+ * second tab or a double submit can therefore reach the append twice, and an
+ * append is the one step that must never happen twice. Give the entry the
+ * identity of the attempt and the invariant becomes structural: the second
+ * write lands on the same document inside the same `create`-if-absent guard, so
+ * two simultaneous requests with one key leave exactly ONE entry.
+ *
+ * The key belongs to a tenant: the same key under two schools derives two
+ * different ids and the pre-read inside the guard filters by `schoolId`, so a
+ * key can never see or block another tenant's payment.
+ *
+ * Only a KEYED college payment derives an id. An unkeyed write (the school's
+ * fees, a college payment from a caller that sends no key) keeps the random id
+ * it has always had.
+ */
+export function collegePaymentLedgerId(schoolId: string, key: string): string {
+  return `le_cp_${sha1(`${String(schoolId)}|${String(key)}`)}`;
+}
+
 /** Deterministic doc id for models with a unique key (upsert-friendly). */
 function idFor(model: string, where: Record<string, any>): string | undefined {
   if (typeof where.id === "string") return where.id;
@@ -338,6 +362,13 @@ function idForCreate(model: string, data: Record<string, any>): string | undefin
   if (model === "dailyRemark" && data.studentId && data.date) return remarkId(String(data.studentId), data.date);
   if (model === "fee" && data.studentId && data.categoryId && data.period) {
     return generatedFeeId(String(data.studentId), String(data.categoryId), String(data.period));
+  }
+  // 7e-pre: a KEYED college payment pins the ledger entry to (tenant, key) — the
+  // key travels in the entry's own `meta`, so no ledger field is added and every
+  // other ledger write is untouched. School-fee entries and college payments that
+  // send no key carry no `meta.collegePaymentKey` and keep their random id.
+  if (model === "ledgerEntry" && data.schoolId && data.meta && data.meta.collegePaymentKey) {
+    return collegePaymentLedgerId(String(data.schoolId), String(data.meta.collegePaymentKey));
   }
   return undefined;
 }

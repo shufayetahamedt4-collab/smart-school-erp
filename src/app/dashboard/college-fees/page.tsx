@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Award, BadgeCheck, Layers, Plus, Receipt, Trash2, Wallet } from "lucide-react";
 import { api, qs } from "@/lib/client";
 import { useMe } from "@/components/Shell";
@@ -59,6 +59,7 @@ import {
   headBlocked,
   headStateText,
   majorFromTyped,
+  newPaymentKey,
   payBlocked,
   payButtonLabel,
   payDisabled,
@@ -849,6 +850,22 @@ function DuesTab({
   const [refNo, setRefNo] = useState("");
   const [payBusy, setPayBusy] = useState(false);
 
+  /**
+   * 7e-pre — ONE idempotency key per payment ATTEMPT, not per request.
+   *
+   * The ref holds the key of the attempt in flight: it is created when a submit
+   * first needs it, KEPT across a retry or a failed request (so repeating the
+   * request repeats the payment instead of adding to it), and thrown away only
+   * after a success or when the user changes what is being paid — the charge, the
+   * amount or the method. That is what makes two clicks in one task, a second tab
+   * and a retried POST all carry the SAME key, and what makes the server able to
+   * answer the repeats from the first payment.
+   */
+  const payKey = useRef("");
+  useEffect(() => {
+    payKey.current = "";
+  }, [pickedStudent, chargeId, payAmount, method]);
+
   const [awardKind, setAwardKind] = useState("PERCENT");
   const [percent, setPercent] = useState("100");
   const [amountPerHead, setAmountPerHead] = useState("");
@@ -966,22 +983,28 @@ function DuesTab({
       setError(read.error);
       return;
     }
+    // The key of THIS attempt: generated once, kept if the request fails so the
+    // retry cannot become a second payment.
+    const idempotencyKey = payKey.current || (payKey.current = newPaymentKey());
     setPayBusy(true);
     setError("");
     setNotice("");
     try {
       const result = await api<any>("/api/college-fees/payments", {
         method: "POST",
-        body: JSON.stringify({ chargeId, amountMinor: read.minor, method, refNo: refNo || null }),
+        body: JSON.stringify({ chargeId, amountMinor: read.minor, method, refNo: refNo || null, idempotencyKey }),
       });
+      payKey.current = ""; // this attempt is done — the next one is a new payment
       setPayAmount("");
       setRefNo("");
       setNotice(paymentDoneText(result, currency));
       await loadStudent(pickedStudent);
       await loadScope();
     } catch (e: any) {
-      // An over-payment (or a charge that settled first) is the API's own 409,
-      // shown as written. Nothing is retried.
+      // A refusal — an over-payment, a key already spent on a different payment,
+      // a charge that settled first — is the API's own 409, shown as written. The
+      // key is deliberately KEPT: repeating this attempt can only replay the first
+      // result, never pay twice.
       setError(refusalText(e, PAGE_ERRORS.pay));
     } finally {
       setPayBusy(false);

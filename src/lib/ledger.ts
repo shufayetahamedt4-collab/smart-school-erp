@@ -1,4 +1,4 @@
-import { prisma } from "./db";
+import { prisma, collegePaymentLedgerId } from "./db";
 import type { PaymentMethod } from "./db";
 import { notifyUsers } from "./notify";
 import { money } from "./utils";
@@ -185,11 +185,27 @@ export interface ConfirmCollegePaymentInput {
   refNo?: string | null;
   actorId?: string | null;
   date?: Date;
+  /**
+   * 7e-pre — the OPTIONAL key that identifies ONE payment ATTEMPT.
+   *
+   * A retry, a second tab open on the same form and a double submit all carry the
+   * same key, so all of them describe one payment: the FIRST request writes it and
+   * every later one is answered from it (`replay: true`) without a second ledger
+   * entry, a second receipt number or a second rupee. A different key is simply a
+   * different payment.
+   *
+   * It is optional on purpose: a caller that sends nothing (the school's own
+   * code, an integration, a script) gets exactly the behaviour this function has
+   * always had.
+   */
+  idempotencyKey?: string | null;
 }
 
 export type CollegePaymentOutcome =
   | {
       ok: true;
+      /** True when this request was answered from a payment an earlier one wrote. */
+      replay?: boolean;
       receiptNo: string;
       chargeId: string;
       applied: number;
@@ -197,7 +213,89 @@ export type CollegePaymentOutcome =
       due: number;
       status: "UNPAID" | "PARTIAL" | "PAID";
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      /** True when the key is already spent on a DIFFERENT charge, amount or method. */
+      conflict?: boolean;
+      error: string;
+    };
+
+/**
+ * 7e-pre — the payment key an attempt carries, or `null` for the keyless path.
+ *
+ * Pure and total: anything that is not a non-empty string is `null` (an absent key
+ * behaves exactly as before), and a very long client string is truncated to the
+ * length the ledger id is happy with rather than rejected, so a hostile caller
+ * cannot turn a valid payment into a 400.
+ */
+export function paymentKeyFrom(key: unknown): string | null {
+  if (typeof key !== "string") return null;
+  const trimmed = key.trim();
+  return trimmed ? trimmed.slice(0, 120) : null;
+}
+
+/** 7e-pre — one key, one payment: whatever is written for a key is written once. */
+const COLLEGE_PAYMENT_KEY_TAKEN = "__COLLEGE_PAYMENT_KEY_TAKEN__";
+
+/** The visible 409 for a key that is already spent on a different payment. */
+export const COLLEGE_PAYMENT_KEY_CONFLICT =
+  "This payment key was already used for a different charge, amount or method. Start a new payment.";
+
+/** The row a keyed attempt stamps onto its charge (7e-pre) — read only by name. */
+interface CollegePaymentStamp {
+  key?: unknown;
+  amountMinor?: unknown;
+  method?: unknown;
+  receiptNo?: unknown;
+  applied?: unknown;
+  paidAmount?: unknown;
+  due?: unknown;
+  status?: unknown;
+  at?: unknown;
+}
+
+function stampOf(row: any): CollegePaymentStamp | null {
+  const s = row && row.idempotency;
+  return s && typeof s === "object" && typeof s.key === "string" && s.key ? (s as CollegePaymentStamp) : null;
+}
+
+/**
+ * The keys this charge has already been paid with, most recent last (7e-pre).
+ *
+ * The full stamp above describes the LAST keyed payment; this bounded list is what
+ * keeps an EARLIER key spent even after a later, different key restamped the
+ * charge. It is a safety net with one job: a key that has already paid this charge
+ * is refused rather than paid again. Eight entries is far more than a form or a
+ * retry can produce in the window that matters, and it keeps the row small.
+ */
+function seenKeys(row: any): string[] {
+  const list = row && row.idempotencyKeys;
+  return Array.isArray(list) ? list.filter((k) => typeof k === "string" && k) as string[] : [];
+}
+
+const KEY_MEMORY = 8;
+
+/** The outcome an earlier, identical payment already produced. */
+function replayOutcome(
+  chargeId: string,
+  stamp: CollegePaymentStamp
+): Extract<CollegePaymentOutcome, { ok: true }> {
+  return {
+    ok: true,
+    replay: true,
+    receiptNo: String(stamp.receiptNo ?? ""),
+    chargeId,
+    applied: Number(stamp.applied) || 0,
+    paidAmount: Number(stamp.paidAmount) || 0,
+    due: Number(stamp.due) || 0,
+    status: (stamp.status as "UNPAID" | "PARTIAL" | "PAID") || "UNPAID",
+  };
+}
+
+/** Paise still owed on a charge, from the row and the post-payment paid amount. */
+function dueOf(row: any, paidAmount: number): number {
+  return fromMinor(Math.max(0, toMinor(row?.amount) - toMinor(paidAmount)));
+}
 
 /**
  * Confirm a payment against ONE college charge (D-7-12) — the college counterpart
@@ -234,49 +332,136 @@ export async function confirmCollegePayment(input: ConfirmCollegePaymentInput): 
     return { ok: false, error: "Payment must be a positive whole number of minor units." };
   }
 
+  // 7e-pre — the keyless path is untouched: with no key, nothing below changes.
+  const key = paymentKeyFrom(input.idempotencyKey);
+  if (key) {
+    // One id per (tenant, key), so this read asks "has THIS attempt already been
+    // written?" and can only ever see this tenant's own payment.
+    const entry: any = await prisma.ledgerEntry.findUnique({
+      where: { id: collegePaymentLedgerId(input.schoolId, key) },
+    });
+    if (entry && entry.schoolId === input.schoolId) {
+      const meta: any = entry.meta || {};
+      const samePayment =
+        meta.collegeFeeId === input.chargeId && Number(meta.amountMinor) === amountMinor && meta.method === input.method;
+      if (!samePayment) return { ok: false, conflict: true, error: COLLEGE_PAYMENT_KEY_CONFLICT };
+      return {
+        ok: true,
+        replay: true,
+        receiptNo: String(meta.receiptNo ?? ""),
+        chargeId: input.chargeId,
+        applied: fromMinor(amountMinor),
+        paidAmount: Number(meta.paidAmount) || 0,
+        due: Number(meta.due) || 0,
+        status: (meta.status as "UNPAID" | "PARTIAL" | "PAID") || "UNPAID",
+      };
+    }
+  }
+
   // A courtesy refusal BEFORE the transaction, so an obvious over-payment gets a
   // clean message; the transaction below is the authoritative decision.
   const preview = acceptCollegePayment(charge, { amount: fromMinor(amountMinor) });
   if (!preview.ok) return { ok: false, error: preview.error };
 
   const stamp = (input.date || new Date()).toISOString();
+  // A keyed attempt must be able to hand its receipt back ATOMICALLY, from inside
+  // the transaction that accepts it — that stamp is what answers a later attempt
+  // with the same key even if it never saw the first reply (the classic dropped
+  // response). A keyless payment keeps generating its receipt after the write.
+  const receiptNo = key ? collegeReceiptNo() : null;
   const written = await prisma.$guardedUpdate("collegeFee", input.chargeId, (current) => {
     if (!current) return { ok: false, error: "College charge not found." };
+    // Same key AGAIN on the SAME charge: nothing is written. `written.holder`
+    // below turns this into the first result (a replay) or a 409 (a different
+    // amount/method), decided against the row as it is at THIS instant.
+    const prior = stampOf(current);
+    if (key && ((prior && prior.key === key) || seenKeys(current).includes(key))) {
+      return { ok: false, error: COLLEGE_PAYMENT_KEY_TAKEN };
+    }
     const decision = acceptCollegePayment(current, { amount: fromMinor(amountMinor) });
     if (!decision.ok) return { ok: false, error: decision.error };
-    return { ok: true, data: { paidAmount: decision.paidAmount, status: decision.status, lastPaidAt: stamp } };
+    return {
+      ok: true,
+      data: {
+        paidAmount: decision.paidAmount,
+        status: decision.status,
+        lastPaidAt: stamp,
+        ...(key && receiptNo
+          ? {
+              idempotencyKeys: [...seenKeys(current), key].slice(-KEY_MEMORY),
+              idempotency: {
+                key,
+                amountMinor,
+                method: input.method,
+                receiptNo,
+                applied: fromMinor(amountMinor),
+                paidAmount: decision.paidAmount,
+                due: dueOf(current, decision.paidAmount),
+                status: decision.status,
+                at: stamp,
+              },
+            }
+          : {}),
+      },
+    };
   });
   if (!written.ok || !written.row) {
+    const holder: any = (written as any).holder;
+    const prior = stampOf(holder);
+    const spent = !!key && seenKeys(holder).includes(key);
+    if (prior?.key === key || spent) {
+      // The key is already spent on THIS charge: answer from the payment it
+      // recorded — the same receipt, the same due, no write at all.
+      if (prior?.key === key && Number(prior.amountMinor) === amountMinor && prior.method === input.method) {
+        return replayOutcome(input.chargeId, prior);
+      }
+      return { ok: false, conflict: true, error: COLLEGE_PAYMENT_KEY_CONFLICT };
+    }
     return { ok: false, error: written.error || "Payment refused — the charge changed while it was being paid." };
   }
 
-  const receiptNo = collegeReceiptNo();
+  const previousPaid = Number(written.row.paidAmount) || 0;
+  const due = dueOf(written.row, previousPaid);
+  const receipt = receiptNo || collegeReceiptNo();
   await postToLedger({
     schoolId: input.schoolId,
     kind: "PAYMENT",
     amount: fromMinor(amountMinor),
     method: input.method,
-    refNo: input.refNo || receiptNo,
+    refNo: input.refNo || receipt,
     status: "CONFIRMED",
     studentId: charge.studentId ?? null,
     feeId: null,
     actorId: input.actorId || null,
     description: `College payment — ${String(charge.title ?? "charge")}`,
     meta: {
-      receiptNo,
+      receiptNo: receipt,
       collegeFeeId: input.chargeId,
       programId: charge.programId ?? null,
       termNumber: charge.termNumber ?? null,
+      // 7e-pre — the attempt that wrote this entry, so the entry itself is what a
+      // replay is answered from and what `collegePaymentLedgerId` is derived from.
+      ...(key
+        ? {
+            collegePaymentKey: key,
+            amountMinor,
+            method: input.method,
+            paidAmount: previousPaid,
+            due,
+            status: written.row.status,
+          }
+        : {}),
     },
   });
 
   return {
     ok: true,
-    receiptNo,
+    ...(key ? { replay: false } : {}),
+    receiptNo: receipt,
     chargeId: input.chargeId,
     applied: fromMinor(amountMinor),
-    paidAmount: Number(written.row.paidAmount) || 0,
-    due: fromMinor(Math.max(0, toMinor(written.row.amount) - toMinor(written.row.paidAmount))),
+    paidAmount: previousPaid,
+    due,
     status: written.row.status,
   };
 }

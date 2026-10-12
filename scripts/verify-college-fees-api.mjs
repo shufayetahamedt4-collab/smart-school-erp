@@ -1074,6 +1074,179 @@ console.log("\n### the ledger readers: what a school-facing ledger read shows of
   );
 }
 
+/* ------------------------------------------------ 7e-pre payment idempotency */
+
+console.log("\n### 7e-pre: a retry, a second tab or a double submit must never record a college payment twice");
+{
+  const PROG_BOTH = `${P}both-prog`;
+  const BOTH_STU = `${P}both-stu`;
+
+  const chargeOf = async (id) => (await db.collection("collegeFees").doc(id).get()).data();
+  const rowsFor = async (chargeId) =>
+    (await db.collection("ledger").where("schoolId", "==", C1).get()).docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((e) => e.kind === "PAYMENT" && e.meta && e.meta.collegeFeeId === chargeId);
+
+  /** One fresh 1000.00 charge for `studentId`, on its own head, so each probe starts from a known due. */
+  const freshCharge = async (schoolId, programId, studentId, cookie, label) => {
+    const h = await post("/api/college-fees/heads", { name: `ZZ Idem ${label}`, bucket: "OTHER", frequency: "TERM" }, cookie);
+    await post("/api/college-fees/structure", { programId, termNumber: 1, headId: h.data?.id, amount: 1000, required: false }, cookie);
+    const gen = await post("/api/college-fees/generate", { programId, termNumber: 1, includeOptional: true, headIds: [h.data?.id] }, cookie);
+    return gen.data?.students?.find((s) => s.studentId === studentId)?.newCharges?.[0]?.id || null;
+  };
+  const payOn = (chargeId, body, cookie = collegeAdmin) =>
+    post("/api/college-fees/payments", { chargeId, method: "CASH", ...body }, cookie);
+
+  // (1) A keyed payment, then the SAME key again — the retry / second-tab case.
+  const chargeA = await freshCharge(C1, PROG_A, STU_A, collegeAdmin, "Replay");
+  check("7e-pre: a fresh 1000.00 charge exists to pay", !!chargeA, `charge=${chargeA}`);
+
+  const key1 = `zzcf-key-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const first = await payOn(chargeA, { amountMinor: 20000, idempotencyKey: key1 });
+  check(
+    "a keyed payment is accepted (201) and carries the college's own CRCP- receipt",
+    first.status === 201 && String(first.data?.receiptNo || "").startsWith("CRCP-") && first.data?.replayed !== true,
+    `HTTP ${first.status} receipt=${first.data?.receiptNo}`
+  );
+
+  const rowsBefore = await rowsFor(chargeA);
+  const chargeBefore = await chargeOf(chargeA);
+  const stampedId = `le_cp_${sha1(`${C1}|${key1}`)}`;
+  check(
+    "the ledger entry is pinned to (tenant, key): its id is derived from them and the key is stored in its meta",
+    rowsBefore.length === 1 && rowsBefore[0].id === stampedId && rowsBefore[0].meta?.collegePaymentKey === key1,
+    `rows=${rowsBefore.length} id=${rowsBefore[0]?.id} key=${rowsBefore[0]?.meta?.collegePaymentKey}`
+  );
+
+  const replay = await payOn(chargeA, { amountMinor: 20000, idempotencyKey: key1 });
+  const rowsAfter = await rowsFor(chargeA);
+  const chargeAfter = await chargeOf(chargeA);
+  check(
+    "a repeat with the SAME key returns the FIRST result — same receipt, same amount, same due — and says so",
+    replay.status === 200 && replay.data?.replayed === true && replay.data?.receiptNo === first.data?.receiptNo &&
+      replay.data?.applied === first.data?.applied && replay.data?.due === first.data?.due,
+    `HTTP ${replay.status} replayed=${replay.data?.replayed} receipt=${replay.data?.receiptNo} due=${replay.data?.due}`
+  );
+  check("…and posted NO second ledger row", rowsAfter.length === rowsBefore.length && rowsAfter.length === 1, `rows=${rowsAfter.length}`);
+  check(
+    "…and consumed NO new receipt number (the entry's own receipt is untouched)",
+    rowsAfter[0].meta?.receiptNo === rowsBefore[0].meta?.receiptNo && replay.data?.receiptNo === rowsBefore[0].meta?.receiptNo,
+    `receipt=${rowsAfter[0].meta?.receiptNo}`
+  );
+  check(
+    "…and left the charge exactly as the first payment left it (one payment, never two)",
+    chargeAfter?.paidAmount === chargeBefore?.paidAmount && chargeAfter?.paidAmount === 200 &&
+      chargeAfter?.idempotency?.receiptNo === rowsBefore[0].meta?.receiptNo,
+    `paid=${chargeAfter?.paidAmount} stampedReceipt=${chargeAfter?.idempotency?.receiptNo}`
+  );
+
+  // (2) TEN simultaneous requests with ONE key — the double-submit/crash-retry race.
+  const chargeB = await freshCharge(C1, PROG_A, STU_A, collegeAdmin, "ParallelSameKey");
+  const key2 = `${key1}-p10`;
+  const ten = await Promise.all(Array.from({ length: 10 }, () => payOn(chargeB, { amountMinor: 10000, idempotencyKey: key2 })));
+  const rowsB = await rowsFor(chargeB);
+  const chargeBAfter = await chargeOf(chargeB);
+  const receiptSet = new Set(ten.map((r) => r.data?.receiptNo).filter(Boolean));
+  check(
+    "10 SIMULTANEOUS requests with ONE key record exactly ONE payment: one ledger row, one receipt, one 100.00 added to the charge",
+    rowsB.length === 1 && chargeBAfter?.paidAmount === 100 && receiptSet.size === 1 &&
+      ten.filter((r) => r.status === 201).length === 1 &&
+      ten.every((r) => r.status === 201 || r.status === 200),
+    `rows=${rowsB.length} paid=${chargeBAfter?.paidAmount} receipts=${receiptSet.size} statuses=${JSON.stringify(ten.map((r) => r.status))}`
+  );
+
+  // (3) TEN simultaneous DIFFERENT keys — the over-payment refusal must still hold.
+  const chargeC = await freshCharge(C1, PROG_A, STU_A, collegeAdmin, "ParallelKeys");
+  const spread = await Promise.all(
+    Array.from({ length: 10 }, (_, i) => payOn(chargeC, { amountMinor: 30000, idempotencyKey: `${key1}-k${i}` }))
+  );
+  const rowsC = await rowsFor(chargeC);
+  const chargeCAfter = await chargeOf(chargeC);
+  const landed = spread.filter((r) => r.status === 201).length;
+  const refusedC = spread.filter((r) => r.status === 409);
+  const paidC = Number(chargeCAfter?.paidAmount) || 0;
+  check(
+    "10 simultaneous payments with DIFFERENT keys against a 1000.00 charge: every answer is 201 or 409, exactly one ledger row per payment that landed, and the stored paid never exceeds the billed amount",
+    landed >= 1 && landed <= 3 && refusedC.length === 10 - landed && spread.every((r) => r.status === 201 || r.status === 409) &&
+      paidC === 300 * landed && paidC <= 1000 && rowsC.length === landed,
+    `statuses=${JSON.stringify(spread.map((r) => r.status))} landed=${landed} paid=${paidC} rows=${rowsC.length} firstRefusal=${JSON.stringify(refusedC[0]?.error)}`
+  );
+  // …and the over-payment refusal still holds on that same charge: the exact
+  // remainder settles, one paisa more is refused by name.
+  const remainderMinor = (1000 - paidC) * 100;
+  const settleC = await payOn(chargeC, { amountMinor: remainderMinor, idempotencyKey: `${key1}-settle` });
+  const overC = await payOn(chargeC, { amountMinor: 1, idempotencyKey: `${key1}-over` });
+  check(
+    "…and the over-payment rule still holds after the race: the exact remainder settles the charge (201, due 0), one paisa more is refused by name (409)",
+    settleC.status === 201 && settleC.data?.due === 0 && settleC.data?.status === "PAID" && overC.status === 409 &&
+      /exceeds the outstanding/i.test(overC.error || ""),
+    `settle=${settleC.status} due=${settleC.data?.due} over=${overC.status} error=${JSON.stringify(overC.error)}`
+  );
+  const rowsC2 = await rowsFor(chargeC);
+  check(
+    "…and the settled charge holds one ledger row per payment (the race never duplicated one)",
+    rowsC2.length === landed + 1 && new Set(rowsC2.map((e) => e.id)).size === rowsC2.length,
+    `rows=${rowsC2.length} landed=${landed}`
+  );
+
+  // (4) Same key, DIFFERENT payment → refused by name, and nothing is written.
+  const rowsD1 = await rowsFor(chargeA);
+  const chargeD1 = await chargeOf(chargeA);
+  const wrongAmount = await payOn(chargeA, { amountMinor: 30000, idempotencyKey: key1 });
+  const wrongMethod = await payOn(chargeA, { amountMinor: 20000, method: "BANK", idempotencyKey: key1 });
+  const chargeD2 = await chargeOf(chargeA);
+  const rowsD2 = await rowsFor(chargeA);
+  check(
+    "the same key with a DIFFERENT amount or method is refused (409) by name — never silently replayed",
+    wrongAmount.status === 409 && wrongMethod.status === 409 && /already used/i.test(wrongAmount.error || "") && /already used/i.test(wrongMethod.error || ""),
+    `amount=${wrongAmount.status} method=${wrongMethod.status} error=${JSON.stringify(wrongAmount.error)}`
+  );
+  check(
+    "…and a refused request leaves the charge and the ledger exactly as they were",
+    chargeD2?.paidAmount === chargeD1?.paidAmount && JSON.stringify(chargeD2?.idempotency) === JSON.stringify(chargeD1?.idempotency) &&
+      rowsD2.length === rowsD1.length && rowsD2.length === 1,
+    `paid=${chargeD2?.paidAmount} rows=${rowsD2.length}`
+  );
+  const wrongCharge = await payOn(chargeB, { amountMinor: 20000, idempotencyKey: key1 });
+  check(
+    "a key already spent on a DIFFERENT charge is refused (409) too, so one key can never pay two charges",
+    wrongCharge.status === 409 && /already used/i.test(wrongCharge.error || ""),
+    `HTTP ${wrongCharge.status} error=${JSON.stringify(wrongCharge.error)}`
+  );
+
+  // (5) The same key under ANOTHER tenant is an independent payment.
+  const chargeBoth = await freshCharge(`${P}both`, PROG_BOTH, BOTH_STU, bothAdmin, "OtherTenant");
+  const otherTenant = await payOn(chargeBoth, { amountMinor: 20000, idempotencyKey: key1 }, bothAdmin);
+  const otherRows = (await db.collection("ledger").where("schoolId", "==", `${P}both`).get()).docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((e) => e.kind === "PAYMENT" && e.meta && e.meta.collegeFeeId === chargeBoth);
+  const rowsStillOne = await rowsFor(chargeA);
+  check(
+    "the SAME key in ANOTHER tenant is a new payment there (its own derived id, its own receipt) and never collides with or leaks the first tenant's",
+    otherTenant.status === 201 && otherRows.length === 1 && otherRows[0].id !== stampedId &&
+      otherRows[0].id === `le_cp_${sha1(`${P}both|${key1}`)}` && rowsStillOne.length === 1,
+    `HTTP ${otherTenant.status} otherId=${otherRows[0]?.id} c1Rows=${rowsStillOne.length}`
+  );
+
+  // (6) No key at all: exactly the behaviour this route has always had.
+  const chargeE = await freshCharge(C1, PROG_A, STU_A, collegeAdmin, "NoKey");
+  const unkeyed1 = await payOn(chargeE, { amountMinor: 20000 });
+  const unkeyed2 = await payOn(chargeE, { amountMinor: 20000 });
+  const rowsE = await rowsFor(chargeE);
+  check(
+    "no key behaves exactly as before: two payments append TWO ledger entries and neither carries a payment key",
+    unkeyed1.status === 201 && unkeyed2.status === 201 && rowsE.length === 2 && rowsE.every((e) => !e.meta?.collegePaymentKey) &&
+      rowsE.every((e) => !e.id.startsWith("le_cp_")),
+    `statuses=${JSON.stringify([unkeyed1.status, unkeyed2.status])} rows=${rowsE.length} ids=${JSON.stringify(rowsE.map((e) => e.id.slice(0, 8)))}`
+  );
+  const badKey = await payOn(chargeE, { amountMinor: 20000, idempotencyKey: "short" });
+  check(
+    "an unusable key value is refused (400) by name rather than ignored, so a repeat-proof payment can never quietly become repeatable",
+    badKey.status === 400 && /idempotencyKey/.test(badKey.error || ""),
+    `HTTP ${badKey.status} error=${JSON.stringify(badKey.error)}`
+  );
+}
+
 /* -------------------------------------------------------------------- end */
 
 console.log("");

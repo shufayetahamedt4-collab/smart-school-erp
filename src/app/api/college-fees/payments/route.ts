@@ -24,7 +24,14 @@ import { requireCollegeFeesWrite, serveCharge, targetSchoolId } from "@/lib/coll
  *     second re-reads the first's `paidAmount` and is refused;
  *   - ONE `PAYMENT` entry is appended to the SAME central ledger (`feeId: null`,
  *     `meta.collegeFeeId`), and the receipt number comes from the college's own
- *     `CRCP-…` sequence so school and college receipts never interleave.
+ *     `CRCP-…` sequence so school and college receipts never interleave;
+ *   - an OPTIONAL `idempotencyKey` (7e-pre) makes the request safe to repeat. The
+ *     page sends one key per ATTEMPT, so a double submit in one task, a second
+ *     tab and a retried request all describe ONE payment: the same key with the
+ *     same charge/amount/method returns the FIRST result (`replayed: true`) and
+ *     writes nothing — no second ledger entry, no second receipt; the same key
+ *     with a different charge, amount or method is a visible 409. No key behaves
+ *     exactly as before, so every existing caller keeps working.
  *
  * Guard order: session → target tenant → `requireCollege` → the write allow-list →
  * `writeGuard`.
@@ -70,6 +77,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `method must be one of ${METHODS.join(", ")}.` }, { status: 400 });
   }
 
+  // 7e-pre — the idempotency key is OPTIONAL (an absent/empty key is the old
+  // behaviour). A key that is present must be a usable string: silently ignoring
+  // a malformed one would quietly turn a repeat-proof payment into a repeatable
+  // one, so it is refused by name instead.
+  const rawKey = body?.idempotencyKey;
+  let idempotencyKey: string | null = null;
+  if (rawKey !== undefined && rawKey !== null && rawKey !== "") {
+    if (typeof rawKey !== "string" || rawKey.trim().length < 8 || rawKey.trim().length > 120) {
+      return NextResponse.json(
+        { error: "idempotencyKey must be between 8 and 120 characters." },
+        { status: 400 }
+      );
+    }
+    idempotencyKey = rawKey.trim();
+  }
+
   const charge: any = await prisma.collegeFee.findUnique({ where: { id: chargeId } });
   if (!charge || charge.schoolId !== schoolId) {
     return NextResponse.json({ error: "College charge not found" }, { status: 404 });
@@ -85,11 +108,36 @@ export async function POST(req: NextRequest) {
     method,
     refNo: body?.refNo ? String(body.refNo) : null,
     actorId: session.id,
+    idempotencyKey,
   });
   if (!outcome.ok) {
-    // The only refusal left after the 400s above is an over-payment (or a charge
-    // that settled between the read and the transaction) — a visible 409.
+    // The refusals left after the 400s above are an over-payment (or a charge that
+    // settled between the read and the transaction) and a key already spent on a
+    // different payment — both visible 409s.
     return NextResponse.json({ error: outcome.error }, { status: 409 });
+  }
+
+  const after: any = await prisma.collegeFee.findUnique({ where: { id: chargeId } });
+
+  if (outcome.replay) {
+    // A replay records nothing: the payment (and its audit row) were written by
+    // the request this one repeats. It answers with that FIRST result so the
+    // caller that lost the first response still shows the right receipt.
+    return NextResponse.json(
+      {
+        data: {
+          replayed: true,
+          receiptNo: outcome.receiptNo,
+          chargeId,
+          applied: outcome.applied,
+          paidAmount: outcome.paidAmount,
+          due: outcome.due,
+          status: outcome.status,
+          charge: serveCharge(after || charge),
+        },
+      },
+      { status: 200 }
+    );
   }
 
   await audit("COLLEGE_FEE_PAYMENT", "collegeFee", chargeId, {
@@ -102,9 +150,9 @@ export async function POST(req: NextRequest) {
     status: outcome.status,
     programId: charge.programId ?? null,
     termNumber: charge.termNumber ?? null,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   });
 
-  const after: any = await prisma.collegeFee.findUnique({ where: { id: chargeId } });
   return NextResponse.json(
     {
       data: {

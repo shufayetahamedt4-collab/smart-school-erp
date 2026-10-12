@@ -348,6 +348,23 @@ export function payButtonLabel(busy: unknown): string {
   return busy ? "Recording…" : "Record payment";
 }
 
+/**
+ * 7e-pre — a fresh key for ONE payment attempt.
+ *
+ * The key belongs to the ATTEMPT, not to a request: the form generates it when a
+ * submit first needs it, keeps it across a retry or a dropped response, and throws
+ * it away only after a success or when the charge, the amount or the method
+ * changes. The server then answers every repeat of that attempt from the payment
+ * the first request wrote, so a double submit, a second tab and a retry can only
+ * ever produce one payment.
+ */
+export function newPaymentKey(): string {
+  const c: any = typeof crypto !== "undefined" ? crypto : null;
+  if (c && typeof c.randomUUID === "function") return String(c.randomUUID());
+  // A browser without randomUUID (or a test harness) still gets a usable key.
+  return `pk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
 /** What the screen says after a payment is accepted (receipt + what is left). */
 export function paymentDoneText(
   result: { receiptNo?: unknown; applied?: unknown; due?: unknown; status?: unknown } | null | undefined,
