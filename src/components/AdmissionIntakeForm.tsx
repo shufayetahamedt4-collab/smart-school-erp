@@ -67,7 +67,9 @@ const initial = {
   previousSchoolAddress: "", leavingReason: "",
   // guardian
   guardianName: "", guardianPhone: "", guardianEmail: "", guardianRelation: "Father",
-  emergencyContact: "", createGuardian: true, guardianPassword: "Guardian@123",
+  // pilot P1c — no guardian password: the guardian signs in with the QR slip
+  // the admission returns (and the school can re-issue from the student page).
+  emergencyContact: "", createGuardian: true,
   // fees
   admissionFee: "", monthlyFee: "", createMonthly: true,
   discountOn: false, discountType: "PERCENT", discountValue: "", discountReason: "SIBLING", discountNote: "",
@@ -212,7 +214,7 @@ export default function AdmissionIntakeForm({
         guardian: {
           name: form.guardianName, phone: form.guardianPhone, email: form.guardianEmail,
           relation: form.guardianRelation, emergencyContact: form.emergencyContact,
-          createLogin: form.createGuardian, password: form.guardianPassword,
+          createLogin: form.createGuardian,
         },
         sibling: { siblingId: siblingId || null },
         fees: {
@@ -470,9 +472,7 @@ export default function AdmissionIntakeForm({
               Create a guardian login account for the parents app
             </label>
             {form.createGuardian && (
-              <div className="mt-3 max-w-xs">
-                <Field label="Initial password"><TextInput value={form.guardianPassword} onChange={(e) => set("guardianPassword", e.target.value)} /></Field>
-              </div>
+              <p className="mt-3 max-w-md text-xs text-slate-500">The guardian signs in with the QR slip for this student — no password is needed. The slip prints on the success screen and can be re-issued from the student page.</p>
             )}
           </div>
         </div>

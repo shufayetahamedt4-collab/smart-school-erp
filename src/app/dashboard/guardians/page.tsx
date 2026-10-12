@@ -17,7 +17,9 @@ export default function GuardiansPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ name: "", email: "", password: "Guardian@123", studentId: "" });
+  // pilot P1c — guardians have no password: the account gets an unusable hash
+  // and the guardian signs in with the student's QR slip.
+  const [form, setForm] = useState({ name: "", email: "", studentId: "" });
 
   const load = () =>
     Promise.all([api<Guardian[]>("/api/guardians"), api<any[]>("/api/students")])
@@ -31,7 +33,7 @@ export default function GuardiansPage() {
     try {
       await api("/api/guardians", { method: "POST", body: JSON.stringify(form) });
       setOpen(false);
-      setForm({ name: "", email: "", password: "Guardian@123", studentId: "" });
+      setForm({ name: "", email: "", studentId: "" });
       load();
     } catch (e: any) {
       setError(e.message);
@@ -81,7 +83,7 @@ export default function GuardiansPage() {
         <div className="space-y-4">
           <Field label="Guardian name *"><TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Email *"><TextInput type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-          <Field label="Password"><TextInput value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+          <p className="text-xs text-slate-500">The guardian signs in with the student&apos;s QR slip — no password is needed. Hand over or re-issue the slip from the student page.</p>
           <Field label="Link to student">
             <Select value={form.studentId} onChange={(e) => setForm({ ...form, studentId: e.target.value })}>
               <option value="">Select student without a guardian…</option>

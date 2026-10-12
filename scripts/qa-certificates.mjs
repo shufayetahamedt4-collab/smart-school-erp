@@ -240,7 +240,14 @@ async function main() {
   assert("teacher outside class forbidden (403)", r.status === 403, `status ${r.status}: ${JSON.stringify(r.json)}`);
 
   // ---- 9. guardian access (own child only) ----
-  r = await api("/api/auth/login", { method: "POST", body: { identifier: `mizanur.${RUN}@qatest.com`, password: "Guardian@123" } });
+  // pilot P1c — guardians have no password: the credential is the student's QR
+  // slip (token + PIN) minted by the import above. Read Sadia's slip as the
+  // admin (who can see the token/PIN), sign in through the QR verify path,
+  // then run the same two own-child assertions with that session.
+  const sadiaFull = (students || []).find((s) => s.name === "Sadia Cert") || sadia;
+  const slip = { token: sadiaFull.qrToken, pin: sadiaFull.qrPin };
+  assert("the legacy import provisioned a QR slip for the guardian", !!slip.token && !!slip.pin, JSON.stringify({ hasToken: !!slip.token, hasPin: !!slip.pin }));
+  r = await api("/api/qr/verify", { method: "POST", body: { token: slip.token, pin: slip.pin } });
   const guardianCookie = cookieOf(r);
   if (guardianCookie) {
     r = await api(`/api/certificates?studentId=${sadia.id}&type=TC`, { cookie: guardianCookie });
@@ -248,7 +255,7 @@ async function main() {
     r = await api(`/api/certificates?studentId=${rahim.id}&type=TC`, { cookie: guardianCookie });
     assert("guardian cannot read another child (403)", r.status === 403, `status ${r.status}`);
   } else {
-    fail("guardian login for own-child test", "guardian account not created by import");
+    fail("guardian login for own-child test", `QR verify failed: status ${r.status} ${JSON.stringify(r.json)}`);
   }
 
   // ---- 10. CHARACTER type independence ----

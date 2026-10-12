@@ -6,6 +6,7 @@ import { can } from "@/lib/permissions";
 import { writeGuard, planLimitGuard } from "@/lib/subscription";
 import { parseCsv, rowsToRecords, toCsv } from "@/lib/csv";
 import { qrToken, qrPin } from "@/lib/qr";
+import { unusableGuardianPassword } from "@/lib/import/write";
 import { invalidateStats } from "@/lib/stats-cache";
 
 /**
@@ -227,7 +228,9 @@ export async function POST(req: NextRequest) {
             role: "GUARDIAN",
             schoolId,
             phone: g.phone || null,
-            passwordHash: bcrypt.hashSync("Guardian@123", 10),
+            // pilot P1c — never the shared default: an unusable hash. The
+            // guardian signs in with the student's QR token + PIN below.
+            passwordHash: bcrypt.hashSync(unusableGuardianPassword(), 10),
           },
         });
         guardianByEmail.set(g.email, user.id);
@@ -259,7 +262,8 @@ export async function POST(req: NextRequest) {
       dryRun: false,
       total: records.length, created, errors: errorCount, skipped: skipCount,
       guardianLoginsCreated: createdGuardians.length,
-      defaultGuardianPassword: createdGuardians.length ? "Guardian@123" : undefined,
+      // pilot P1c — no password is ever returned. The guardian's credential
+      // is the per-student QR token + PIN on the student record.
       results,
     },
   });

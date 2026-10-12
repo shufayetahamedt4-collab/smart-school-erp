@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
+import { unusableGuardianPassword } from "@/lib/import/write";
 import { findExistingSibling, linkSiblingFamily } from "@/lib/family";
 import { normalizeInstitutionType } from "@/lib/institution";
 
@@ -31,8 +32,14 @@ import { normalizeInstitutionType } from "@/lib/institution";
  *  - duplicate checks stay in each caller (they differ in rule and message).
  */
 
-/** The password a created guardian account gets when the caller supplies none. */
-export const DEFAULT_GUARDIAN_PASSWORD = "Guardian@123";
+/**
+ * pilot P1c — guardians never get a password. The QR slip (per-student token +
+ * PIN) is the guardian's credential, so every guardian account the kernel
+ * creates gets a random, unusable hash (the same one the bulk import uses).
+ * Any `password`/`defaultPassword` a caller passes is ignored — no shared or
+ * guessable password can ever sign a guardian in. (`DEFAULT_GUARDIAN_PASSWORD`
+ * is gone; nothing imported it.)
+ */
 
 export interface EnrollGuardianInput {
   /** Attempt to create/link an account (callers gate this, e.g. body.createGuardian). */
@@ -44,7 +51,10 @@ export interface EnrollGuardianInput {
    * field entirely (POST /api/students does not set one); pass null to write null.
    */
   phone?: string | null;
-  /** Explicit password; falls back to `defaultPassword` then the app default. */
+  /**
+   * Ignored (pilot P1c). Kept on the type so existing callers still compile
+   * while they stop passing it; the kernel always mints an unusable password.
+   */
   password?: string | null;
   defaultPassword?: string;
   /**
@@ -129,12 +139,16 @@ export async function enrollStudent(opts: EnrollStudentOptions): Promise<EnrollS
     const email = String(g.email).toLowerCase();
     let user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
+      // P1c: any caller-supplied password is deliberately ignored — the QR
+      // slip is the guardian's credential, so the account always gets a
+      // random, unusable hash. (The fields stay on the input type so old
+      // callers still compile while they stop passing them.)
       const data: Record<string, any> = {
         email,
         name: g.name || "Guardian",
         role: "GUARDIAN",
         schoolId,
-        passwordHash: bcrypt.hashSync(g.password || g.defaultPassword || DEFAULT_GUARDIAN_PASSWORD, 10),
+        passwordHash: bcrypt.hashSync(unusableGuardianPassword(), 10),
       };
       // Only write a phone when the caller supplies one (undefined omits the key).
       if (g.phone !== undefined) data.phone = g.phone;

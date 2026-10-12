@@ -26,7 +26,9 @@ interface Preview {
   guardianLoginsToCreate?: number; results: RowResult[];
 }
 interface CommitResult extends Preview {
-  created: number; guardianLoginsCreated?: number; defaultGuardianPassword?: string;
+  // pilot P1c — the legacy student import returns no guardian password: the
+  // credential is the per-student QR token + PIN.
+  created: number; guardianLoginsCreated?: number;
   /** pilot P1b item D — the teacher import returns NO password, only what to do. */
   passwordNotice?: string;
 }
@@ -198,7 +200,7 @@ export default function ImportExportPage() {
               <div className="font-black text-emerald-800">Import complete — {commit.created} created</div>
               <div className="text-xs text-emerald-700">
                 {commit.errors} error(s) · {commit.skipped} skipped
-                {commit.guardianLoginsCreated ? ` · ${commit.guardianLoginsCreated} guardian login(s) created (default password: ${commit.defaultGuardianPassword})` : ""}
+                {commit.guardianLoginsCreated ? ` · ${commit.guardianLoginsCreated} guardian login(s) created — hand over each student's QR slip (no password)` : ""}
                 {commit.passwordNotice ? ` · ${commit.passwordNotice}` : ""}
               </div>
             </div>

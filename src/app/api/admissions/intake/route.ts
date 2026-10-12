@@ -261,12 +261,13 @@ export async function POST(req: NextRequest) {
         qrPin: pin,
         sessionId,
       },
+      // pilot P1c — no guardian password is accepted here: the kernel mints
+      // an unusable one and the guardian signs in with the QR slip below.
       guardian: {
         create: true,
         email: guardianEmail,
         name: str(guard.name) || "Guardian",
         phone: guardianPhone,
-        password: str(guard.password) || null,
       },
       family: { siblingId: str(sib.siblingId) || null },
       fees: {

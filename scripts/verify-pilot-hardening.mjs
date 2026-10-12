@@ -705,12 +705,40 @@ check("p1b-d", "no quoted Teacher@123 literal survives in any of the four files"
 ].some((src) => /"Teacher@123"/.test(stripComments(src))), "a quoted Teacher@123 literal is still assigned somewhere");
 check("p1b-d", "the old default survived in NONE of the teacher paths (the live proof is behaviour below)", !/Teacher@123/.test(stripComments(importTeachersSrc)) && !/Teacher@123/.test(stripComments(teachersSrc)));
 
+/* pilot P1c — guardians never have a password. The QR slip (token + PIN) is the
+ * guardian's credential; every creation path mints a random, unusable hash.
+ * (These replace the P1b REPORT-ONLY pins, which deliberately left the guardian
+ * default in place.) */
 const guardiansSrc = read("src/app/api/guardians/route.ts");
 const enrollSrc = read("src/lib/enroll.ts");
 const importStudentsSrc = read("src/app/api/import/students/route.ts");
-check("p1b-d", "REPORT-ONLY: the guardian default was deliberately NOT changed", guardiansSrc.includes('password || "Guardian@123"') && enrollSrc.includes('DEFAULT_GUARDIAN_PASSWORD = "Guardian@123"'));
-check("p1b-d", "REPORT-ONLY: the students import still reports its guardian default", importStudentsSrc.includes("defaultGuardianPassword"));
-check("p1b-d", "the bulk-import guardian path still refuses a shared password", writeSrc.includes("unusableGuardianPassword"));
+const intakeSrc = read("src/app/api/admissions/intake/route.ts");
+const studentsSrc = read("src/app/api/students/route.ts");
+const intakeFormSrc = read("src/components/AdmissionIntakeForm.tsx");
+const guardiansPageSrc = read("src/app/dashboard/guardians/page.tsx");
+check("p1c", "POST /api/guardians mints an unusable password, never a default", guardiansSrc.includes("unusableGuardianPassword()") && !/Guardian@123/.test(stripComments(guardiansSrc)));
+check("p1c", "POST /api/guardians ignores any password the caller sends", !stripComments(guardiansSrc).includes("password ||") && !stripComments(guardiansSrc).includes("name, password,"));
+check("p1c", "the enrollment kernel has no shared guardian default left", !/Guardian@123/.test(stripComments(enrollSrc)) && !stripComments(enrollSrc).includes("DEFAULT_GUARDIAN_PASSWORD ="));
+check("p1c", "the enrollment kernel mints an unusable guardian password", enrollSrc.includes("unusableGuardianPassword()"));
+check("p1c", "the legacy student import mints an unusable guardian password", importStudentsSrc.includes("unusableGuardianPassword()") && !/Guardian@123/.test(stripComments(importStudentsSrc)));
+check("p1c", "the legacy import response carries NO guardian password", !importStudentsSrc.includes("defaultGuardianPassword"));
+check("p1c", "the legacy import still reports how many guardian logins it created", importStudentsSrc.includes("guardianLoginsCreated"));
+check("p1c", "the desk intake sends no guardian password to the kernel", !stripComments(intakeSrc).includes("guard.password"));
+check("p1c", "POST /api/students sends no guardian password to the kernel", !stripComments(studentsSrc).includes("guardianPassword"));
+check("p1c", "the admission form has no initial-password field left", !intakeFormSrc.includes("guardianPassword") && !/Guardian@123/.test(stripComments(intakeFormSrc)));
+check("p1c", "the guardians console has no password default left", !/Guardian@123/.test(stripComments(guardiansPageSrc)) && !guardiansPageSrc.includes("form.password"));
+check("p1c", "the import console prints no guardian default password", !/defaultGuardianPassword/.test(stripComments(importExportPageSrc)));
+check("p1c", "the bulk-import guardian path still refuses a shared password", writeSrc.includes("unusableGuardianPassword"));
+check("p1c", "no quoted Guardian@123 literal survives in any writer or form", ![
+  guardiansSrc,
+  enrollSrc,
+  importStudentsSrc,
+  intakeSrc,
+  studentsSrc,
+  intakeFormSrc,
+  guardiansPageSrc,
+  importExportPageSrc,
+].some((src) => /"Guardian@123"/.test(stripComments(src))), "a quoted Guardian@123 literal is still assigned somewhere");
 
 /* ------------------------------------------------------------------- live */
 const BASE = process.env.PILOT_BASE || `http://127.0.0.1:${process.env.SMOKE_PORT || 3000}`;
@@ -1213,6 +1241,110 @@ if (OFFLINE_ONLY) {
           const withPassword = await post("/api/teachers", admin.cookie, { name: `ZZ PB Pw ${p1bTag}`, email: `zzpb-pw-${p1bTag}@test.local`, password: `TeacherProbe!${p1bTag}` });
           check("p1b-d-live", "creating a teacher WITH a password still works", withPassword.status === 201, `got ${withPassword.status} ${JSON.stringify(withPassword.body)}`);
           p1bTeacherEmails.push(`zzpb-nopw-${p1bTag}@test.local`, `zzpb-pw-${p1bTag}@test.local`);
+
+          console.log("\nP1c-live) guardians have no password — the QR slip is the credential");
+          const p1cUsers = [];
+          const p1cStudents = [];
+          const p1cAdmissions = [];
+          const p1cFees = [];
+          // A class for the creation paths (read straight from the emulator).
+          const p1cClass = (await db.collection("classes").where("schoolId", "==", schoolId).limit(1).get()).docs[0];
+          check("p1c-live", "there is a class to admit into", !!p1cClass, p1cClass?.id || "none");
+          const p1cClassName = p1cClass?.data?.()?.name || "Class 1";
+          const qrCheck = async (token, pin) => {
+            const r = await fetch(`${BASE}/api/qr/verify`, {
+              method: "POST",
+              redirect: "manual",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ token, pin }),
+            });
+            return { status: r.status, cookie: (r.headers.get("set-cookie") || "").split(";")[0], body: await r.json().catch(() => null) };
+          };
+          // Every refusal below is compared against an UNKNOWN identifier with
+          // the same password: the shape must be identical (no account oracle).
+          const unknownProbe = await rawLogin(`zzpb-unknown-${p1bTag}@test.local`, "Guardian@123");
+          const sameShape = (r) => r.status === unknownProbe.status && String(r.body?.error || "") === String(unknownProbe.body?.error || "");
+          if (p1cClass) {
+            // Path 1: POST /api/students (no guardian) + POST /api/guardians.
+            const s1 = await post("/api/students", admin.cookie, { name: `ZZ PC S1 ${p1bTag}`, classId: p1cClass.id, admissionNo: `ZZ-PC-S1-${p1bTag}` });
+            check("p1c-live", "a student without a guardian is created", s1.status === 201 && !!s1.body?.data?.id, `got ${s1.status}`);
+            const s1Id = s1.body?.data?.id;
+            if (s1Id) p1cStudents.push(s1Id);
+            const g1Email = `zzpc-g1-${p1bTag}@test.local`;
+            const g1 = await post("/api/guardians", admin.cookie, { name: "ZZ PC G1", email: g1Email, studentId: s1Id });
+            check("p1c-live", "POST /api/guardians links without any password", g1.status === 201, `got ${g1.status} ${JSON.stringify(g1.body)}`);
+            if (g1.status === 201) p1cUsers.push(userDoc(g1Email));
+            for (const [label, pw] of [["the old default", "Guardian@123"], ["a guess", "Sunrise123"], ["the phone number", "01700000001"]]) {
+              const attempt = await rawLogin(g1Email, pw);
+              check("p1c-live", `a guardian from POST /api/guardians cannot sign in with ${label}`, attempt.status === 401 && sameShape(attempt), `got ${attempt.status} ${JSON.stringify(attempt.body)}`);
+            }
+            const emptyAttempt = await rawLogin(g1Email, "");
+            const emptyUnknown = await rawLogin(`zzpb-unknown2-${p1bTag}@test.local`, "");
+            check("p1c-live", "an empty password is refused exactly like an unknown account", emptyAttempt.status === emptyUnknown.status && String(emptyAttempt.body?.error || "") === String(emptyUnknown.body?.error || ""), `got ${emptyAttempt.status} vs ${emptyUnknown.status}`);
+            // The same guardian CAN sign in with the linked student's QR slip.
+            const s1full = s1.body?.data || {};
+            const g1qr = await qrCheck(s1full.qrToken, s1full.qrPin);
+            check("p1c-live", "the same guardian signs in with the QR slip token+PIN", g1qr.status === 200 && /ss_token=/.test(g1qr.cookie), `got ${g1qr.status}`);
+            // Slip re-issue (new PIN) from the student page still works.
+            const reissue = await fetch(`${BASE}/api/students/${s1Id}`, {
+              method: "PATCH",
+              redirect: "manual",
+              headers: { "content-type": "application/json", cookie: admin.cookie },
+              body: JSON.stringify({ qrPin: "7701" }),
+            });
+            check("p1c-live", "an admin can re-issue the slip (new PIN)", reissue.status === 200, `got ${reissue.status}`);
+            const stalePin = await qrCheck(s1full.qrToken, s1full.qrPin);
+            check("p1c-live", "the OLD pin stops working after a re-issue", stalePin.status === 401, `got ${stalePin.status}`);
+            const freshPin = await qrCheck(s1full.qrToken, "7701");
+            check("p1c-live", "the NEW pin signs the guardian in", freshPin.status === 200 && /ss_token=/.test(freshPin.cookie), `got ${freshPin.status}`);
+
+            // Path 2: the desk intake (no password field anywhere).
+            const g2Email = `zzpc-g2-${p1bTag}@test.local`;
+            const intake = await post("/api/admissions/intake", admin.cookie, {
+              student: { name: `ZZ PC S2 ${p1bTag}`, classId: p1cClass.id },
+              guardian: { name: "ZZ PC G2", phone: `0179${p1bTag.slice(-7)}`, email: g2Email, createLogin: true },
+              fees: { admissionFee: 0, monthlyFee: 0, createMonthly: false },
+              payment: { collect: false },
+              kit: {},
+            });
+            check("p1c-live", "the desk intake admits without a guardian password", intake.status === 201 && !!intake.body?.data?.studentId, `got ${intake.status} ${JSON.stringify(intake.body?.error || "")}`);
+            if (intake.body?.data?.studentId) p1cStudents.push(intake.body.data.studentId);
+            if (intake.body?.data?.admissionId) p1cAdmissions.push(intake.body.data.admissionId);
+            if (g2Email && intake.body?.data?.guardian?.linked) p1cUsers.push(userDoc(g2Email));
+            const g2try = await rawLogin(g2Email, "Guardian@123");
+            check("p1c-live", "an intake guardian cannot sign in with the old default", g2try.status === 401 && sameShape(g2try), `got ${g2try.status}`);
+            const g2qr = await qrCheck(intake.body?.data?.qrToken, intake.body?.data?.qrPin);
+            check("p1c-live", "an intake guardian signs in with the admission QR slip", g2qr.status === 200 && /ss_token=/.test(g2qr.cookie), `got ${g2qr.status}`);
+
+            // Path 3: the legacy CSV import (keeps guardianLoginsCreated, drops the password).
+            const legacy = await post("/api/import/students", admin.cookie, {
+              dryRun: false,
+              csv: [
+                "Admission No,Name,Class,Roll,Guardian Name,Guardian Email,Guardian Phone,Guardian Relation,Create Guardian Login",
+                `ZZ-PC-L1-${p1bTag},ZZ PC Legacy ${p1bTag},${p1cClassName},1,ZZ PC GL ${p1bTag},zzpc-gl-${p1bTag}@test.local,+880170000001,FATHER,yes`,
+              ].join("\n"),
+            });
+            check("p1c-live", "the legacy import still creates the student + guardian login", legacy.status === 200 && legacy.body?.data?.created === 1 && legacy.body?.data?.guardianLoginsCreated === 1, `got ${legacy.status} ${JSON.stringify(legacy.body?.data)}`);
+            check("p1c-live", "the legacy import response carries NO password", !("defaultGuardianPassword" in (legacy.body?.data || {})), JSON.stringify(Object.keys(legacy.body?.data || {})));
+            const glEmail = `zzpc-gl-${p1bTag}@test.local`;
+            p1cUsers.push(userDoc(glEmail));
+            const glTry = await rawLogin(glEmail, "Guardian@123");
+            check("p1c-live", "a legacy-import guardian cannot sign in with the old default", glTry.status === 401 && sameShape(glTry), `got ${glTry.status}`);
+            const glStudent = ((await db.collection("students").where("schoolId", "==", schoolId).get()).docs.map((d) => ({ id: d.id, ...d.data() }))).find((s) => String(s.admissionNo || "") === `ZZ-PC-L1-${p1bTag}`);
+            if (glStudent?.id) p1cStudents.push(glStudent.id);
+            const glQr = glStudent ? await qrCheck(glStudent.qrToken, glStudent.qrPin) : { status: 0, cookie: "" };
+            check("p1c-live", "a legacy-import guardian signs in with the QR slip", glQr.status === 200 && /ss_token=/.test(glQr.cookie || ""), `got ${glQr.status}`);
+          }
+          // Best-effort cleanup of everything path 1–3 created.
+          await Promise.all(p1cFees.map((id) => db.collection("fees").doc(id).delete().catch(() => null)));
+          for (const id of p1cStudents) {
+            await db.collection("fees").where("studentId", "==", id).get().then((s) => Promise.all(s.docs.map((d) => d.ref.delete()))).catch(() => null);
+            await db.collection("payments").where("studentId", "==", id).get().then((s) => Promise.all(s.docs.map((d) => d.ref.delete()))).catch(() => null);
+            await db.collection("ledger").where("studentId", "==", id).get().then((s) => Promise.all(s.docs.map((d) => d.ref.delete()))).catch(() => null);
+            await db.collection("students").doc(id).delete().catch(() => null);
+          }
+          await Promise.all(p1cAdmissions.map((id) => db.collection("admissions").doc(id).delete().catch(() => null)));
+          await Promise.all(p1cUsers.map((id) => db.collection("users").doc(id).delete().catch(() => null)));
         } finally {
           const teacherUserIds = (await db.collection("users").where("email", "in", p1bTeacherEmails.length ? p1bTeacherEmails : ["zzpb-none@test.local"]).get()).docs.map((d) => d.id);
           for (const id of teacherUserIds) {

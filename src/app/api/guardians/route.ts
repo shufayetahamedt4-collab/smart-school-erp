@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
+import { unusableGuardianPassword } from "@/lib/import/write";
 import { getSession, audit, publicUser } from "@/lib/auth";
 import { isBranchScoped } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
@@ -44,7 +45,11 @@ export async function POST(req: NextRequest) {
   const locked = await writeGuard(schoolId);
   if (locked) return locked;
   const body = await req.json().catch(() => null);
-  const { email, name, password, studentId } = body || {};
+  // pilot P1c — a guardian's credential is the QR slip (token + PIN), never a
+  // password. Any `password` the caller sends is ignored: the account is
+  // created with a random, unusable hash so no shared or guessable password
+  // can ever sign it in. The school hands over (or re-issues) the QR slip.
+  const { email, name, studentId } = body || {};
   if (!email || !name || !studentId) {
     return NextResponse.json({ error: "Email, name and student are required." }, { status: 400 });
   }
@@ -69,7 +74,7 @@ export async function POST(req: NextRequest) {
         name: String(name),
         role: "GUARDIAN",
         schoolId,
-        passwordHash: bcrypt.hashSync(password || "Guardian@123", 10),
+        passwordHash: bcrypt.hashSync(unusableGuardianPassword(), 10),
       },
     });
     await tx.student.update({ where: { id: studentId }, data: { guardianUserId: u.id, guardianEmail: String(email).toLowerCase(), guardianName: String(name) } });

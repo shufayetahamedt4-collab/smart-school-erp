@@ -157,11 +157,12 @@ export async function POST(req: NextRequest) {
         ...(college?.programId ? { programId: college.programId } : {}),
         ...(college?.termNumber ? { termNumber: college.termNumber } : {}),
       },
+      // pilot P1c — a guardian password is never accepted: the kernel mints
+      // an unusable one and the guardian signs in with the QR slip.
       guardian: {
         create: !!body.createGuardian,
         email: body.guardianEmail,
         name: body.guardianName,
-        password: body.guardianPassword,
       },
       fees: { ensureDefaults: true, createDefaults: body.createFees !== false, includeBranch: true, branchId },
     });
