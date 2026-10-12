@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { SECTOR_LIST, resolveSector, requestHost, sectorHostFor } from "@/lib/sectors";
 import LoginForm from "@/components/LoginForm";
 import PortalChooser from "@/components/PortalChooser";
+import { demoAccountsFor } from "@/lib/demo-accounts";
 
 /**
  * One route, one app per host.
@@ -26,6 +27,10 @@ export default async function LoginPage() {
   const h = await headers();
   const host = requestHost(h);
   const sector = resolveSector(host);
+  // pilot-fix-1 item 4 — the demo quick-fill accounts are resolved HERE, on the
+  // server, and are empty on a deployment. They are never a client constant, so a
+  // production bundle carries neither the credentials nor the card.
+  const demoAccounts = demoAccountsFor(process.env);
   // Scheme for the app links shown on the hub (behind a proxy in production).
   const protocol = (h.get("x-forwarded-proto") || (process.env.NODE_ENV === "production" ? "https" : "http"))
     .split(",")[0]
@@ -33,16 +38,24 @@ export default async function LoginPage() {
 
   if (!sector) {
     const routed = SECTOR_LIST.some((s) => sectorHostFor(host, s.key));
-    return routed ? <PortalChooser host={host} protocol={protocol} /> : <SignIn hub />;
+    return routed ? <PortalChooser host={host} protocol={protocol} /> : <SignIn hub demoAccounts={demoAccounts} />;
   }
 
-  return <SignIn sector={sector.key} />;
+  return <SignIn sector={sector.key} demoAccounts={demoAccounts} />;
 }
 
-function SignIn({ sector, hub }: { sector?: Parameters<typeof LoginForm>[0]["sector"]; hub?: boolean }) {
+function SignIn({
+  sector,
+  hub,
+  demoAccounts,
+}: {
+  sector?: Parameters<typeof LoginForm>[0]["sector"];
+  hub?: boolean;
+  demoAccounts: ReturnType<typeof demoAccountsFor>;
+}) {
   return (
     <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-white" />}>
-      <LoginForm sector={sector} hub={hub} />
+      <LoginForm sector={sector} hub={hub} demoAccounts={demoAccounts} />
     </Suspense>
   );
 }

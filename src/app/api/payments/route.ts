@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, audit, guardianChildIds } from "@/lib/auth";
 import { can, PermissionError } from "@/lib/permissions";
-import { createPaymentIntent, markFailed, markConfirmed } from "@/lib/payments";
+import {
+  createPaymentIntent,
+  markFailed,
+  markConfirmed,
+  liveGatewayMethods,
+  isSelfServiceRole,
+  ONLINE_PAYMENT_UNAVAILABLE,
+} from "@/lib/payments";
 import type { PaymentMethod } from "@/lib/db";
 import { money } from "@/lib/utils";
 
@@ -80,6 +87,24 @@ export async function POST(req: NextRequest) {
     }
   } else if (!can(session.role, "feePayment", "full")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // pilot-fix-1 item 3 — a family cannot record money through the app.
+  //
+  // The old path let a guardian "pay" with CASH, which `CashProvider.createIntent`
+  // confirms IMMEDIATELY: the child's fee went to PAID with no money handled, no
+  // gateway and nothing for the office to reconcile. A gateway method was no
+  // better — the stub handed out a /pay/mock URL that `mock-complete` finished.
+  // Pilot schools take fees at the office, so a GUARDIAN or STUDENT session is
+  // refused here, before any intent is written. Staff paths are untouched: an
+  // ACCOUNTANT or SCHOOL_ADMIN still records and reconciles intents exactly as
+  // before. If a real gateway is ever configured (`live: true`), the guard opens
+  // for that gateway method only.
+  if (isSelfServiceRole(session.role)) {
+    const live = liveGatewayMethods();
+    if (live.length === 0 || !live.includes(method as PaymentMethod)) {
+      return NextResponse.json({ error: ONLINE_PAYMENT_UNAVAILABLE }, { status: 403 });
+    }
   }
 
   // A guardian may part-pay (৳200 against a ৳500 fee) but never over-pay: this

@@ -2,10 +2,20 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 import { SECTOR_LIST, resolveSector, sectorForRole, sectorHostFor, stripPort, isSharedPath, requestHost, type Sector } from "@/lib/sectors";
+import { effectiveSessionSecret } from "@/lib/pilot-guards";
 
 const SESSION_COOKIE = "ss_token";
 
-const secret = () => new TextEncoder().encode(process.env.JWT_SECRET || "smart-school-erp-secret-change-me-in-production");
+/**
+ * The verification key, or null when this deployment has no `JWT_SECRET`
+ * (pilot-fix-1 item 1). `null` means every cookie is treated as anonymous — the
+ * middleware must never accept a session signed with the development secret on a
+ * deployment that has no secret of its own.
+ */
+const secretKey = (): Uint8Array | null => {
+  const value = effectiveSessionSecret(process.env);
+  return value ? new TextEncoder().encode(value) : null;
+};
 
 /**
  * Legacy (hub) role guards. These apply on the bare/unknown host, which stays
@@ -15,7 +25,16 @@ const secret = () => new TextEncoder().encode(process.env.JWT_SECRET || "smart-s
  */
 const HUB_GUARDS: { prefix: string; roles: string[] }[] = [
   { prefix: "/admin", roles: ["SUPER_ADMIN"] },
-  { prefix: "/dashboard", roles: ["SCHOOL_ADMIN", "ACCOUNTANT", "LIBRARIAN", "FRONT_DESK"] },
+  // pilot-fix-1 item 6: BRANCH_ADMIN and REGISTRAR were missing from both this
+  // list and HUB_HOME, so on the bare/unknown host (the ONLY host production
+  // serves today) they signed in successfully and were then bounced from
+  // /dashboard straight back to /login. They are school-app roles — the sector
+  // registry (`SECTORS.school.roles`) has always carried them — so the hub list
+  // must carry them too.
+  {
+    prefix: "/dashboard",
+    roles: ["SCHOOL_ADMIN", "BRANCH_ADMIN", "REGISTRAR", "ACCOUNTANT", "LIBRARIAN", "FRONT_DESK"],
+  },
   { prefix: "/teacher", roles: ["TEACHER"] },
   { prefix: "/parent", roles: ["GUARDIAN"] },
   { prefix: "/print", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "ACCOUNTANT", "LIBRARIAN", "FRONT_DESK", "TEACHER", "GUARDIAN", "STUDENT"] },
@@ -27,6 +46,12 @@ const HUB_HOME: Record<string, string> = {
   ACCOUNTANT: "/dashboard/fees",
   LIBRARIAN: "/dashboard/library",
   FRONT_DESK: "/dashboard/admissions",
+  // pilot-fix-1 item 6 — without these two the fallback `HUB_HOME[role] || "/login"`
+  // sent a branch admin or a registrar back to the sign-in screen they had just
+  // left, even on a host where every other holder of a school-app role lands on
+  // /dashboard.
+  BRANCH_ADMIN: "/dashboard",
+  REGISTRAR: "/dashboard",
   TEACHER: "/teacher",
   GUARDIAN: "/parent",
 };
@@ -62,11 +87,16 @@ export async function middleware(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   let role: string | null = null;
   if (token) {
-    try {
-      role = ((await jwtVerify(token, secret())).payload.role as string) || null;
-    } catch {
-      // invalid/expired token → treated as anonymous
+    const key = secretKey();
+    if (key) {
+      try {
+        role = ((await jwtVerify(token, key)).payload.role as string) || null;
+      } catch {
+        // invalid/expired token → treated as anonymous
+      }
     }
+    // No key (a deployment with no JWT_SECRET) ⇒ anonymous, whatever the cookie
+    // claims. The sign-in route answers 503 and says what is missing.
   }
 
   const sector = resolveSector(host);

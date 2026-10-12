@@ -8,6 +8,7 @@ import { needsTwoFactor, verifyChallenge, twoFactorStatus } from "@/lib/twoFacto
 import { sendOtpEmail } from "@/lib/notify";
 import { resolveSector, sectorForRole, requestHost } from "@/lib/sectors";
 import { firebaseConfigProblem } from "@/lib/firebase";
+import { SESSION_SECRET_MISSING, sessionSecretFatal } from "@/lib/pilot-guards";
 
 /**
  * Each app only accepts the accounts that belong to it. The check is skipped on
@@ -37,6 +38,15 @@ export async function POST(req: NextRequest) {
   if (configProblem) {
     console.error(`[auth] refusing to sign in: ${configProblem}`);
     return NextResponse.json({ error: configProblem }, { status: 503 });
+  }
+  // pilot-fix-1 item 1 — a deployment with no JWT_SECRET can neither sign nor
+  // verify a session, so it must refuse the sign-in with a clear, actionable
+  // answer instead of minting a cookie everyone could forge. Checked BEFORE the
+  // password so no account is verified against a deployment that cannot hold a
+  // session. `/api/health` reports the same problem.
+  if (sessionSecretFatal(process.env)) {
+    console.error(`[auth] refusing to sign in: ${SESSION_SECRET_MISSING}`);
+    return NextResponse.json({ error: SESSION_SECRET_MISSING }, { status: 503 });
   }
   try {
     return await signIn(req);

@@ -98,6 +98,31 @@ export function gatewayMethods(): PaymentMethod[] {
   return ["BKASH", "NAGAD", "ROCKET", "CARD"];
 }
 
+/**
+ * The gateway methods that can really complete a payment on THIS deployment.
+ *
+ * Every gateway provider is a stub with `live: false` until merchant
+ * credentials exist, so this returns `[]` today — which is exactly what makes
+ * "online payment is unavailable" a fact rather than a policy.
+ */
+export function liveGatewayMethods(): PaymentMethod[] {
+  return gatewayMethods().filter((method) => PROVIDERS[method].live);
+}
+
+/**
+ * The one message a family sees when online payment is not available
+ * (pilot-fix-1 item 3). Schools in the pilot take fees at the office, so a
+ * guardian or student session can neither create nor complete a payment intent
+ * that would record money — see `POST /api/payments` and `/api/payments/mock-complete`.
+ */
+export const ONLINE_PAYMENT_UNAVAILABLE =
+  "Online payment is not available. Please pay at the school office.";
+
+/** True when this role must not record a payment through the app on its own. */
+export function isSelfServiceRole(role: string | null | undefined): boolean {
+  return role === "GUARDIAN" || role === "STUDENT";
+}
+
 export async function createPaymentIntent(input: CreateIntentInput, actorId?: string | null) {
   const intentId = `pi_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const intent = await prisma.paymentIntent.create({

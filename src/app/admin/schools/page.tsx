@@ -43,7 +43,10 @@ export default function SchoolsPage() {
     logoUrl: "",
     adminName: "",
     adminEmail: "",
-    adminPassword: "School@123",
+    // pilot-fix-1 item 5 — no built-in default. The operator types the first
+    // admin's password, and it must be at least 8 characters (`canAdvance`), so a
+    // new tenant can never start life with a guessable password.
+    adminPassword: "",
     monthlyFee: "1500",
     admissionFee: "5000",
     planId: "",
@@ -79,7 +82,10 @@ export default function SchoolsPage() {
 
   const canAdvance = () => {
     if (step === 0) return Boolean(form.name.trim() && form.address.trim());
-    if (step === 1) return Boolean(form.adminName.trim() && form.adminEmail.trim() && form.adminPassword.trim());
+    // The admin's password is the tenant's first credential: 8+ characters, or the
+    // operator cannot move on (the server enforces the same rule on a deployment).
+    if (step === 1)
+      return Boolean(form.adminName.trim() && form.adminEmail.trim() && form.adminPassword.trim().length >= 8);
     if (step === 2) return Boolean(form.planId);
     return true;
   };
@@ -111,7 +117,7 @@ export default function SchoolsPage() {
         logoUrl: "",
         adminName: "",
         adminEmail: "",
-        adminPassword: "School@123",
+        adminPassword: "",
         monthlyFee: "1500",
         admissionFee: "5000",
         planId: plans[0]?.id || "",
@@ -237,7 +243,14 @@ export default function SchoolsPage() {
             <div className="space-y-4">
               <Field label="Admin name"><TextInput value={form.adminName} onChange={(e) => setForm({ ...form, adminName: e.target.value })} placeholder="School Administrator" /></Field>
               <Field label="Admin email"><TextInput type="email" value={form.adminEmail} onChange={(e) => setForm({ ...form, adminEmail: e.target.value })} placeholder="admin@school.com" /></Field>
-              <Field label="Admin password"><TextInput value={form.adminPassword} onChange={(e) => setForm({ ...form, adminPassword: e.target.value })} /></Field>
+              <Field label="Admin password" hint="At least 8 characters. This is the school's first sign-in — give it to the admin over a safe channel.">
+                <TextInput
+                  type="password"
+                  minLength={8}
+                  value={form.adminPassword}
+                  onChange={(e) => setForm({ ...form, adminPassword: e.target.value })}
+                />
+              </Field>
             </div>
           )}
 
@@ -303,7 +316,13 @@ export default function SchoolsPage() {
                   Next
                 </button>
               ) : (
-                <button className="btn btn-primary" onClick={create} disabled={!form.name || !form.adminEmail || !form.adminPassword || !form.planId}>Create school</button>
+                <button
+                  className="btn btn-primary"
+                  onClick={create}
+                  disabled={!form.name || !form.adminEmail || form.adminPassword.trim().length < 8 || !form.planId}
+                >
+                  Create school
+                </button>
               )}
             </div>
           </div>

@@ -137,9 +137,16 @@ const childOrder = (s) => {
 ownChildren.sort((a, b) => childOrder(a)[0] - childOrder(b)[0] || (childOrder(a)[1] < childOrder(b)[1] ? -1 : 1));
 const defaultChild = ownChildren[0];
 // A student of the same school that is NOT this family's — the "stranger".
-const foreignChild = allStudents.find(
-  (s) => s.guardianUserId !== guardianUser.id && s.familyId !== defaultChild.familyId && s.id !== defaultChild.id
-);
+// Two rows are the same family when they share an explicit familyId, or when
+// they are linked to the same guardian login. (The seed sets no familyId on
+// anyone, so comparing familyId alone — `s.familyId !== defaultChild.familyId`
+// — is false for every pair on a clean database and this script could never
+// start except on leftovers. pilot-fix-1: fixed as part of re-scoping this
+// verifier, which now also proves the office-only payment refusal.)
+const sameFamily = (a, b) =>
+  (a.familyId && b.familyId && a.familyId === b.familyId) ||
+  (a.guardianUserId && a.guardianUserId === b.guardianUserId);
+const foreignChild = allStudents.find((s) => s.id !== defaultChild.id && !sameFamily(s, defaultChild));
 if (!foreignChild) {
   console.error("No foreign demo student available for the access checks.");
   process.exit(1);
@@ -358,16 +365,30 @@ try {
     dueDate: new Date(),
     createdAt: new Date(),
   });
+  // pilot-fix-1 item 3 — a family can no longer start a payment in the app.
+  //
+  // Pilot schools take fees at the office, so `POST /api/payments` refuses a
+  // GUARDIAN session outright: `verify-guardian-child` used to prove the sibling
+  // link through THIS route ("the second child is not treated as a stranger"), and
+  // the route is now closed to families for the first child and the sibling alike.
+  // The sibling link is still proved on this screen and elsewhere — the fee list
+  // spans both children (above), and the student page, certificate and leave
+  // request checks all name the sibling and succeed. What this check asserts now
+  // is the refusal itself, and that it created nothing.
   const ownPay = await req(HOSTS.parents, "/api/payments", {
     cookie: guardianCookie,
     method: "POST",
     body: JSON.stringify({ feeId: siblingFeeId, method: "BKASH", amount: 100 }),
   });
-  if (ownPay.data?.id) createdIntentIds.push(ownPay.data.id);
   check(
-    "guardian can start a payment on a family-linked sibling's fee",
-    ownPay.status === 201 && ownPay.data?.studentId === siblingId,
+    "guardian cannot start a payment on a family-linked sibling's fee (pay at the office)",
+    ownPay.status === 403 && /Online payment is not available/.test(String(ownPay.error || "")),
     `HTTP ${ownPay.status} ${ownPay.error || ""}`
+  );
+  check(
+    "the refused sibling payment created no payment intent",
+    !ownPay.data?.id,
+    JSON.stringify(ownPay.data || {})
   );
 
   const foreignPay = await req(HOSTS.parents, "/api/payments", {

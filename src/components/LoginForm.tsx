@@ -23,6 +23,7 @@ import { api, clearApiCache, prefetch } from "@/lib/client";
 import { Spinner } from "@/components/ui";
 import { SECTORS, sectorForRole, type SectorKey } from "@/lib/sectors";
 import { warmListForSector } from "@/lib/route-data";
+import type { DemoAccount } from "@/lib/demo-accounts";
 
 /** Lucide marks live here (not in the registry) so middleware stays icon-free. */
 const SECTOR_ICON: Record<SectorKey, LucideIcon> = {
@@ -32,13 +33,15 @@ const SECTOR_ICON: Record<SectorKey, LucideIcon> = {
   guardian: HeartHandshake,
 };
 
-/** Demo quick-fill accounts, each belonging to exactly one app. */
-const DEMO: { sector: SectorKey; role: string; id: string; pw: string }[] = [
-  { sector: "super", role: "Super Admin", id: "admin@smartschool.com", pw: "Admin@123" },
-  { sector: "school", role: "School Admin", id: "principal@sunrise.edu", pw: "School@123" },
-  { sector: "teacher", role: "Teacher", id: "teacher@sunrise.edu", pw: "Teacher@123" },
-  { sector: "guardian", role: "Guardian", id: "guardian1@demo.com", pw: "Guardian@123" },
-];
+/**
+ * The demo quick-fill accounts, each belonging to exactly one app.
+ *
+ * pilot-fix-1 item 4 — the list is a PROP, not a constant. It comes from the
+ * server (`src/lib/demo-accounts.ts` via `src/app/login/page.tsx`), which passes
+ * an EMPTY list on a deployment: the seeded logins belong to the emulator, and
+ * shipping them here put both the credentials and the "click to fill" card in
+ * every production bundle. Nothing in this file names an account.
+ */
 
 /** What the platform-shaped sign-in screen says when there is one address. */
 const HUB_BULLETS = [
@@ -78,7 +81,15 @@ function clearSessionCaches(): void {
  * apps have no separate hostnames — a platform URL, a bare IP, a `<site>.netlify.app`
  * — since those hosts serve every app from one address anyway.
  */
-export default function LoginForm({ sector: sectorKey, hub = false }: { sector?: SectorKey; hub?: boolean }) {
+export default function LoginForm({
+  sector: sectorKey,
+  hub = false,
+  demoAccounts = [],
+}: {
+  sector?: SectorKey;
+  hub?: boolean;
+  demoAccounts?: DemoAccount[];
+}) {
   const section = sectorKey ? SECTORS[sectorKey] : null;
   const Icon = sectorKey ? SECTOR_ICON[sectorKey] : GraduationCap;
   // One set of names for both shapes, so nothing below has to branch.
@@ -169,7 +180,7 @@ export default function LoginForm({ sector: sectorKey, hub = false }: { sector?:
     }
   };
 
-  const demos = hub ? DEMO : DEMO.filter((d) => d.sector === sectorKey);
+  const demos = demoAccounts.filter((d) => hub || d.sector === sectorKey);
   const qrEntry = hub || sectorKey === "guardian";
 
   return (

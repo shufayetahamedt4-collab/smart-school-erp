@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import type { Role } from "@/lib/db";
 import { MODE_COOKIE, allowedModes, collegeGateDecision, isMode, normalizeInstitutionType, type Mode } from "./institution";
+import { SESSION_SECRET_MISSING, effectiveSessionSecret } from "./pilot-guards";
 
 export const SESSION_COOKIE = "ss_token";
 
@@ -20,19 +21,38 @@ export interface SessionUser {
   branchId?: string | null;
 }
 
-const secret = () => new TextEncoder().encode(process.env.JWT_SECRET || "smart-school-erp-secret-change-me-in-production");
+/**
+ * The signing key, or **null when this deployment has none**.
+ *
+ * pilot-fix-1 item 1: a deployment with no `JWT_SECRET` must not sign or accept
+ * a session with the built-in development secret — every such cookie would be
+ * forgeable by anyone who has read this repository. `null` is that fail-closed
+ * answer; outside production the development secret is still used, so the
+ * emulator harness and the seeded suites are unaffected.
+ */
+const secretKey = (): Uint8Array | null => {
+  const value = effectiveSessionSecret(process.env);
+  return value ? new TextEncoder().encode(value) : null;
+};
 
 export async function signSession(user: SessionUser, days = 7): Promise<string> {
+  const key = secretKey();
+  // Refuse to mint a session this deployment could not verify.
+  if (!key) throw new Error(SESSION_SECRET_MISSING);
   return new SignJWT({ ...user })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${days}d`)
-    .sign(secret());
+    .sign(key);
 }
 
 export async function verifySession(token: string): Promise<SessionUser | null> {
+  const key = secretKey();
+  // No key on a deployment ⇒ every cookie is unauthenticated, never trusted and
+  // never verified against the development secret.
+  if (!key) return null;
   try {
-    const { payload } = await jwtVerify(token, secret());
+    const { payload } = await jwtVerify(token, key);
     return payload as unknown as SessionUser;
   } catch {
     return null;

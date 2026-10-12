@@ -7,6 +7,7 @@ import { audit } from "@/lib/auth";
 import { notifySuperAdmins } from "@/lib/notify";
 import { isInstitutionType, normalizeInstitutionType } from "@/lib/institution";
 import { wizardAcceptsFees } from "@/lib/onboarding-seed";
+import { adminPasswordProblem } from "@/lib/pilot-guards";
 
 function addDays(date: Date, days: number) {
   const copy = new Date(date);
@@ -43,6 +44,13 @@ export async function POST(req: NextRequest) {
   if (!name || !adminEmail || !password) {
     return NextResponse.json({ error: "School name, admin email and password are required." }, { status: 400 });
   }
+
+  // pilot-fix-1 item 5 — password STRENGTH. The password is already required
+  // above; on a deployment it must also be long enough to be worth having, so the
+  // Super Admin console can never mint a tenant admin whose password is a word.
+  // Outside production there is no rule, so the harnesses are unchanged.
+  const passwordProblem = adminPasswordProblem(process.env, password);
+  if (passwordProblem) return NextResponse.json({ error: passwordProblem }, { status: 400 });
 
   // Tenant shape (docs/COLLEGE-DECISIONS.md). Absent ⇒ SCHOOL; an explicit value
   // must be one of the three — a typo is a 400, never a silently-stored junk value.

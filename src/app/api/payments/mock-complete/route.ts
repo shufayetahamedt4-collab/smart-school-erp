@@ -2,20 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession, guardianChildIds } from "@/lib/auth";
 import { confirmPayment, refAlreadyProcessed } from "@/lib/ledger";
-import { markConfirmed } from "@/lib/payments";
+import { markConfirmed, liveGatewayMethods, isSelfServiceRole, ONLINE_PAYMENT_UNAVAILABLE } from "@/lib/payments";
+import { isProductionEnv } from "@/lib/pilot-guards";
 import type { PaymentMethod } from "@/lib/db";
 
 /**
  * Mock completion for gateway intents while merchant credentials are absent
- * (sandbox mode). ONLY available when PAYMENT_WEBHOOK_SECRET is unset —
- * production deployments set the secret and this route refuses to run.
+ * (sandbox mode).
+ *
+ * pilot-fix-1 item 2: DISABLED on a deployment unconditionally — a sandbox route
+ * that confirms real money must never be reachable in production, whatever the
+ * webhook secret happens to be. pilot-fix-1 item 3: a GUARDIAN or STUDENT
+ * session cannot complete one either (pilot schools take fees at the office),
+ * unless a real, live gateway is configured.
  */
 export async function POST(req: NextRequest) {
+  if (isProductionEnv(process.env)) {
+    return NextResponse.json({ error: "Disabled in production" }, { status: 403 });
+  }
   if (process.env.PAYMENT_WEBHOOK_SECRET) {
     return NextResponse.json({ error: "Disabled in production" }, { status: 403 });
   }
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // A family may not complete a payment that records money on its own.
+  if (isSelfServiceRole(session.role) && liveGatewayMethods().length === 0) {
+    return NextResponse.json({ error: ONLINE_PAYMENT_UNAVAILABLE }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => null);
   const intentId = String(body?.intentId || "");

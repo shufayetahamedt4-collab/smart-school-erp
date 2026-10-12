@@ -13,6 +13,7 @@ import {
 } from "@/lib/institution";
 import { type SeedCollege, defaultSeedFor, resolveCollegeSeed } from "@/lib/onboarding-seed";
 import { collegeProgressCounts, seedCollegeSkeleton } from "@/lib/college-skeleton";
+import { resolvedWizardAdminPassword } from "@/lib/pilot-guards";
 
 /**
  * PRD §3.3 — Self-serve onboarding wizard.
@@ -172,6 +173,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Admin email is required." }, { status: 400 });
   }
 
+  // pilot-fix-1 item 5 — the admin account's password.
+  //
+  // A deployment must be GIVEN one, and it must be at least 8 characters; there is
+  // no built-in fallback there. The wizard used to hash `body.admin.password ||
+  // "School@123"`, so a tenant created without a password had one anybody could
+  // guess. Decided BEFORE the transaction, like the college seed below, so a bad
+  // password is a clean 400 rather than a half-created tenant.
+  const adminPassword = resolvedWizardAdminPassword(process.env, body?.admin?.password);
+  if (!adminPassword.ok) return NextResponse.json({ error: adminPassword.error }, { status: 400 });
+
   // ---- unique slug --------------------------------------------------------
   let slug = slugify(name) || "school";
   let unique = slug;
@@ -246,7 +257,7 @@ export async function POST(req: NextRequest) {
         name: adminName || "School Administrator",
         role: "SCHOOL_ADMIN",
         schoolId: school.id,
-        passwordHash: bcrypt.hashSync(String(body?.admin?.password || "School@123"), 10),
+        passwordHash: bcrypt.hashSync(adminPassword.password, 10),
       },
     });
 
