@@ -48,6 +48,7 @@ import {
   countText,
   currencyOf,
   decideButtonLabel,
+  duesScopeText,
   dueStatusText,
   formatMinor,
   formatMoney,
@@ -70,9 +71,9 @@ import {
   rowsForTerm,
   saveButtonLabel,
   structureBlocked,
+  structureRowsText,
   structureTotalsText,
   tabFor,
-  termTotalText,
   unitLabel,
   writeControlsFor,
   type CollegeFeeTab,
@@ -755,7 +756,7 @@ function StructureTab({ controls }: { controls: ReturnType<typeof writeControlsF
         <CardHeader
           title="Term pricing"
           subtitle={programId ? "What this programme's term charges, head by head" : "Every priced row this college holds"}
-          action={<span className="text-xs text-slate-500">{termTotalText(rows, currency)}</span>}
+          action={<span className="text-xs text-slate-500">{structureRowsText(rows, currency)}</span>}
         />
         {rows.length === 0 ? (
           <EmptyState
@@ -1035,7 +1036,6 @@ function DuesTab({
   };
 
   const openCharges = useMemo(() => (student?.rows || []).filter((r) => Number(r.due) > 0), [student]);
-  const scopeTotals = chargeTotals(scope?.students || []);
   const selectedCharge = openCharges.find((c) => c.id === chargeId) || null;
 
   if (loading) return <LoadingScreen />;
@@ -1124,10 +1124,7 @@ function DuesTab({
       <Card>
         <CardHeader
           title="Dues"
-          subtitle={`${countText(scope?.totals?.students ?? 0, "student")} · ${countText(scopeTotals.count, "charge")} · ${formatMinor(
-            scopeTotals.billedMinor,
-            currency
-          )} billed · ${formatMinor(scopeTotals.paidMinor, currency)} paid · ${formatMinor(scopeTotals.dueMinor, currency)} due`}
+          subtitle={duesScopeText(scope?.students || [], currency)}
         />
         {(scope?.students || []).length === 0 ? (
           <EmptyState

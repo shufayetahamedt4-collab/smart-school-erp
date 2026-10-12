@@ -88,6 +88,9 @@ const view = await import(VIEW_URL.href);
 const access = await import(ACCESS_URL.href);
 const seed = await import(new URL("../src/lib/onboarding-seed.ts", import.meta.url).href);
 const nav = await import(NAV_URL.href);
+// The API's OWN dues arithmetic (`collegeDues`), so the 7d-fix checks feed the
+// page helper the payload the SERVER really serves — never a hand-made fixture.
+const feesLib = await import(FEES_LIB_URL.href);
 const {
   CURRENCY_SYMBOLS,
   COLLEGE_FEE_TABS,
@@ -111,6 +114,8 @@ const {
   countText,
   currencyOf,
   decideButtonLabel,
+  duesScopeText,
+  duesScopeTotals,
   dueMinorOf,
   dueStatusText,
   filterLedgerEntries,
@@ -138,6 +143,7 @@ const {
   rowsForTerm,
   saveButtonLabel,
   structureBlocked,
+  structureRowsText,
   structureTotalsText,
   sumMinor,
   tabFor,
@@ -539,6 +545,17 @@ console.log("\n7. the shared ledger: college money is TAGGED, and the two halves
   eq("a college row prints with paisa", collegeLedgerAmountText(collegePayment), "৳500.25");
   eq("a school row is left to the school formatter", collegeLedgerAmountText(schoolPayment), null);
   check("the note explains the badge", /College badge/.test(collegeLedgerNote()));
+  // 7d-fix: the note is printed right after the `College` badge, so it must not
+  // start with that same word — the DOM read "College College fee payments…".
+  check("the note does not repeat the badge word it follows", !/^\s*College\b/.test(collegeLedgerNote()), collegeLedgerNote());
+  // 7d-fix (confirmed in the DOM): with a college half present, the school card's
+  // bare "No payments yet" appeared beside the college's own payment rows. It now
+  // names its half; a school-only ledger keeps the old text.
+  check(
+    "the school by-method empty text names its half only when a college half exists",
+    /collegeMoney\s*\?\s*"No school payments yet"\s*:\s*"No payments yet"/.test(ledgerCode),
+    "name the half conditionally"
+  );
   check("the filter offers both halves", LEDGER_MODE_OPTIONS.length === 3 && LEDGER_MODE_OPTIONS[2].value === "COLLEGE");
 
   // …and the ledger PAGE must use exactly these decisions.
@@ -650,6 +667,115 @@ console.log("\n10. the pages' own contract with the 7c API");
   check("the error copy is per screen", Object.keys(PAGE_ERRORS).length >= 10);
   check("the read-only note explains the role", /read-only/.test(readOnlyNote()));
   eq("the section label for an undefined amount", formatMoney(undefined), MONEY_UNKNOWN);
+}
+
+/* ----------------------- 11. the Dues header's totals (the 7d-fix, D-7-16) */
+
+console.log("\n11. the Dues header's figures = the rows beneath them = the API's own totals");
+{
+  // The REAL payload, built the way the route builds it: `collegeDues()` — the
+  // API's own function — over the very charge rows it serves, once per student
+  // and once for the whole scope. Nothing here is a hand-made fixture.
+  const chargeRows = [
+    // Student A — a tuition row discounted 10% (net amount kept, discount beside
+    // it) and part-paid, plus an unpaid lab row.
+    { id: "cf_a1", studentId: "s1", amount: 21600, discount: 2400, paidAmount: 10800 },
+    { id: "cf_a2", studentId: "s1", amount: 3500, discount: 0, paidAmount: 0 },
+    // Student B — fully paid.
+    { id: "cf_b1", studentId: "s2", amount: 10000, discount: 0, paidAmount: 10000 },
+  ];
+  const studentIds = [...new Set(chargeRows.map((r) => r.studentId))];
+  const servedStudents = studentIds.map((sid) => {
+    const own = feesLib.collegeDues(chargeRows.filter((r) => r.studentId === sid));
+    return { studentId: sid, count: own.count, billed: own.billed, discount: own.discount, paid: own.paid, due: own.due, status: own.status };
+  });
+  const servedTotals = { ...feesLib.collegeDues(chargeRows), students: servedStudents.length };
+
+  const header = duesScopeTotals(servedStudents);
+  const apiBilled = minorUnits(servedTotals.billed);
+  const apiWaived = minorUnits(servedTotals.discount);
+  const apiPaid = minorUnits(servedTotals.paid);
+  const apiDue = minorUnits(servedTotals.due);
+
+  eq("the header counts the students", header.students, servedStudents.length);
+  eq("the header counts the CHARGE ROWS, not the students", header.charges, chargeRows.length);
+  eq("billed = the API's billed", header.billedMinor, apiBilled);
+  eq("waived = the API's waivers", header.waivedMinor, apiWaived);
+  eq("paid = the API's paid", header.paidMinor, apiPaid);
+  eq("due = the API's due", header.dueMinor, apiDue);
+  eq("and billed really is the sum of the rows beneath", header.billedMinor, chargeRows.reduce((a, r) => a + minorUnits(r.amount), 0));
+  eq("…as is due", header.dueMinor, chargeRows.reduce((a, r) => a + Math.max(0, minorUnits(r.amount) - minorUnits(r.paidAmount)), 0));
+
+  // The previous bug in one line: a CHARGE-shaped helper reads `amount`/
+  // `paidAmount` off a SUMMARY row (which has `billed`/`paid`), so it printed
+  // ৳0.00 for every figure and counted students as charges.
+  const wrong = view.chargeTotals(servedStudents);
+  eq("the charge-shaped helper DOES collapse on summary rows (the 7d defect)", wrong.billedMinor, 0);
+  eq("…and would have counted students as charges", wrong.count, servedStudents.length);
+  eq("the fixed helper does not", header.billedMinor !== wrong.billedMinor, true);
+
+  const text = duesScopeText(servedStudents);
+  check(
+    "the header line names all six figures",
+    /student/.test(text) && /charge/.test(text) && /billed/.test(text) && /waived/.test(text) && /paid/.test(text) && /due/.test(text),
+    text
+  );
+  check("the header line prints the API's own money", new RegExp(formatMinor(apiBilled)).test(text) && new RegExp(formatMinor(apiDue)).test(text), text);
+  check("the header line is NOT the old zero row", !/0 student/.test(text) && !/৳0\.00 billed/.test(text), text);
+
+  // Edge: no students at all — zeros, never NaN, and still six figures.
+  const zero = duesScopeTotals([]);
+  eq("zero students: all six figures are zero", JSON.stringify(zero), JSON.stringify({ students: 0, charges: 0, billedMinor: 0, waivedMinor: 0, paidMinor: 0, dueMinor: 0 }));
+  eq("zero students: junk in is zero out, never NaN", JSON.stringify(duesScopeTotals(null)), JSON.stringify(duesScopeTotals(undefined)));
+  check("zero students still reads as a sentence", /0 students · 0 charges · ৳0\.00 billed/.test(duesScopeText([])), duesScopeText([]));
+
+  // Edge: a fully paid set — due is zero and no figure is dropped.
+  const paidRows = [{ amount: 5000, discount: 0, paidAmount: 5000 }];
+  const paidSummary = feesLib.collegeDues(paidRows);
+  const paidHeader = duesScopeTotals([{ count: paidSummary.count, billed: paidSummary.billed, discount: paidSummary.discount, paid: paidSummary.paid, due: paidSummary.due }]);
+  eq("a fully paid set owes nothing", paidHeader.dueMinor, 0);
+  eq("…and still shows what was billed", paidHeader.billedMinor, 500000);
+  eq("…and what was paid", paidHeader.paidMinor, 500000);
+  check("a fully paid header still prints a due figure", /৳0\.00 due/.test(duesScopeText([{ billed: paidSummary.billed, discount: 0, paid: paidSummary.paid, due: paidSummary.due }])));
+
+  // The page must USE the helper — and must not feed per-student rows to a
+  // charge-shaped total ever again.
+  check("the page prints the header through the one helper", /duesScopeText\(\s*scope\?\.students/.test(pageCode));
+  check("the page no longer runs a charge total over the per-student summaries", !/chargeTotals\(\s*scope\?\.students/.test(pageCode));
+}
+
+/* ---------------- 12. the Term pricing table shows PRICING money, not dues */
+
+console.log("\n12. the Fee structure tab prints a pricing total, never billed/paid/due");
+{
+  const priceRows = [{ amount: 24000, termNumber: 1 }, { amount: 3500, termNumber: 1 }];
+  const apiRowsTotal = priceRows.reduce((a, r) => a + minorUnits(r.amount), 0);
+  eq("the pricing total is the sum of the priced rows", structureRowsText(priceRows), `${formatMinor(apiRowsTotal)} in rows`);
+  check("it never claims a charge was billed, paid or due", !/billed|paid|due/.test(structureRowsText(priceRows)), structureRowsText(priceRows));
+  eq("an empty pricing table reads as zero, not NaN", structureRowsText([]), `${formatMinor(0)} in rows`);
+  eq("junk rows contribute nothing", structureRowsText([{ amount: null }, { amount: "x" }]), `${formatMinor(0)} in rows`);
+  // A structure row has an amount and no paidAmount: the charge-shaped total is
+  // exactly what printed a phantom "due" on a pure pricing table.
+  // Exactly the string the tab used to print under the pricing table: the full
+  // price shown as money "due" that nobody owes.
+  eq("the charge-shaped total is the phantom the tab used to print", termTotalText(priceRows), "৳27,500.00 billed · ৳0.00 paid · ৳27,500.00 due");
+  check("the page's Term pricing header uses the pricing helper", /structureRowsText\(\s*rows/.test(pageCode));
+  check("the page's Term pricing header no longer uses the dues helper", !/termTotalText\(\s*rows/.test(pageCode));
+}
+
+/* ------------------- 13. the wizard must not prefill the SUPER_ADMIN (7d-fix) */
+
+console.log("\n13. the Admin step does not prefill the platform SUPER_ADMIN's own identity");
+{
+  eq("a SUPER_ADMIN creating a tenant gets NO prefill", seed.wizardPrefillsAdmin("SUPER_ADMIN", false), false);
+  eq("a SCHOOL_ADMIN creating their own school keeps its prefill", seed.wizardPrefillsAdmin("SCHOOL_ADMIN", false), true);
+  eq("the check is case-proof", seed.wizardPrefillsAdmin("super_admin", false), false);
+  eq("extend mode is unchanged for a SUPER_ADMIN", seed.wizardPrefillsAdmin("SUPER_ADMIN", true), true);
+  eq("extend mode is unchanged for anyone", seed.wizardPrefillsAdmin("ACCOUNTANT", true), true);
+  eq("a missing role is not the platform operator", seed.wizardPrefillsAdmin(null, false), true);
+  check("the wizard page asks the rule", /wizardPrefillsAdmin\(me\.user\.role, false\)/.test(onboardingNoComments));
+  check("the wizard page no longer prefills the admin unconditionally", !/\} else if \(me\?\.user\) \{\s*setAdmin\(/.test(onboardingNoComments));
+  check("the rule lives with the wizard's other decisions", /export function wizardPrefillsAdmin\(/.test(readFileSync(new URL("../src/lib/onboarding-seed.ts", import.meta.url), "utf8")));
 }
 
 /* ---------------------------------------------------------------------- end */

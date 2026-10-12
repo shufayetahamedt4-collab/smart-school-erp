@@ -427,6 +427,82 @@ export function termTotalText(rows: readonly ChargeLike[] | null | undefined, cu
   )} due`;
 }
 
+/* ------------------------------------------------------- dues scope summary */
+
+/**
+ * One row of the Dues tab's per-student SUMMARY table — the shape
+ * `GET /api/college-fees/dues` serves in `students`. Note the money fields:
+ * `billed`, `discount`, `paid`, `due` (MAJOR units) beside `count` — NOT a
+ * charge's `amount`/`paidAmount`.
+ */
+export interface DuesStudentRowLike {
+  count?: unknown;
+  billed?: unknown;
+  discount?: unknown;
+  paid?: unknown;
+  due?: unknown;
+}
+
+/** The Dues header's six figures, all in integer minor units but for the counts. */
+export interface DuesScopeTotals {
+  students: number;
+  charges: number;
+  billedMinor: number;
+  waivedMinor: number;
+  paidMinor: number;
+  dueMinor: number;
+}
+
+/**
+ * The Dues header totals: the SUM of the per-student SUMMARY rows the table
+ * beneath renders.
+ *
+ * A summary row carries `count`/`billed`/`discount`/`paid`/`due` in MAJOR units —
+ * it is NOT a charge, so it has no `amount`/`paidAmount`. Running a CHARGE-shaped
+ * helper (`chargeTotals`) over these rows is exactly the 7d defect the header
+ * shipped with: the helper read charge-shaped keys off rows that never had them,
+ * so every money figure collapsed to ৳0.00 and `count` counted STUDENTS, printing
+ * `2 students · 2 charges · ৳0.00 billed · ৳0.00 paid · ৳0.00 due` beside a table
+ * of real money.
+ *
+ * The API's own `totals` object is built by `collegeDues()` over the same charge
+ * rows these summaries come from, so this sum and the served totals agree — the
+ * offline verifier holds this helper to the API's REAL payload (not a fixture)
+ * and to the rows the table prints.
+ */
+export function duesScopeTotals(students: readonly DuesStudentRowLike[] | null | undefined): DuesScopeTotals {
+  const list = Array.isArray(students) ? students : [];
+  let charges = 0;
+  let billedMinor = 0;
+  let waivedMinor = 0;
+  let paidMinor = 0;
+  let dueMinor = 0;
+  for (const s of list) {
+    const count = Number(s?.count);
+    if (Number.isFinite(count)) charges += count;
+    billedMinor += minorUnits(s?.billed) ?? 0;
+    waivedMinor += minorUnits(s?.discount) ?? 0;
+    paidMinor += minorUnits(s?.paid) ?? 0;
+    dueMinor += minorUnits(s?.due) ?? 0;
+  }
+  return { students: list.length, charges, billedMinor, waivedMinor, paidMinor, dueMinor };
+}
+
+/**
+ * The Dues header line: `N students · M charges · X billed · Y waived · Z paid ·
+ * W due` — the six figures the table below and the API's `totals` agree on.
+ */
+export function duesScopeText(students: readonly DuesStudentRowLike[] | null | undefined, currency: unknown = "BDT"): string {
+  const t = duesScopeTotals(students);
+  return `${countText(t.students, "student")} · ${countText(t.charges, "charge")} · ${formatMinor(
+    t.billedMinor,
+    currency
+  )} billed · ${formatMinor(t.waivedMinor, currency)} waived · ${formatMinor(t.paidMinor, currency)} paid · ${formatMinor(
+    t.dueMinor,
+    currency
+  )} due`;
+}
+
 /* ------------------------------------------------------------ structure rows */
 
 export interface StructureRowLike {
@@ -467,6 +543,19 @@ export function structureTotalsText(
 ): string {
   const rowsMinor = sumMinor((Array.isArray(rows) ? rows : []).map((r) => rowAmountMinor(r)));
   return `${formatMinor(rowsMinor, currency)} in rows · ${formatMoney(billTotalMajor, currency)} once cadences bill`;
+}
+
+/**
+ * The Term pricing TABLE's own total: what its PRICED rows add up to.
+ *
+ * A structure row is a price, not a charge: it has an `amount` and no
+ * `paidAmount`, so a charge-shaped total (`termTotalText`) printed
+ * `৳X billed · ৳0.00 paid · ৳X due` under a pure pricing table — "due" money that
+ * nobody owes. The pricing table shows a pricing figure.
+ */
+export function structureRowsText(rows: readonly StructureRowLike[] | null | undefined, currency: unknown = "BDT"): string {
+  const rowsMinor = sumMinor((Array.isArray(rows) ? rows : []).map((r) => rowAmountMinor(r)));
+  return `${formatMinor(rowsMinor, currency)} in rows`;
 }
 
 /** A structure row's shape in words, e.g. `per student · flat`. */
@@ -816,7 +905,10 @@ export function hasCollegeMoney(entries: readonly { feeId?: unknown; meta?: unkn
 
 /** A BOTH/COLLEGE tenant's own ledger note, so a reader knows what the badge means. */
 export function collegeLedgerNote(): string {
-  return "College fee payments and waivers post to this same ledger. They carry a College badge, their totals are kept apart from the school's, and no figure on this page adds the two together.";
+  // The line sits DIRECTLY after the `College` badge on the ledger page, so it
+  // must not open with the same word again: "College" + "College fee payments…"
+  // reads as "College College fee payments…" (the 7d-screens observation, 7d-fix).
+  return "Fee payments and waivers post to this same ledger. They carry a College badge, their totals are kept apart from the school's, and no figure on this page adds the two together.";
 }
 
 /* --------------------------------------------------------------- misc helpers */

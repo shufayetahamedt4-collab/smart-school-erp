@@ -111,7 +111,14 @@ export default function LedgerPage() {
                 <span className="font-bold text-slate-800">{fmtMoney(v)}</span>
               </div>
             ))}
-            {!Object.keys(byMethod).length && <p className="text-xs text-slate-400">No payments yet</p>}
+            {!Object.keys(byMethod).length && (
+              // On a ledger that ALSO holds college money, the bare "No payments
+              // yet" reads as if nothing had been paid at all — while the college
+              // card right below lists the college's payments (the 7d-screens
+              // observation, 7d-fix). Name the half this card owns. A school-only
+              // ledger keeps the exact text it has always had.
+              <p className="text-xs text-slate-400">{collegeMoney ? "No school payments yet" : "No payments yet"}</p>
+            )}
           </div>
         </Card>
       </div>

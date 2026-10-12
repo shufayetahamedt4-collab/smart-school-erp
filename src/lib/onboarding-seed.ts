@@ -201,6 +201,24 @@ export function wizardSettingsLink(value: unknown): { href: string; label: strin
 }
 
 /**
+ * May the wizard's Admin step prefill the signed-in account's own name and email?
+ *
+ * The step creates the ADMIN ACCOUNT of a tenant that is being created, so the
+ * fields are the new tenant's admin — not necessarily whoever is holding the
+ * wizard. In EXTEND mode the tenant already exists and keeps the signed-in
+ * account, so its details are correct to show (the step is read-only there).
+ * While CREATING, one account must not become the new tenant's admin by default:
+ * the platform SUPER_ADMIN provisions OTHER people's tenants, so prefilling their
+ * own email would seed the new school with the operator's identity and a login
+ * they never asked for. A SCHOOL_ADMIN creating their own school is provisioning
+ * themselves, and keeps the prefill it has always had.
+ */
+export function wizardPrefillsAdmin(role: unknown, extendMode: boolean): boolean {
+  if (extendMode) return true;
+  return String(role ?? "").trim().toUpperCase() !== "SUPER_ADMIN";
+}
+
+/**
  * May this tenant carry the school-shaped `feeSetting` defaults?
  *
  * `feeSetting` is one monthly + one admission default — school semantics, and

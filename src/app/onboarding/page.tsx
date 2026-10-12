@@ -21,6 +21,7 @@ import {
   TERM_SYSTEMS,
   cloneCollege,
   wizardAcceptsFees,
+  wizardPrefillsAdmin,
   wizardSettingsLink,
   wizardStepKeys,
   wizardSubmitLabel,
@@ -126,7 +127,7 @@ export default function OnboardingPage() {
             setSchool((s) => ({ ...s, name: st.school!.name }));
             if (me?.user) setAdmin({ name: me.user.name, email: me.user.email || "", password: "" });
             if (st.onboarded) setStep(1); // jump straight to the first setup step (classes / college)
-          } else if (me?.user) {
+          } else if (me?.user && wizardPrefillsAdmin(me.user.role, false)) {
             setAdmin({ name: me.user.name, email: me.user.email || "", password: "" });
           }
         }
