@@ -241,6 +241,41 @@ re-running each alone from clean state:
   record. Same for `verify-admission-intake`'s kit checks (53/0 with the shelves
   stocked).
 
+## Baseline reconciliation (2026-10-12)
+
+`docs/TESTING.md` and `docs/COLLEGE-STATUS.md` recorded counts that predated the
+last two commits on this branch. They were corrected here so the frozen
+baseline stops contradicting the suite. Both deltas are attributed by counting
+the `check(` calls each commit added, not by guessing:
+
+| Recorded in | Was | Is | Cause |
+|---|---|---|---|
+| `TESTING.md`, `COLLEGE-STATUS.md`: `verify-college-fees-api` | 95 | **112** | `824e80d` (7e-pre, "make a college payment impossible to record twice") added exactly **17** `check(` calls — the idempotency replay, ten simultaneous taps with one key, and ten racing keys. 95 + 17 = 112. |
+| `TESTING.md`: `verify-college-fees-page` | 214 | **255** | `cac825c` (7d-fix) added **15** `check(` calls, several inside tables, so one call is many runtime checks. |
+
+Both were confirmed against what the verifiers themselves print at `54e9ea4`
+("RESULT: 112/112 checks passed"; "255 checks"), and `verify-college-fees-api`
+printed **112 in the previous record's run too**, so it is identical, not drifting.
+
+**`verify-routine-config` is not one number — it is calendar-gated, and BOTH of
+its forms are valid.** `docs/COLLEGE-STATUS.md` records it as **32 pass / 3 fail**,
+and that is correct on a day its section 7 can run. Section 7 (the
+roster-follows-a-section-override checks) reads the demo teacher's periods for
+**today** and, when the teacher has no scheduled period for the day, emits **one
+`skip` instead of its three checks** (`scripts/verify-routine-config.mjs`, the
+`!slot` branch at the top of section 7). On such a day the script prints **30
+pass / 2 fail / 1 skip** — its own summary line reading "2 failure(s), 1
+skipped" — and that is the form BOTH recorded runs landed on: this stage's and
+the immediately preceding record are identical to the line (30 `[PASS]`, 2
+`[FAIL]`, 1 skip, and the same two unconditional class-wide-read failures, "the
+class-wide routine loads" and "the removed lessons are really gone"). The
+failures are the same class-wide-read defect in both forms — the seed writes
+only section-scoped routines while the route's class-wide read returns the
+`sectionId == null` rows — so only the *number* moves, never the cause. It is
+recorded here in both forms so that a future run landing on an open-gate day is
+not mistaken for a regression. (An earlier draft of this section called 32/3 a
+stale accounting line; that was wrong — the gate explains it.)
+
 ## What the production deployment must set
 
 `apphosting.yaml` is **not** edited by this stage. What it must have:

@@ -108,14 +108,27 @@ green numbers.
 **Added 2026-10-11 (Phase 7c-follow-up)** — the fee line's own numbers. The tables below are the
 Phase 6 record; the runs that carry the fee phases are `docs/COLLEGE-DECISIONS.md` §24.7's 7-pre-2 /
 7b / 7c / 7c-follow-up notes. In short: `verify-college-fees-logic` **21**, `verify-college-fees-data`
-**11** (9 at 7c + the two 7c-follow-up ledger checks), `verify-college-fees-api` **95** (86 at 7c + the
-3-check staff matrix + 6 ledger-reader checks), `verify-enrollment-fees` **19**, and
+**11** (9 at 7c + the two 7c-follow-up ledger checks), `verify-college-fees-api` **112** (86 at 7c +
+the 3-check staff matrix + 6 ledger-reader checks + 7e-pre's 17 payment-idempotency checks), `verify-enrollment-fees` **19**, and
 `verify-college-routes` **3** — which now covers **22 college route files / 47 gated handlers** (14/30
 before 7c's eight routes). The 7c-follow-up full-suite run (the same 36-step list as the 7b run, with
 `verify-college-fees-api` last) reproduced **every** count in this section, the known reds included:
-`verify-read-cache` **0 pass / 1 fail**, `verify-routine-config` **32 pass / 3 fail**, `qa-certificates`
+`verify-read-cache` **0 pass / 1 fail**, `verify-routine-config` **32 pass / 3 fail** when its calendar-gated section 7 runs, **30 pass / 2 fail / 1 skip** when it does not (both forms are valid — see the note below), `qa-certificates`
 **39 / 1** (the credential-gated orphan sweep), `tsc` 0 errors, and `next build` **185/185** pages
 (177 at 6f + 7c's eight college fee routes).
+
+**`verify-routine-config` is calendar-gated, and BOTH of its forms are valid.** Its section 7 (the
+roster-follows-a-section-override checks) reads the demo teacher's periods for **today** and, when the
+teacher has no scheduled period, emits **one `skip` instead of its three checks**
+(`scripts/verify-routine-config.mjs`, the `!slot` branch at the top of section 7). So a day that
+section cannot run prints **30 pass / 2 fail / 1 skip** — the script's own line reads
+"2 failure(s), 1 skipped" — and a day it does run prints **32 pass / 3 fail**, the three added checks
+being 2 pass and 1 fail (the owner's record; the 2026-10-12 runs recorded here have not yet landed on
+an open-gate day to re-observe it). **The failures are the same class-wide-read defect in both forms**
+— the seed writes only section-scoped routines while the route's class-wide read returns the
+`sectionId == null` rows — so only the *number* moves, never the cause. The two unconditional
+class-wide-read checks (`the class-wide routine loads`, `the removed lessons are really gone`) fail on
+every run; section 7's own checks are what the gate adds or withholds.
 
 **The college/registration isolation set:**
 
@@ -180,7 +193,7 @@ Build and types:
 
 **Known-failing checks (documented, not fixed, pre-existing, out of Phase 6's scope):**
 `verify-read-cache` — 1 fail (a latency assertion that does not hold in dev mode); `verify-routine-config`
-— 3 fails (the seed writes only **section-scoped** routines while the route's class-wide read returns
+— 2 fails, or 3 on a day its section 7 runs (the seed writes only **section-scoped** routines while the route's class-wide read returns
 the `sectionId == null` rows). Four browser checks in `scripts/smoke-all.mjs` (the two `/print/*` pages
 and two `/teacher/marks` checks) are also known-failing, analysed in
 [docs/SMOKE-FAILURES.md](docs/SMOKE-FAILURES.md) (which is untracked and a snapshot, see §8). They are
@@ -188,8 +201,9 @@ and two `/teacher/marks` checks) are also known-failing, analysed in
 
 **Re-confirmed 2026-10-11 (Phase 7c-follow-up)**, from a wiped emulator, a fresh seed and a restarted app,
 each red suite run alone: `verify-read-cache` **0 pass / 1 fail** (51 routes "still pay full latency on a
-repeat read" — the same single assertion), `verify-routine-config` **32 pass / 3 fail** (the same three
-class-wide read failures, byte-identical to the 7b run), `qa-certificates` **39 pass / 1 fail** (the
+repeat read" — the same single assertion), `verify-routine-config` **32 pass / 3 fail** on the day of
+that run and **30 pass / 2 fail / 1 skip** on a closed-gate day (the same class-wide read failures,
+byte-identical to the 7b run), `qa-certificates` **39 pass / 1 fail** (the
 credential-gated orphan sweep). Nothing here is caused by the fee phases, and no count moved anywhere else.
 
 ---
@@ -253,7 +267,7 @@ verifier runs. Steps graded from the code alone are marked where a live run is n
 | 4 | ~~College fee heads / structures not modelled~~ — **DONE (7a/7b/7c)**: modelled, stored and served behind `/api/college-fees` | §24 | — | — | No |
 | 5 | Post-v1: per-programme scale override (D-6-19) | §23.6 | Small | Owner to confirm | No |
 | 6 | Post-v1: per-child guardian view, per-course teacher view | §23.6 | Small–medium | Owner to decide | No |
-| 7 | Known-failing checks: `verify-read-cache` (1), `verify-routine-config` (3), four browser checks — re-confirmed unchanged 2026-10-11 | `scripts/`; [SMOKE-FAILURES.md](docs/SMOKE-FAILURES.md) | Small–medium | Nobody in production; CI trust | No |
+| 7 | Known-failing checks: `verify-read-cache` (1), `verify-routine-config` (2, or 3 when its calendar-gated section 7 runs), four browser checks — re-confirmed unchanged 2026-10-11 | `scripts/`; [SMOKE-FAILURES.md](docs/SMOKE-FAILURES.md) | Small–medium | Nobody in production; CI trust | No |
 | 8 | Routines missing-`sectionId` read hole (the `verify-routine-config` cause) | `src/app/api/routines/route.ts` + `scripts/seed.mjs` | Small | A future reader | No |
 | 9 | Super-admin `POST /api/schools` still writes `feeSetting` for a college tenant | `src/app/api/schools/route.ts` | Small | College admin | No |
 | 10 | Wizard success screen says "school"; college sidebar still shows school items | onboarding page, `src/components/nav.ts` | Small | College admin | No |
@@ -286,7 +300,7 @@ remaining product work on the fee line, and the dashboard/reports/import trio is
   them; a transcript therefore names the scheme, its scale, the pass mark and the print date, which is
   the recorded mitigation (D-6-12's known limitation).
 - **The fee line now runs end to end behind an API — and stops at the screen.** Heads, structure,
-  generation, dues, payments and awards are served, gated and proved over HTTP (95 checks), and the money
+  generation, dues, payments and awards are served, gated and proved over HTTP (112 checks), and the money
   lands in the ONE ledger the school already reads, tagged so the two modes can never be confused. What is
   missing is the part a college accountant would touch: the screens and print pages (7d), then the fee rows'
   isolation record (7e/7f), then the dashboard/reports/import trio (9a/9b/9c).

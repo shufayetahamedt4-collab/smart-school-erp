@@ -171,12 +171,16 @@ propose/approve award flow with no self-approval, the shared ledger entries, and
 any school fee read. It deletes its own rows on the way out, and it is documented as **run once per app start**:
 it resets the tenant through firebase-admin, which cannot invalidate the app's in-process pull memo
 (`src/lib/db.ts`, 30 s + 120 s of stale-while-revalidate).
-  `SMOKE_PORT=3000 node scripts/verify-college-fees-api.mjs` (**95 checks** — 86 at 7c plus the
+  `SMOKE_PORT=3000 node scripts/verify-college-fees-api.mjs` (**112 checks** — 86 at 7c plus the
   7c-follow-up additions: the three-check staff matrix, where the ACCOUNTANT and the BRANCH_ADMIN reach
   all 17 handlers and the REGISTRAR reaches every read and is 403 on every write, and six ledger-reader
   checks that pin what a school-facing ledger read shows of college money: the tenant's ledger and the
   `?type=ledger` CSV include the college row TAGGED (`feeId: null` + `meta.collegeFeeId`), a student's
-  own ledger shows their own college payment, and no school `payment` row is written).
+  own ledger shows their own college payment, and no school `payment` row is written; plus
+  **7e-pre's 17 checks** (`824e80d`) that a college payment can never be recorded twice — a replay of
+  one idempotency key, ten simultaneous taps with one key and ten racing keys all leave exactly one
+  ledger row per payment that landed, the stored paid amount never exceeds what was billed, and a
+  same-key retry carrying a different amount or method is refused).
 
 **One ordering rule the college fee verifiers share with the demo-school ones.** A verifier that reads a row an
 earlier verifier created *through the app* is safe (the app's own writes clear its memo), but one that reads a row
@@ -208,7 +212,8 @@ Phase 7d (the college fee screens, the ledger's college badge and the college si
   gate, the shared ledger's college TAG and its split (never summed) totals, the wizard success screen's
   per-half lines, and the double-submit/refusal rules. It *reads* the three pages, the nav registry
   (`src/components/nav.ts`), the two fee routes and `college-fees-access.ts` as text to pin what the screens
-  call and what they must not re-inline. `node scripts/verify-college-fees-page.mjs` (**214 checks**), and it
+  call and what they must not re-inline. `node scripts/verify-college-fees-page.mjs` (**255 checks** at
+  `54e9ea4` — 214 when 7d wrote this line, plus the further checks `cac825c` (7d-fix) added), and it
   is **mutation-proved** — each of these makes it fail, and restoring the file makes it pass again: a REGISTRAR
   shown a write control, a money form that is not disabled while its request is in flight, float arithmetic on
   money in a page, a write control rendered without its `controls.<id>` guard, the ledger's two halves summed
@@ -228,6 +233,22 @@ a fee spine built over HTTP (server-generated `cf_…`/`r_…`/`cfc_…` ids) is
 `zziso-`-prefixed rows.
 
 Already guarded: `smoke-all.mjs` and the full `verify-*.mjs` suite.
+
+**A verifier's count can have more than one valid value when it is calendar-gated — record both.**
+`scripts/verify-routine-config.mjs` is the one that is, and it is the reason two runs can both be
+"identical" while printing different numbers. Its section 7 (the roster-follows-a-section-override
+checks) reads the demo teacher's periods for **today**; when the teacher has no period that day the
+section emits **one `skip` instead of its three checks** (the `!slot` branch). So:
+
+| Day | Printed | Meaning |
+|---|---|---|
+| section 7 cannot run | **30 pass / 2 fail / 1 skip** ("2 failure(s), 1 skipped") | the two class-wide-read failures, plus the section's skip |
+| section 7 runs | **32 pass / 3 fail** | the same two failures plus the three checks section 7 adds (2 pass, 1 fail) |
+
+The failures are the **same class-wide-read defect** in both forms — the seed writes only
+section-scoped routines while the route's class-wide read returns the `sectionId == null` rows
+(§3's known reds) — so a run that prints the other form is a calendar difference, not a regression.
+Never record this verifier as a single number.
 
 ## 5. Never agent-runnable — production-targeted scripts
 
