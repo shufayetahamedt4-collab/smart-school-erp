@@ -1,0 +1,159 @@
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+foreign reference data: 78 names, 146 ids from 6 other school(s)
+
+### foreign tenant availability
+  ✅ a real foreign tenant exists — 78 name(s), 146 id(s) from 6 other school(s)
+
+### school2-admin
+  ✅ /api/chat — no foreign data
+  ✅ /api/assignments — no foreign data
+  ✅ /api/homework — no foreign data
+  ✅ /api/fees — no foreign data
+  ✅ /api/meetings — no foreign data
+  ✅ /api/exams — no foreign data
+  ✅ /api/routines — no foreign data
+  ✅ /api/attendance?classId=zziso-class&date=2026-09-11 — no foreign data
+  ✅ /api/classes — no foreign data
+  ✅ /api/stats — no foreign data
+  ⛔ 403 (no access for this role)  /api/departments
+  ⛔ 403 (no access for this role)  /api/programs
+  ⛔ 403 (no access for this role)  /api/courses
+  ✅ school2-admin: at least one accessible route inspected (10 of 13)
+
+### school2-teacher
+  ✅ /api/chat — no foreign data
+  ✅ /api/assignments — no foreign data
+  ✅ /api/homework — no foreign data
+  ✅ /api/fees — no foreign data
+  ✅ /api/meetings — no foreign data
+  ✅ /api/exams — no foreign data
+  ✅ /api/routines — no foreign data
+  ✅ /api/attendance?classId=zziso-class&date=2026-09-11 — no foreign data
+  ✅ /api/classes — no foreign data
+  ✅ /api/stats — no foreign data
+  ⛔ 403 (no access for this role)  /api/departments
+  ⛔ 403 (no access for this role)  /api/programs
+  ⛔ 403 (no access for this role)  /api/courses
+  ✅ school2-teacher: at least one accessible route inspected (10 of 13)
+
+### school2-student
+  ✅ /api/chat — no foreign data
+  ⛔ 403 (no access for this role)  /api/assignments
+  ✅ /api/homework — no foreign data
+  ✅ /api/fees — no foreign data
+  ✅ /api/meetings — no foreign data
+  ⛔ 403 (no access for this role)  /api/exams
+  ⛔ 403 (no access for this role)  /api/routines
+  ⛔ 403 (no access for this role)  /api/attendance?classId=zziso-class&date=2026-09-11
+  ⛔ 403 (no access for this role)  /api/classes
+  ⛔ 403 (no access for this role)  /api/stats
+  ⛔ 403 (no access for this role)  /api/departments
+  ⛔ 403 (no access for this role)  /api/programs
+  ⛔ 403 (no access for this role)  /api/courses
+  ✅ school2-student: at least one accessible route inspected (4 of 13)
+
+### fixture visibility (school2 teacher)
+  ✅ homework list contains the fixture homework
+  ✅ exam list contains the fixture exam
+  ✅ routines contain fixture rows with resolved names
+  ✅ attendance returns the fixture student row (PRESENT)
+
+### fixture visibility (school2 teacher chat thread)
+  ✅ chat lists the fixture conversation
+
+### cross-tenant read by explicit foreign id
+  ✅ supplying another tenant's class id returns no rows — status=200 rows=0 (35NF8USw7dg8OrWFtSAx)
+
+### userNamesFor school-scoping (school2 admin sees only ZZ names in routines/homework)
+  ✅ routines resolve the fixture teacher name
+  ✅ no foreign school ids anywhere in routines payload
+
+### college routes are refused for a SCHOOL tenant
+  ✅ /api/departments → 403 for a SCHOOL tenant (got 403)
+  ✅ /api/programs → 403 for a SCHOOL tenant (got 403)
+  ✅ /api/courses → 403 for a SCHOOL tenant (got 403)
+  ✅ /api/courses → 403 with ZERO data for a SCHOOL tenant (status=403, data=undefined)
+
+### college tenant — own departments/programs visible, zero foreign data
+  ✅ /api/departments → 200 for a COLLEGE tenant (got 200)
+  ✅ all three own departments are visible (["ZZ Iso College Dept A","ZZ Iso College Dept B","ZZ Iso College Dept None"])
+  ✅ /api/departments — no foreign id or name
+  ✅ /api/programs → 200 for a COLLEGE tenant (got 200)
+  ✅ both own programs are visible (["ZZ Iso College Program A","ZZ Iso College Program B"])
+  ✅ /api/programs — no foreign id or name
+  ✅ ?departmentId=<foreign zziso-both-dept> returns zero rows — status=200 rows=0
+  ✅ ?departmentId=<own dept A> returns exactly its own program (["zziso-col-prog-a"])
+  ✅ /api/courses → 200 for a COLLEGE tenant (got 200)
+  ✅ all three own courses are visible (["ZZ Iso College Course A","ZZ Iso College Course B","ZZ Iso College Course None"])
+  ✅ /api/courses — no foreign id or name
+  ✅ ?departmentId=<foreign zziso-both-dept> returns zero courses — status=200 rows=0
+  ✅ program A's term list is exactly its own mapping (["zziso-col-map-a"])
+  ✅ the mapping list carries no foreign (BOTH-tenant) mapping or course id
+
+### course registrations — a COLLEGE tenant's rows are invisible and untouchable elsewhere
+  ✅ /api/course-registrations → 200 for a COLLEGE tenant (got 200)
+  ✅ C1 sees both of its own registrations (["zziso-col-reg-a","zziso-col-reg-b"])
+  ✅ /api/course-registrations — no foreign id or name
+  ✅ /api/course-registrations → 403 with ZERO data for a SCHOOL tenant (status=403, data=undefined)
+  ✅ the BOTH tenant sees only its own registration (["zziso-both-reg"])
+  ✅ a SCHOOL tenant GET one is 403 for BOTH a real and a ghost id, byte-identical (gate, not oracle) — real=403 ghost=403
+  ✅ the BOTH tenant GET one (foreign C1 id) → 404 (got 404)
+  ✅ the BOTH tenant PATCH/DELETE of the foreign C1 row → 404/404 (got 404/404)
+  ✅ the C1 registration row is unchanged after the foreign attempts (PENDING / zziso-college / zziso-col-br-a)
+  ✅ a foreign studentId in a POST is 400, byte-identical to a ghost (foreign={"error":"Student not found in this school."} ghost={"error":"Student not found in this school."})
+  ✅ a foreign courseId in a POST is 400, byte-identical to a ghost (foreign={"error":"Course not found in this school."} ghost={"error":"Course not found in this school."})
+  ✅ C1 POST with a foreign (BOTH) studentId is 400, byte-identical to a ghost (foreign={"error":"Student not found in this school."} ghost={"error":"Student not found in this school."})
+  ✅ C1 POST with a foreign (BOTH) courseId is 400, byte-identical to a ghost (foreign={"error":"Course not found in this school."} ghost={"error":"Course not found in this school."})
+  ✅ another tenant's student DELETE of a C1 student is 404 and leaves the row (status=404, schoolId=zziso-college, name=ZZ Iso College Student A)
+
+### course results — a COLLEGE tenant's rows are invisible and untouchable elsewhere
+  ✅ /api/course-results → 200 for a COLLEGE tenant (got 200)
+  ✅ C1 sees both of its own results (["zziso-col-res-a","zziso-col-res-b"])
+  ✅ the stored 70/100 is graded at read time (percent=70 grade="A" passed=true pass=33%)
+  ✅ the response names the scale in force (Bangladesh National out of 5)
+  ✅ /api/course-results — no foreign id or name
+  ✅ → 200 for its own student, naming the same scheme (status=200, scheme=Bangladesh National)
+  ✅ the transcript derives the course grade and a numeric CGPA (percent=70 grade="A" cgpa=4)
+  ✅ the transcript read of a foreign (BOTH) student → 404 (got 404)
+  ✅ /api/course-results → 403 with ZERO data for a SCHOOL tenant (status=403, data=undefined)
+  ✅ the transcript read → 403 with ZERO data for a SCHOOL tenant (status=403)
+  ✅ the BOTH tenant sees only its own result (["zziso-both-res"])
+  ✅ the BOTH tenant GET one (foreign C1 id) → 404 (got 404)
+  ✅ the BOTH tenant PATCH/DELETE of the foreign C1 row → 404/404 (got 404/404)
+  ✅ the C1 result row is unchanged after the foreign attempts (70/100 / zziso-college / zziso-col-br-a)
+  ✅ a foreign studentId in a POST is 400, byte-identical to a ghost (foreign={"error":"Student not found in this school."} ghost={"error":"Student not found in this school."})
+  ✅ a foreign courseId in a POST is 400, byte-identical to a ghost (foreign={"error":"Course not found in this school."} ghost={"error":"Course not found in this school."})
+  ✅ C1 POST with a foreign (BOTH) studentId is 400, byte-identical to a ghost (foreign={"error":"Student not found in this school."} ghost={"error":"Student not found in this school."})
+
+### course results — the page never leaks another tenant's student (6e)
+  ✅ C1's own transcript print page renders its own student (status=200, named=true)
+  ✅ the BOTH tenant's print page for a C1 student is NOT FOUND and never names it (status=200, notFound=true, leaked=false)
+  ✅ C1's print page for a BOTH student is NOT FOUND and never names it (status=200, notFound=true, leaked=false)
+  ✅ C1's results screen names no other tenant's student (status=200, leakedName=false, leakedId=false)
+  ✅ the BOTH tenant's results screen names no C1 student (status=200, leakedName=false, leakedId=false)
+
+### BOTH tenant in SCHOOL mode — the API still follows institutionType
+  ✅ mode=SCHOOL does NOT block the API for a BOTH tenant — /api/departments 200 with own row
+  ✅ the NAV hides both college items for a BOTH tenant in SCHOOL mode (38 items)
+  ✅ …and shows them again in COLLEGE mode
+
+### BOTH → SCHOOL downgrade (blocked with data, allowed without)
+  ✅ BOTH tenant WITH a department cannot be downgraded — 409 (409)
+  ✅ BOTH tenant with NO college data can be downgraded — 200 (200)
+
+### COLLEGE registrations-only → SCHOOL downgrade (5-pre)
+  ✅ a COLLEGE tenant whose only college data is a registration cannot be downgraded — 409 (409)
+  ✅ the same tenant with no registration can still be downgraded — 200 (200)
+
+### college fees — a COLLEGE tenant's fee rows are invisible and untouchable elsewhere
+  ✅ C1's spine is built through the app (head=r_a788add34897ed00 charge=cf_zziso-col-stu-a_r_a788add34897ed00_1_1 award=r_509d89cddf82291d bothHead=r_c5bbbbc5de0da4b4 cfg=200)
+  ✅ a COLLEGE tenant reads its own fee head and charge (200/200)
+  ✅ …and its own award and college fee config (200/200)
+  ✅ C1's college fee reads carry NO row, id or name from the other college-capable tenant
+  ✅ the BOTH tenant sees only its own fee head, never C1's (["zziso-both-head-tuition","zziso-both-fee-head","r_c5bbbbc5de0da4b4"])
+  ✅ a SCHOOL tenant is gated on every college fee read — 403 with zero data (403/403/403)
+  ✅ another tenant's payment / head PATCH / head DELETE / award PATCH on a C1 row are all NOT FOUND (404/404/404/404)
+  ✅ …and C1's head and charge are UNCHANGED (paidAmount 0)
+  ✅ the reverse direction is NOT FOUND too (404)
+
+✅ ISOLATION CONFIRMED — no cross-school data in any of the 13 swept routes

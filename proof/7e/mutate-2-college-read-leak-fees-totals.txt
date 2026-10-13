@@ -1,0 +1,32 @@
+[hostfetch] Host header delivery enabled (requests with Host: go through node:http)
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+
+=== fees totals (http://127.0.0.1:3000) ===
+
+  PASS  GET /api/fees as school admin — HTTP 200
+  PASS  fees returned — 56 rows
+  PASS  every row carries a finite amount and paidAmount — no null / missing / NaN
+  PASS  school totals are finite — billed 123200 · paid 85200 · due 38000
+  PASS  paid + due === billed (row for row) — 85200 + 38000 = 123200 vs 123200
+  PASS  totals are not silently zeroed — billed 123200 is >0
+  PASS  GET /api/stats as school admin — HTTP 200
+  PASS  stats fees are finite numbers — {"totalFees":123200,"paidFees":85200,"dueFees":38000,"unpaidCount":30}
+  PASS  stats billed matches the fee list — 123200 vs 123200
+  PASS  stats collected matches the fee list — 85200 vs 85200
+  PASS  guardian fee rows are finite — 4 rows clean
+  PASS  guardian totals are finite — total 8800 · due 3800
+  PASS  ledger returned a list — 17 entries
+  PASS  ledger amounts are finite — no null / NaN amounts
+  PASS  GET /dashboard/fees — HTTP 200
+  PASS  GET /api/fees as a BOTH tenant's admin — HTTP 200 2 rows
+  PASS  the BOTH tenant's school half totals its OWN money (17,000 billed / 8,000 paid / 9,000 due) — 17000 / 8000 / 9000
+  PASS  …and NO college row, id or amount is in it (a college charge must never move a school total) — payload=1161B
+  PASS  …and /api/stats' fee payload is that same school-only money — HTTP 200 {"totalFees":17000,"paidFees":8000,"dueFees":9000,"unpaidCount":0}
+  PASS  GET /api/college-fees/dues as the same BOTH tenant's admin — HTTP 200 
+  PASS  college money is finite too (billed / paid / due, never NaN or null) — {"rows":[{"id":"cf_zziso-both-stu_r_11b4e6217f286d4f_1_1","amount":2500,"discount":0,"paid":0,"due":2500,"status":"UNPAID"},{"id":"cf_zziso-both-stu_r_32c5da97de86b8e4_1_1","amount":2500,"discount":0,"paid":0,"due":2500,"status":"UNPAID"},{"id":"cf_zziso-both-stu_r_6705e50e559505b5_1_1","amount":2500,"discount":0,"paid":0,"due":2500,"status":"UNPAID"},{"id":"zziso-both-charge-1","amount":45000,"discount":0,"paid":15000,"due":30000,"status":"PARTIAL"},{"id":"zziso-both-fee-a","amount":12000,"discount":0,"paid":3000,"due":9000,"status":"PARTIAL"},{"id":"zziso-both-fee-b","amount":5000,"discount":0,"paid":5000,"due":0,"status":"PAID"}],"count":6,"gross":69500,"billed":69500,"discount":0,"paid":23000,"due":46500,"status":"PARTIAL","students":1}
+  PASS  college dues contain the fixture's own charge (45,000 / 15,000 / 30,000 due) — the college half is non-empty — {"id":"zziso-both-charge-1","amount":45000,"discount":0,"paid":15000,"due":30000,"status":"PARTIAL"}
+ FAIL  …and the totals are exactly those rows (paid + due === billed, no school money folded in) — billed=69500 paid+due=69500
+ FAIL  …and NO school fee id or school amount is in the college read (the other direction of the same rule) — payload=966B
+
+2 CHECK(S) FAILED
+

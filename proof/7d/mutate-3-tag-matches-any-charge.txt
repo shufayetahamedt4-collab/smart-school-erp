@@ -1,0 +1,5 @@
+
+########## M3: make isCollegePaymentEntryFor ignore the charge id ##########
+mutated: src/lib/college-fees-view.ts — the tag comparison 'return String(meta.collegeFeeId ?? "") === id;' → 'return true;'
+ FAIL  a payment on ANOTHER charge does not
+❌ college fees page verification FAILED — 1 of 360 check(s).

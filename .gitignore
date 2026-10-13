@@ -71,3 +71,12 @@ app.log
 # scratch/temporary verification artifacts (agent-authored, never committed)
 _tmp-*/
 scripts/_tmp-*
+
+# proof/ evidence records: REPORT.md + the text transcripts (.md/.txt/.json/.mjs) ARE committed;
+# binary media is NOT. See proof/README.md. (PNG/WEBM committed before 2026-10-14 predate this rule.)
+proof/**/*.png
+proof/**/*.webm
+proof/**/*.jpg
+proof/**/*.jpeg
+proof/**/*.gif
+proof/**/*.mp4

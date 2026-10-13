@@ -1,0 +1,8 @@
+restored: sha1sum -c OK, verifier back to PASSED — 366 checks
+
+########## M5: the preview label DROPPED to plain "Preview" ##########
+mutated: src/app/dashboard/college-fees/page.tsx — "Preview (nothing written)" → "Preview"
+ FAIL  the preview panel names itself (7d item 4 — zeros beside committed money read as a wrong total) — Preview (nothing written)
+ FAIL  …and only the dry-run branch says it
+❌ college fees page verification FAILED — 2 of 366 check(s).
+restored: sha1sum -c OK, verifier back to PASSED — 366 checks

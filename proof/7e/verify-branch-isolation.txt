@@ -1,0 +1,96 @@
+[hostfetch] Host header delivery enabled (requests with Host: go through node:http)
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+
+=== set-up (http://127.0.0.1:3000)
+  PASS  the school admin is signed in — s_54bf3dc2c4f98fabdf78b7216c0ae888455d009a
+  PASS  there is a class to import into — Class 1
+
+### two branches + a branch admin scoped to the first
+  PASS  both branches were created — r_d6453d6672ba73ec / r_5b3793ac1b781c40
+  PASS  a BRANCH_ADMIN was created for branch A — HTTP 201 
+  PASS  the branch admin signs in
+
+### the branch admin imports into its OWN branch
+  PASS  the branch admin can commit into its own branch — HTTP 200 
+  PASS  the imported student landed in the branch admin's branch — r_d6453d6672ba73ec vs r_d6453d6672ba73ec
+  PASS  the branch admin can read its own credential slips — HTTP 200
+  PASS  the branch admin can read its own batch detail — HTTP 200
+
+### a batch owned by ANOTHER branch
+  PASS  the school admin can import into branch B — HTTP 200 
+  PASS  the branch admin CANNOT read branch B's batch (404) — HTTP 404
+  PASS  the branch admin CANNOT read branch B's credentials (404) — HTTP 404
+  PASS  the branch admin CANNOT undo branch B's import (404) — HTTP 404
+
+### the branch admin cannot import into another branch
+  PASS  a branch admin's import is forced into its own branch — r_d6453d6672ba73ec vs r_d6453d6672ba73ec
+  PASS  the requested other branch was not used — r_d6453d6672ba73ec
+  PASS  the batch is recorded under the branch admin's own branch — r_d6453d6672ba73ec vs r_d6453d6672ba73ec
+
+### no cross-branch leakage in the credential list
+  PASS  the branch admin's slips never include another branch's student — ["ISO-OWN-1791896141065"]
+  PASS  the branch admin's slips include only its own student — ["ISO-OWN-1791896141065"]
+
+### college departments/programs — branch admin confinement
+  PASS  branch admin sees ONLY its own branch's departments — ["zziso-col-dept-a"]
+  PASS  branch admin sees ONLY its own branch's programs — ["zziso-col-prog-a"]
+  PASS  branch admin CANNOT PATCH another branch's department (403) — HTTP 403
+  PASS  branch admin CANNOT DELETE another branch's department (403) — HTTP 403
+  PASS  branch admin CANNOT PATCH another branch's program (403) — HTTP 403
+  PASS  branch admin CANNOT DELETE another branch's program (403) — HTTP 403
+  PASS  a foreign tenant's department id is NOT FOUND (404) — HTTP 404
+  PASS  a foreign tenant's program id is NOT FOUND (404) — HTTP 404
+  PASS  a BRANCH-scoped admin CANNOT move a program into a branch-less department (403) — HTTP 403
+  PASS  a SCHOOL_ADMIN CAN move a program into a branch-less department (200, branchId null) — HTTP 200 dept=zziso-col-dept-none branch=null
+  PASS  the moved program is restored to its original department — HTTP 200
+  PASS  branch admin sees ONLY its own branch's courses — ["zziso-col-course-a"]
+  PASS  branch admin CANNOT PATCH another branch's course (403) — HTTP 403
+  PASS  branch admin CANNOT DELETE another branch's course (403) — HTTP 403
+  PASS  a BRANCH-scoped admin CANNOT touch the branch-less course (403) — HTTP 403
+  PASS  a SCHOOL_ADMIN CAN touch the branch-less course (200) — HTTP 200
+  PASS  the branch-less course is restored (creditHours null) — HTTP 200 creditHours=null
+  PASS  a BRANCH-scoped admin CANNOT map into another branch's program (403) — HTTP 403
+  PASS  a BRANCH-scoped admin CANNOT remove another branch's mapping (403) — HTTP 403
+  PASS  a foreign tenant's course id is NOT FOUND (404) — HTTP 404
+  PASS  the foreign course row is unchanged — zziso-both / ZZ Iso Both Course
+  PASS  a foreign tenant's mapping id is NOT FOUND (404) — HTTP 404
+  PASS  the foreign mapping row is unchanged — zziso-both
+  PASS  a foreign courseId in a mapping POST is refused with 400 — HTTP 400
+  PASS  …byte-identical to a NON-EXISTENT courseId (no oracle) — foreign={"status":400,"data":null,"error":"Course not found in this school.","setCookie":"","text":"{\"error\":\"Course not found in this school.\"}"} ghost={"status":400,"data":null,"error":"Course not found in this school.","setCookie":"","text":"{\"error\":\"Course not found in this school.\"}"}
+  PASS  a MISSING courseId is also refused with 400 (same status) — HTTP 400
+  PASS  branch admin's registration list carries its own branch's row and NOT another branch's — ["zziso-col-reg-a"]
+  PASS  branch admin CANNOT GET another branch's registration (403) — HTTP 403
+  PASS  branch admin CANNOT PATCH another branch's registration (403) — HTTP 403
+  PASS  branch admin CANNOT DELETE another branch's registration (403) — HTTP 403
+  PASS  a BRANCH-scoped admin CANNOT register another branch's student (403) — HTTP 403
+  PASS  a SCHOOL-scoped college admin sees BOTH branches' registrations — ["zziso-col-reg-a","zziso-col-reg-b"]
+  PASS  branch admin CAN read its own branch's registration (200) — HTTP 200
+  PASS  the other branch's registration row is unchanged after the foreign probes — PENDING / zziso-col-br-b / decidedById=null
+
+### college course results — branch admin confinement
+  PASS  branch admin's results list carries its own branch's row and NOT another branch's — ["zziso-col-res-a"]
+  PASS  branch admin CANNOT GET another branch's result (403) — HTTP 403
+  PASS  branch admin CANNOT PATCH another branch's result (403) — HTTP 403
+  PASS  branch admin CANNOT DELETE another branch's result (403) — HTTP 403
+  PASS  a BRANCH-scoped admin CANNOT record a result for another branch's student (403) — HTTP 403
+  PASS  a SCHOOL-scoped college admin sees BOTH branches' results — ["zziso-col-res-a","zziso-col-res-b"]
+  PASS  branch admin CAN read its own branch's result (200) — HTTP 200
+  PASS  the other branch's result row is unchanged after the foreign probes — 80/100 / zziso-col-br-b / attempt=1
+  PASS  branch admin CAN read its OWN branch student's transcript (200) — HTTP 200 name="ZZ Iso College Student A"
+  PASS  branch admin CANNOT read ANOTHER branch student's transcript (403, no name) — HTTP 403
+  PASS  a SCHOOL-scoped college admin CAN read the other branch's transcript (200) — HTTP 200 name="ZZ Iso College Student B"
+  PASS  the transcript print page renders the branch admin's OWN branch student — HTTP 200
+  PASS  the transcript print page is NOT FOUND for ANOTHER branch's student (no name leaked) — HTTP 200 notFound=true
+
+### college fees — branch admin confinement (7c)
+  PASS  a branch admin's college fee heads hold ONLY its own branch's rows — ["zziso-col-fee-head-a"]
+  PASS  the branch admin CAN read its own branch's structure (200) — HTTP 200
+  PASS  …and is refused on another branch's programme (403) — HTTP 403
+  PASS  a branch admin CANNOT pay another branch's college charge (403) — HTTP 403
+  PASS  …and that charge is UNCHANGED (paidAmount still 0) — paidAmount=0
+  PASS  …but CAN pay its own branch's charge (201) — HTTP 201 undefined
+  PASS  a SCHOOL-scoped admin sees every branch's college fee head, the branch-less one included — ["zziso-col-fee-head-a","zziso-col-fee-head-b","zziso-col-fee-head-none"]
+
+### cleanup
+
+✅ PASS — a BRANCH_ADMIN imports only into its own branch and cannot read or undo another branch's import or credentials.

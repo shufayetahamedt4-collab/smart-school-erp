@@ -1,0 +1,25 @@
+=== D-7-18 role probe — MUTATION PROOF re-enacted (2026-10-13) ===
+
+7e's mutation 4, re-enacted on a SECOND production build to prove the probe's role
+checks are live (not vacuous). Not a new test: the same mutation 7e recorded in
+../7e/mutate-4-guardian-added-to-read-roles.txt, re-run because the live message asked
+that the mutation proofs be verified rather than read.
+
+mutation: src/lib/college-fees-access.ts — COLLEGE_FEES_READ_ROLES gains "GUARDIAN"
+          (the D-7-18 v1 read allow-list is admin-level + ACCOUNTANT + read-only REGISTRAR;
+           GUARDIAN is REFUSED by the owner's Q4 ruling)
+build under test: .next/BUILD_ID = fAPnqL2DcE_P65Ormou9k  (npm run build exit 0, 187/187)
+command: PROBE_ORIGIN=http://127.0.0.1:3111 node scripts/verify-role-probe.mjs
+
+  ❌ all three are 403 on the college fee read, with the D-7-18 read refusal — statuses=[403,200,403]
+  ❌ …and the print statement renders the same refusal for each, with the tenant's charge NOWHERE in the HTML — statuses=[200,200,200]
+  ❌ …and so does the receipt page — statuses=[200,200,200]
+❌ role probe FAILED — 3 of 24 check(s).
+
+---- restored: the file is back to its exact bytes (sha1sum -c OK, git diff empty),
+     rebuilt (exit 0) and the probe re-run against the restored build ----
+build under test: .next/BUILD_ID = tjRUuwGvujOhe_dYHTjb5
+
+  ✅ another tenant's student renders 'Statement not found.' for this tenant's admin — HTTP 200
+
+✅ ROLE PROBE OK — 24 checks against the PRODUCTION build tjRUuwGvujOhe_dYHTjb5: authentication, authorized college access (admin + ACCOUNTANT + read-only REGISTRAR), the SCHOOL-tenant refusal, the TEACHER/GUARDIAN/STUDENT refusal inside a college-capable tenant, and tenant isolation.

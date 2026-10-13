@@ -2,7 +2,9 @@
 
 Stage rules honoured: no code change, no commit, no push. Branch `integration/main-into-college` @ `77a1b18`.
 Emulator only. No verifier was run during this stage — only the emulator, the app and one browser.
-`proof/` is untracked and was deliberately not committed.
+`proof/` was not committed during this stage. **Record status (2026-10-14):** the Phase 7
+evidence records (the `REPORT.md` files and the plain-text transcripts) are committed now, and binary
+media is ignored — the rule is [../README.md](../README.md).
 
 ## Environment
 

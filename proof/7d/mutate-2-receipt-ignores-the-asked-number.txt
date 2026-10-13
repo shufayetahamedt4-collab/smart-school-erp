@@ -1,0 +1,5 @@
+
+########## M2: ignore the ?receipt= number on the receipt page ##########
+mutated: src/app/print/college-fee-receipt/[chargeId]/page.tsx — pickReceiptEntry(payments, receiptParam) → pickReceiptEntry(payments, undefined)
+ FAIL  the receipt page uses the one picker, ON the number it was asked for
+❌ college fees page verification FAILED — 1 of 360 check(s).

@@ -1,0 +1,24 @@
+[hostfetch] Host header delivery enabled (requests with Host: go through node:http)
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+
+=== fees totals (http://127.0.0.1:3000) ===
+
+  PASS  GET /api/fees as school admin — HTTP 200
+  PASS  fees returned — 56 rows
+  PASS  every row carries a finite amount and paidAmount — no null / missing / NaN
+  PASS  school totals are finite — billed 123200 · paid 85200 · due 38000
+  PASS  paid + due === billed (row for row) — 85200 + 38000 = 123200 vs 123200
+  PASS  totals are not silently zeroed — billed 123200 is >0
+  PASS  GET /api/stats as school admin — HTTP 200
+  PASS  stats fees are finite numbers — {"totalFees":123200,"paidFees":85200,"dueFees":38000,"unpaidCount":30}
+  PASS  stats billed matches the fee list — 123200 vs 123200
+  PASS  stats collected matches the fee list — 85200 vs 85200
+  PASS  guardian fee rows are finite — 4 rows clean
+  PASS  guardian totals are finite — total 8800 · due 3800
+  PASS  ledger returned a list — 17 entries
+  PASS  ledger amounts are finite — no null / NaN amounts
+  PASS  GET /dashboard/fees — HTTP 200
+ FAIL  the college half of the money rule (9 checks, on a BOTH tenant with both halves populated) needs scripts/.qa-fixtures.json — run: node scripts/isolation-fixture.mjs create — a local run must create the fixture first
+
+1 CHECK(S) FAILED
+

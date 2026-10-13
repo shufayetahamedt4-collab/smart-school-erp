@@ -1,0 +1,10 @@
+
+########## restored ##########
+5c560cccc7db20ae44ec35e0297822751bda993c *src/app/print/college-fee-statement/[studentId]/page.tsx
+306dea048260c35bc131e4843622c42ecbb7af29 *src/app/print/college-fee-receipt/[chargeId]/page.tsx
+7be10e56f541633e0380b91cb1242a711fb0bb3b *src/lib/college-fees-view.ts
+✅ college fees page verification PASSED — 360 checks.
+
+########## the restored run ##########
+f1cca77902f623ec094f71127840a8cbcb48d200 *src/app/dashboard/college-fees/page.tsx
+✅ college fees page verification PASSED — 366 checks.

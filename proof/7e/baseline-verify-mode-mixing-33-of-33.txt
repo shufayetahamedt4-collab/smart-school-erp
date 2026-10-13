@@ -1,0 +1,52 @@
+[hostfetch] Host header delivery enabled (requests with Host: go through node:http)
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+
+=== Phase 7e — mode mixing: a BOTH tenant's two halves never touch (http://127.0.0.1:3000) ===
+
+  ✅ the BOTH tenant is college-capable and its mode cookie really switches (UI context, not a filter) — type=BOTH schoolMode=SCHOOL collegeMode=COLLEGE
+
+### 1. the school half: exactly its own two rows, in both modes
+  ✅ GET /api/fees as the BOTH tenant's admin — HTTP 200 rows=2
+  ✅ it returns exactly the fixture's two school rows and nothing else — got "zziso-both-fee-a,zziso-both-fee-b", want "zziso-both-fee-a,zziso-both-fee-b"
+  ✅ …carrying the school's own 17,000 billed / 8,000 paid / 9,000 due — 17000 / 8000 / 9000
+  ✅ …every row a finite money row (paid + due === billed, row for row) — 1700000 vs 1700000
+  ✅ NO college row, id, head or amount appears in the school fee read — payload=1161B
+  ✅ …and the SAME read under the COLLEGE mode cookie is byte-identical (mode is not a filter) — equal=true
+
+### 2. /api/stats' fee payload is the school half's own money, in both modes
+  ✅ /api/stats fee payload is finite and equals the fee list — HTTP 200 {"totalFees":17000,"paidFees":8000,"dueFees":9000,"unpaidCount":0}
+  ✅ …and is byte-identical under the college mode cookie — equal=true
+  ✅ …and carries no college money either — {"totalFees":17000,"paidFees":8000,"dueFees":9000,"unpaidCount":0}
+
+### 3. the college half: exactly its own charge, in both modes
+  ✅ GET /api/college-fees/dues as the BOTH tenant's admin (college mode) — HTTP 200 
+  ✅ …with every figure a finite number (never NaN/null on the money path) — {"rows":[{"id":"zziso-both-charge-1","amount":45000,"discount":0,"paid":15000,"due":30000,"status":"PARTIAL"}],"count":1,"gross":45000,"billed":45000,"discount":0,"paid":15000,"due":30000,"status":"PARTIAL","students":1}
+  ✅ …containing the fixture's own college charge, with the college's 45,000 / 15,000 / 30,000 — {"id":"zziso-both-charge-1","amount":45000,"discount":0,"paid":15000,"due":30000,"status":"PARTIAL"}
+  ✅ …and its totals are exactly its own rows (paid + due === billed, row for row — no school money folded in) — billed=45000 paid+due=45000
+  ✅ …and NO school fee row, id or title appears anywhere in the college read — payload=476B
+  ✅ …and the college read is unchanged under the SCHOOL mode cookie (mode grants nothing, revokes nothing) — HTTP 200 equal=true
+  ✅ the BOTH tenant's own student is readable (the positive control for the 404s below) — HTTP 200 billed=45000
+
+### 4. the measurement: a NEW college charge leaves the school half byte-identical
+  ✅ a college head is created for the BOTH tenant (201) — HTTP 201 
+  ✅ …priced by a structure row on its own programme term (201) — HTTP 201 
+  ✅ …and generation raises EXACTLY ONE new charge, for the BOTH tenant's own student — HTTP 200 charge=cf_zziso-both-stu_r_56c9e0ae690efab1_1_1 newRows=1
+  ✅ WITH the new college charge present, /api/fees is BYTE-IDENTICAL to the pre-write capture — HTTP 200 equal=true
+  ✅ …and /api/stats' fee payload is byte-identical too — HTTP 200 equal=true
+  ✅ …while the COLLEGE half gained exactly the new charge's money — billed/due +2,500, paid untouched — {"rows":[{"id":"cf_zziso-both-stu_r_56c9e0ae690efab1_1_1","amount":2500,"discount":0,"paid":0,"due":2500,"status":"UNPAID"},{"id":"zziso-both-charge-1","amount":45000,"discount":0,"paid":15000,"due":30000,"status":"PARTIAL"}],"count":2,"gross":47500,"billed":47500,"discount":0,"paid":15000,"due":32500,"status":"PARTIAL","students":1} vs baseline {"rows":[{"id":"zziso-both-charge-1","amount":45000,"discount":0,"paid":15000,"due":30000,"status":"PARTIAL"}],"count":1,"gross":45000,"billed":45000,"discount":0,"paid":15000,"due":30000,"status":"PARTIAL","students":1}
+  ✅ …and the school's rows are still absent from the college read after the write — billed=47500
+
+### 5. the shared ledger keeps the two halves apart by its ONE tag
+  ✅ GET /api/ledger returns the tenant's ledger — HTTP 200 rows=3
+  ✅ the school's own entry keeps its `feeId` and carries NO college tag — feeId=zziso-both-fee-a meta={"receiptNo":"ZZRCP-900001"}
+  ✅ the college entry is TAGGED: feeId null + meta.collegeFeeId, with the college's own CRCP- receipt — feeId=null meta={"receiptNo":"CRCP-900001","collegeFeeId":"zziso-both-charge-1","programId":"zziso-both-prog","termNumber":1}
+  ✅ every college-tagged row in the shared ledger has NO school `feeId` (the college's money is never also school money) — tagged=2 withFeeId=0
+  ✅ …and no row carrying a school `feeId` is college-tagged — schoolRows=1
+  ✅ the tenant-wide ledger shows BOTH halves in either mode (the tag is what separates them) — school-mode=ok equal=true
+
+### 6. cross-tenant: neither tenant can see the other's college or school money
+  ✅ the COLLEGE tenant's dues read contains NONE of the BOTH tenant's rows or money — HTTP 200 rows=0
+  ✅ …and a BOTH-tenant student is the SAME 404 for it as a ghost id (no tenant oracle) — foreign=404 ghost=404
+  ✅ …and the reverse holds: the COLLEGE tenant's student is a 404 for the BOTH tenant — HTTP 404
+
+✅ mode-mixing verification PASSED — 33 checks: a BOTH tenant's school half is byte-identical with and without college charges (measured in this run), no college row or amount reaches a school read, no school row reaches a college read, the shared ledger keeps them apart by its tag, and neither tenant can read the other's money.

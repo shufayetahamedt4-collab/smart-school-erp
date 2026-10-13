@@ -1,0 +1,12 @@
+=== 7d copy pins — mutation proofs for section 16 (added 2026-10-13, pre-commit review) ===
+The verifier now carries SIX source-level pins for the 7d copy fixes (section 16) because the
+college fee page is a client render: its server HTML is a loading shell, so the sentences a human
+reads cannot be fetched. Each mutation below was made in the working tree, the verifier run, and
+the file restored to its exact bytes (sha1sum -c OK; no other file touched).
+
+########## M4: the Fee-structure intro RE-CLIPPED to the old phrasing ##########
+mutated: src/app/dashboard/college-fees/page.tsx — subtitle back to
+         "The structure is one row per programme × term × head. …"
+ FAIL  the Fee-structure intro is the complete sentence (7d item 3 — it read as clipped) — One row per programme, per term and per head. The programme's own term shape bounds the term number.
+ FAIL  …and the OLD, clipped phrasing is gone
+❌ college fees page verification FAILED — 2 of 366 check(s).

@@ -1,0 +1,31 @@
+=== npm run build — the production build the D-7-18 probe ran against ===
+command: npm run build   (dev server STOPPED first — PROGRESS.md rule: never build while dev is live)
+exit=0
+   ✓ Compiled successfully in 17.3s
+     Linting and checking validity of types ...
+   ✓ Generating static pages (187/187)
+  ├ ƒ /print/college-fee-receipt/[chargeId]         1.44 kB         107 kB
+  ├ ƒ /print/college-fee-statement/[studentId]      1.44 kB         107 kB
+  BUILD_ID (read at probe time) = J8dv3wQUnWhHl5Yxf2rz_
+  NOTE: .next/BUILD_ID exists only while a production build is deployed; the dev server restarted
+        afterwards (as PROGRESS.md requires) and replaced .next, so the id is recorded here instead.
+
+=== the server the probe dialled ===
+command: NODE_ENV=production npx next start -p 3111   (emulator env: FIRESTORE_EMULATOR_HOST=127.0.0.1:8080,
+         FIREBASE_PROJECT_ID=demo-ss-test, FIREBASE_CLIENT_EMAIL/KEY empty so .env cannot reinstate a live key)
+     - Local:        http://localhost:3111
+   ✓ Ready in 418ms
+
+=== the offline 7d/7e verifiers re-run on the final working tree ===
+  verify-college-fees-page         exit=0  PASSED — 360
+  verify-college-fees-data         exit=0  OK — 11
+  verify-college-fees-logic        exit=0  OK — 21
+  verify-college-routes            exit=0  OK — 22
+  verify-nav-scope                 exit=0  
+  verify-college-gate              exit=0  
+  verify-college-grading-logic     exit=0  OK — 13
+  verify-college-results-page      exit=0  PASSED — 106
+  verify-onboarding-seed           exit=0  87 checks
+  verify-database-id               exit=0  OK — 17
+  verify-college-permissions       exit=0  
+  npm run typecheck (tsc --noEmit)   exit=0  0 errors

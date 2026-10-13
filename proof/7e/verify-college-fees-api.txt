@@ -1,0 +1,147 @@
+[hostfetch] Host header delivery enabled (requests with Host: go through node:http)
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+
+=== Phase 7c college fees API (http://127.0.0.1:3000)
+
+### set-up — a clean college fee spine, and the school-fee baseline
+  PASS  the COLLEGE tenant's college fee spine starts empty (5 collections) — rows=0
+  PASS  …and the fixture's course registration is back to PENDING (the verifier is re-runnable) — registration reset
+  PASS  a school fee read baseline was captured (the list and /api/stats' fee payload) — fees=200 stats=200
+
+### the fee heads (D-7-2/D-7-5): admin + ACCOUNTANT write, validation is 7a's
+  PASS  POST /api/college-fees/heads creates a head (201) with the school's own shape — HTTP 201 null
+  PASS  GET lists it back, sorted, with no class pricing — HTTP 200 rows=1
+  PASS  a junk bucket/frequency falls back (OTHER/MONTHLY) and dueDay clamps to 28 — never a throw — HTTP 201 ["OTHER","MONTHLY",28]
+  PASS  a head with no name is refused (400) and says what to fix — HTTP 400 "Give the fee head a name."
+  PASS  PATCH merges onto the stored row (the bucket survives, the patch is applied) — HTTP 200 {"n":"ZZ Junk Renamed","b":"OTHER","d":5}
+  PASS  an ACCOUNTANT may WRITE a head (the one staff role the allow-list admits, D-7-18) — HTTP 201 null
+  PASS  a REGISTRAR may NOT write a head (403 — v1 access is read-only for the registrar) — HTTP 403
+  PASS  …but may READ the heads (200) — the positive control — HTTP 200
+
+### the structure (D-7-6…D-7-8): one row per (programme, term, head), and the unit/basis rules are 7a's
+  PASS  POST creates a structure row (201) with unit STUDENT and basis FLAT by default — HTTP 201 null
+  PASS  a PER_CREDIT row is refused (400) with 7a's pinned reason — HTTP 400 "Per-credit-hour pricing is not in v1 — price the term flat (basis FLAT)."
+  PASS  an UNKNOWN unit is refused (400), naming the allowed values — HTTP 400 "A structure row's unit must be STUDENT or COURSE — got \"PER_HOUR\"."
+  PASS  an UNKNOWN basis is refused (400), naming the allowed values — HTTP 400 "A structure row's basis must be FLAT or PER_CREDIT — got \"CREDIT\"."
+  PASS  a term the programme does not have is refused (400) — programme A has two terms — HTTP 400 "This programme has no term 3 — it has 2 term(s)."
+  PASS  the duplicate (programme, term, head) is a VISIBLE 409 — never a silent overwrite — HTTP 409 "This head is already priced for that programme and term — edit the existing row instead."
+  PASS  …and the stored amount is NOT overwritten (1000, not 999) — rows=1 amount=1000
+  PASS  GET returns the rows with both totals (SUM of rows, and the cadence-adjusted bill) — HTTP 200 rowsTotal=1000 billTotal=1000
+
+### generation (D-7-10): dryRun writes nothing, a commit is idempotent, and a late change tops up
+  PASS  a dryRun previews the exact rows (1 student × 1 row) and writes NOTHING — HTTP 200 rows=1 written=0
+  PASS  the dry run — writes NOTHING (college fee spine 3 → 3) — delta=0
+  PASS  the commit writes the derived row for the one student on roll in term 1 — HTTP 200 written=1 amount=1000
+  PASS  …and exactly ONE document was written — 3 → 4
+  PASS  …whose id is 7a's deterministic cf_ id, and whose paidAmount is written EXPLICITLY as 0 — id=cf_zziso-col-stu-a_r_133bfb10545618db_1_1 paid=0 status=UNPAID
+  PASS  a re-run creates NO duplicates (written 0, the existing row counted, not touched) — HTTP 200 written=0 existing=1
+  PASS  the idempotent re-run — writes NOTHING (college fee spine 4 → 4) — delta=0
+  PASS  a fresh PENDING registration exists for the COURSE-unit probe (201) — HTTP 201 null
+  PASS  a COURSE-unit row can be created (201) — the unit is stored, never priced — HTTP 201 null
+  PASS  with NO approved registration, the COURSE head bills nothing and says so — HTTP 200 new=0 refused=[[{"headId":"r_fb851a8fe627c4ba","reason":"No approved course registration — nothing to bill for this head."}],[{"headId":"r_fb851a8fe627c4ba","reason":"No approved course registration — nothing to bill for this head."}]]
+  PASS  the probe registration is approved (200) — HTTP 200 null
+  PASS  a late approval tops up exactly ONE new course charge — the earlier rows are untouched — HTTP 200 written=1 amount=200 row={"a":200,"u":"COURSE"}
+
+### payments (D-7-12): integer minor units, over-payment refused, the ledger entry tagged
+  PASS  a fresh spine generated exactly one 1000 charge to pay — charge=cf_zziso-col-stu-a_r_34062378c551c883_1_1
+  PASS  amountMinor must be a positive WHOLE number of minor units — 0, negative, fractional, junk and missing are all 400
+  PASS  an unknown payment method is refused (400) naming the allowed ones — HTTP 400
+  PASS  a partial payment of 400.00 is accepted (201) and leaves the charge PARTIAL — HTTP 201 {"paid":400,"due":600,"st":"PARTIAL"}
+  PASS  …and its receipt comes from the college's own CRCP- sequence (never the school's RCP-) — receipt=CRCP-9621204761
+  PASS  an OVER-payment is refused (409) by name — never clamped into a credit — HTTP 409 "Payment exceeds the outstanding amount (৳600)."
+  PASS  paying the exact remainder settles the charge (201, PAID, due 0) — HTTP 201 due=0 status=PAID
+  PASS  every college payment appended ONE shared-ledger PAYMENT entry, feeId null and meta.collegeFeeId set — entries=2 [600,400]
+  PASS  …and the ledger entries live in the ONE ledger the school reads (no college money collection) — n=2
+
+### two simultaneous payments that together exceed the balance (the D-7-12 transaction)
+  PASS  a second, unpaid 1000 charge exists for the race — charge=cf_zziso-col-stu-a_r_06be5174e10e2f1f_1_1
+  PASS  exactly ONE of the two 600.00 payments against a 1000.00 charge succeeds (the other is a 409) — statuses=[201,409] errors=[null,"Payment exceeds the outstanding amount (৳400)."]
+  PASS  …and the stored paidAmount is exactly 600.00 — never the double payment, never over the billed amount — paidAmount=600
+
+### dues (D-7-14): finite, derived, and never negative
+  PASS  a student's dues summary is finite, the rows carry a derived status, and due === billed − paid — HTTP 200 billed=2000 paid=1600 due=400 status=PARTIAL
+  PASS  a ghost student is a 404 (never a 403 oracle) — HTTP 404
+  PASS  the programme/term dues read lists one row per student with the same arithmetic — HTTP 200 students=1 due=400
+
+### awards (D-7-13): propose/approve, no self-approval, an accountant may not approve
+  PASS  an ACCOUNTANT may PROPOSE an award (201, PROPOSED, proposedBy recorded) — HTTP 201 null
+  PASS  …but may NOT approve it (403 — only an admin-level role decides) — HTTP 403 "An award is approved or rejected by the administration, and never by the person who proposed it."
+  PASS  no one may approve their OWN proposal (403 — the four-eyes rule of the school's flow) — HTTP 403 "An award is approved or rejected by the administration, and never by the person who proposed it."
+  PASS  a DIFFERENT admin approves it (200, APPROVED, approvedBy recorded) — HTTP 200 null
+  PASS  re-deciding a decided award is a VISIBLE 409 — HTTP 409 "This award is already approved."
+  PASS  a FIXED award naming a head that is not this tenant's is refused (400) — HTTP 400
+  PASS  a percentage outside 1..100 is refused (400) — HTTP 400
+  PASS  an APPROVED 50% award halves only the NEW charge (400 → 200, discount 200 recorded) — HTTP 200 {"gross":400,"discount":200,"amount":200}
+  PASS  the waived money reached the SHARED ledger as a DISCOUNT entry (the ledger and the statement agree) — entries=1 [200]
+  PASS  GET lists the awards (the decided one and the admin's own proposal) — HTTP 200 rows=2
+
+### the college's own config (D-7-3): ONE row per tenant, never feeSetting
+  PASS  GET returns the shipped defaults (an empty channel list, BDT) when nothing is stored — HTTP 200 currency=BDT
+  PASS  PATCH saves the channels and the note (200) — HTTP 200 null
+  PASS  …and exactly ONE config row exists for the tenant (a deterministic id) — rows=1
+  PASS  GET reflects the saved config — HTTP 200
+
+### the 403/400/404 matrix and the role probe, everything bracketed by a document count
+  PASS  a SCHOOL tenant is refused (403, zero data) on all six college fee reads
+  PASS  …and on all six college fee writes — statuses=[403,403,403,403,403,403]
+  PASS  every SCHOOL-tenant refusal — writes NOTHING (college fee spine 9 → 9) — delta=0
+  PASS  an unauthenticated read is 401 (not 403, not 200) — HTTP 401
+  PASS  a foreign tenant sees another tenant's student as the SAME 404 as a ghost (no oracle) — foreign=404 ghost=404
+  PASS  …and another tenant's charge is NOT FOUND (404) on a payment — HTTP 404
+  PASS  a ghost structure row is a 404 — HTTP 404
+  PASS  the college admin can price and bill BRANCH B (the branch probe's real setup) — head=201 row=201 gen=200 charge=cf_zziso-feeprobe-stu-mv6oqjdm_r_80b4b84e171e2349_1_1
+  PASS  a BRANCH-scoped admin's head list holds its own branch's head and NO other branch's — HTTP 200 rows=2 hasOwn=true
+  PASS  …and CAN read its own branch's programme (200 — the positive control) — HTTP 200
+  PASS  …but is refused (403) on another branch's programme — HTTP 403
+  PASS  …and cannot edit another branch's structure row (403) — HTTP 403
+  PASS  …and cannot delete another branch's head (403) — HTTP 403
+  PASS  …and cannot pay another branch's charge (403) — HTTP 403 "Forbidden"
+  PASS  …and cannot read another branch's student dues (403) — HTTP 403
+  PASS  …but CAN pay its own branch's charge (201 — the positive control) — HTTP 201 null
+  PASS  every cross-branch refusal — writes NOTHING (college fee spine 13 → 13) — delta=0
+  PASS  a TEACHER is refused (403, zero data) by ALL 17 college-fee handlers — every route, every method — 0/17 reached
+  PASS  a GUARDIAN is refused (403, zero data) by ALL 17 college-fee handlers — every route, every method — 0/17 reached
+  PASS  a STUDENT is refused (403, zero data) by ALL 17 college-fee handlers — every route, every method — 0/17 reached
+  PASS  …so no teacher/guardian/student can read or write any college money (the stop-and-report condition holds)
+  PASS  every denied-role probe — writes NOTHING (college fee spine 13 → 13) — delta=0
+
+### the staff matrix: ACCOUNTANT, REGISTRAR and BRANCH_ADMIN against every handler
+  PASS  the ACCOUNTANT reaches ALL 17 handlers — the accounts office writes the fee spine, not just reads it — 0/17 refused
+  PASS  the REGISTRAR is READ-ONLY: all 6 reads reached, and all 11 writes are 403 — reads=6/6 writesRefused=11/11
+  PASS  the BRANCH_ADMIN reaches all 17 handlers on its own branch's spine (confinement is proved separately) — 0/17 refused
+  PASS  every staff-role probe — writes NOTHING (college fee spine 13 → 13) — delta=0
+
+### no college fee row appears in a school fee read (Q3, the 7c half)
+  PASS  the school fee list is byte-identical with the college spine populated — HTTP 200 equal=true
+  PASS  /api/stats' fee payload is byte-identical too — HTTP 200 equal=true
+  PASS  …and neither a college charge id (cf_…) nor a college fee head appears anywhere in that read — bytes=51
+  PASS  the college heads live in their OWN collection — no school `feeCategories` row was written — collegeHeads=3 schoolCats=0
+
+### the ledger readers: what a school-facing ledger read shows of college money
+  PASS  the tenant's ledger read INCLUDES the college money, and every college row is TAGGED (feeId null + meta.collegeFeeId / collegeDiscountId) — HTTP 200 rows=4 collegeTagged=4
+  PASS  …and no college amount is in that read UNTAGGED: every 'College payment' row carries its collegeFeeId — collegePaymentRows=3 tagged=3
+  PASS  the ledger CSV export includes the college row too, with an EMPTY feeId column (its collegeFeeId lives in meta, not in the school's feeId) — HTTP 200 collegeLines=3
+  PASS  a student's OWN ledger shows their own college payment, tagged the same way (ledgerForStudent is a college-money reader too) — HTTP 200 rows=3 collegeTagged=3
+  PASS  no `payments` row was written for the college payment, so the school payments surface cannot show college money — schoolPaymentRows=0 collegeTagged=0
+
+### 7e-pre: a retry, a second tab or a double submit must never record a college payment twice
+  PASS  7e-pre: a fresh 1000.00 charge exists to pay — charge=cf_zziso-col-stu-a_r_0351888d67911474_1_1
+  PASS  a keyed payment is accepted (201) and carries the college's own CRCP- receipt — HTTP 201 receipt=CRCP-9622997537
+  PASS  the ledger entry is pinned to (tenant, key): its id is derived from them and the key is stored in its meta — rows=1 id=le_cp_9ac056f4e3d34d66f1ee4807bb169a791dc6b3b2 key=zzcf-key-mv6oqztx-a65zd4
+  PASS  a repeat with the SAME key returns the FIRST result — same receipt, same amount, same due — and says so — HTTP 200 replayed=true receipt=CRCP-9622997537 due=800
+  PASS  …and posted NO second ledger row — rows=1
+  PASS  …and consumed NO new receipt number (the entry's own receipt is untouched) — receipt=CRCP-9622997537
+  PASS  …and left the charge exactly as the first payment left it (one payment, never two) — paid=200 stampedReceipt=CRCP-9622997537
+  PASS  10 SIMULTANEOUS requests with ONE key record exactly ONE payment: one ledger row, one receipt, one 100.00 added to the charge — rows=1 paid=100 receipts=1 statuses=[200,200,200,200,200,200,200,200,200,201]
+  PASS  10 simultaneous payments with DIFFERENT keys against a 1000.00 charge: every answer is 201 or 409, exactly one ledger row per payment that landed, and the stored paid never exceeds the billed amount — statuses=[409,201,409,201,201,409,409,409,409,409] landed=3 paid=900 rows=3 firstRefusal="Payment exceeds the outstanding amount (৳100)."
+  PASS  …and the over-payment rule still holds after the race: the exact remainder settles the charge (201, due 0), one paisa more is refused by name (409) — settle=201 due=0 over=409 error="Payment exceeds the outstanding amount (৳0)."
+  PASS  …and the settled charge holds one ledger row per payment (the race never duplicated one) — rows=4 landed=3
+  PASS  the same key with a DIFFERENT amount or method is refused (409) by name — never silently replayed — amount=409 method=409 error="This payment key was already used for a different charge, amount or method. Start a new payment."
+  PASS  …and a refused request leaves the charge and the ledger exactly as they were — paid=200 rows=1
+  PASS  a key already spent on a DIFFERENT charge is refused (409) too, so one key can never pay two charges — HTTP 409 error="This payment key was already used for a different charge, amount or method. Start a new payment."
+  PASS  the SAME key in ANOTHER tenant is a new payment there (its own derived id, its own receipt) and never collides with or leaks the first tenant's — HTTP 201 otherId=le_cp_3c9ab64f675acd49e7a0538a73cbc57d4504c612 c1Rows=1
+  PASS  no key behaves exactly as before: two payments append TWO ledger entries and neither carries a payment key — statuses=[201,201] rows=2 ids=["r_a7f0d7","r_d15abf"]
+  PASS  an unusable key value is refused (400) by name rather than ignored, so a repeat-proof payment can never quietly become repeatable — HTTP 400 error="idempotencyKey must be between 8 and 120 characters."
+
+RESULT: 112/112 checks passed
+✅ COLLEGE FEES API OK — 112 check(s): the eight /api/college-fees routes are gated (requireCollege → the D-7-18 allow-list → writeGuard), the test/reports show PER_CREDIT + an unknown unit/basis refused by 7a's own validation, the (programme, term, head) duplicate is a visible 409, generation is idempotent and tops up, a payment is integer minor units with over-payment refused and two racing payments cannot both land, awards follow propose/approve with no self-approval and post their waived money to the shared ledger, the accountant/branch-admin/registrar staff matrix holds (registrar read-only), the ledger readers show the college money only with its tag, and no college row leaks into a school fee read.

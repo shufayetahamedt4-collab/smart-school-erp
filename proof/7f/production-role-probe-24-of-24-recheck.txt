@@ -1,0 +1,71 @@
+=== D-7-18 role probe — INDEPENDENT RE-RUN (2026-10-13, this session) ===
+
+commands, in order:
+  npm run build                                          (dev STOPPED first)                  exit 0, 187/187 pages
+  NODE_ENV=production npx next start -p 3111              (emulator env, FIREBASE_CLIENT_EMAIL/KEY empty)
+  node scripts/isolation-fixture.mjs create              (fresh fixture, emulator only)       exit 0
+  PROBE_ORIGIN=http://127.0.0.1:3111 node scripts/verify-role-probe.mjs                    exit 0, 24/24
+
+build that answered: .next/BUILD_ID = bTZhoZ8u8HFwxegmI4rKq (recorded by the probe's own check F)
+
+PRECONDITION THIS RE-RUN EXPOSED (recorded, not hidden): the probe asserts that the fixture's
+BOTH tenant renders ITS OWN 45,000 charge and its CRCP-900001 receipt, so it needs the fixture's
+college spine to exist. verify-college-fees-api.mjs resets that spine on purpose — line 264,
+  await resetCollegeFees(`${P}both`);
+so a probe run AFTER that verifier sees an empty college half and fails 4 checks (B's two print-page
+checks and D's two refusal checks) even though nothing about the role matrix regressed. The first
+attempt in this session did exactly that and is kept verbatim below. The correct order is:
+  isolation-fixture.mjs create  →  probe  →  (then) verify-college-fees-api.mjs
+or re-create the fixture before the probe. Nothing was changed to make the probe pass: the fix was
+running it against the fixture state its own acceptance criterion describes.
+
+=== first attempt (AFTER verify-college-fees-api had reset the BOTH spine) — 20/24 ===
+  ❌ the admin's print statement renders the tenant's OWN charge (৳45,000.00) and its rate footer — HTTP 200 money=false
+  ❌ the admin's print receipt renders THAT payment (CRCP- receipt and its ৳15,000.00) — HTTP 200 receipt=true
+  ❌ …and both print pages render for them (authorized, empty — no charges raised in that tenant) — accountant=200 registrar=200
+  ❌ …and so does the receipt page — statuses=[200,200,200]
+❌ role probe FAILED — 4 of 24 check(s).
+
+=== the re-run, on a freshly created fixture — 24/24 ===
+[hostfetch] Host header delivery enabled (requests with Host: go through node:http)
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+
+=== D-7-18 role probe — college fee screens and print pages (http://127.0.0.1:3111) ===
+
+### F. the build that answered: PRODUCTION BUILD (build id bTZhoZ8u8HFwxegmI4rKq)
+  ✅ .next/BUILD_ID exists and the served page embeds it (a production build, not a dev server) — build id bTZhoZ8u8HFwxegmI4rKq
+
+### A. authentication: no session, no data
+  ✅ an anonymous print statement renders 'Statement not found.' and no money — HTTP 200
+  ✅ an anonymous print receipt renders 'Receipt not found.' — HTTP 200
+  ✅ GET /api/college-fees/dues unauthenticated → 401 — HTTP 401
+  ✅ GET /api/fees unauthenticated → 403 — HTTP 403
+
+### B. authorized college access: the screen and both print pages
+  ✅ the college fee screen is served to the tenant's admin (200, an app shell — never a refusal page) — HTTP 200
+  ✅ the admin's print statement renders the tenant's OWN charge (৳45,000.00) and its rate footer — HTTP 200 money=true
+  ✅ the admin's print receipt renders THAT payment (CRCP- receipt and its ৳15,000.00) — HTTP 200 receipt=true
+  ✅ the ACCOUNTANT and the read-only REGISTRAR both reach the college fee read — accountant=200 registrar=200
+  ✅ …and both print pages render for them (authorized, empty — no charges raised in that tenant) — accountant=200 registrar=200
+  ✅ the ACCOUNTANT may write (400 from validation, i.e. past the gate) but the REGISTRAR may not (403) — accountant=400 (Give the fee head a name.) registrar=403 (College fees are managed by the school administration and the accounts office.)
+
+### C. a tenant with no college half is refused
+  ✅ a SCHOOL tenant's admin gets 403 with ZERO data from the college fee read — HTTP 403 data=null
+  ✅ …and is 403 on the write too — HTTP 403
+  ✅ its print page says 'available to college tenants only' and carries no college money — HTTP 200
+  ✅ …and the receipt page does not render another tenant's payment — HTTP 200
+
+### D. TEACHER / GUARDIAN / STUDENT are refused INSIDE a college-capable tenant
+  ✅ all three are 403 on the college fee read, with the D-7-18 read refusal — statuses=[403,403,403]
+  ✅ …and the print statement renders the same refusal for each, with the tenant's charge NOWHERE in the HTML — statuses=[200,200,200]
+  ✅ …and so does the receipt page — statuses=[200,200,200]
+  ✅ …and all three are refused the write as well (403, never a 400 — the gate is first) — statuses=[403,403,403]
+  ✅ the TEACHER's own school fee read is untouched (200 — 7e changed no school behaviour) — HTTP 200 rows=2
+
+### E. another tenant's student or charge is the SAME answer as a ghost
+  ✅ a foreign student id is the SAME 404 body as a ghost id (no oracle) — foreign=404 ghost=404
+  ✅ …and the reverse direction is refused the same way — HTTP 404
+  ✅ a charge id that does not exist renders 'Receipt not found.' with no money — HTTP 200
+  ✅ another tenant's student renders 'Statement not found.' for this tenant's admin — HTTP 200
+
+✅ ROLE PROBE OK — 24 checks against the PRODUCTION build bTZhoZ8u8HFwxegmI4rKq: authentication, authorized college access (admin + ACCOUNTANT + read-only REGISTRAR), the SCHOOL-tenant refusal, the TEACHER/GUARDIAN/STUDENT refusal inside a college-capable tenant, and tenant isolation.

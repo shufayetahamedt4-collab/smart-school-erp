@@ -1,0 +1,9 @@
+=== 7d remainder — mutation proofs for the print-page checks ===
+branch integration/main-into-college, HEAD e5ee07d, working tree (uncommitted)
+each mutation was applied to the working tree, the verifier run, and the file restored to its exact bytes (sha1 verified)
+
+########## M1: remove the branch confinement from the statement page ##########
+mutated: src/app/print/college-fee-statement/[studentId]/page.tsx — the line
+         'if (!canAccessBranch(session, student.branchId)) return NOT_FOUND;' was deleted
+ FAIL  statement: confines the read to the caller's branch
+❌ college fees page verification FAILED — 1 of 360 check(s).

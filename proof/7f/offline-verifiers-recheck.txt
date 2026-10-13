@@ -1,0 +1,517 @@
+===== verify-college-fees-page =====
+=== college fees page layer (offline) ===
+
+1. the view module is import-clean, and all three pages use it
+  PASS  college-fees-view.ts imports only the three pure modules — ./college-fees, ./college-fees-access, ./institution
+  PASS  it declares no require()
+  PASS  it pulls in no prisma / node: / next/server / react
+  PASS  the college fee page imports the view module
+  PASS  the shared ledger page imports the view module
+  PASS  the view module consumes the ONE access rule
+  PASS  the access module itself stays import-free
+  PASS  the view module builds on 7a's money module
+  PASS  no page talks to Firestore or fetch() directly
+
+2. ONE money helper: integer minor units in, grouped money out
+  PASS  zero — got "৳0.00", want "৳0.00"
+  PASS  one paisa — got "৳0.01", want "৳0.01"
+  PASS  ten paisa — got "৳0.10", want "৳0.10"
+  PASS  99 paisa — got "৳0.99", want "৳0.99"
+  PASS  one taka — got "৳1.00", want "৳1.00"
+  PASS  odd amount 1,234.56 — got "৳1,234.56", want "৳1,234.56"
+  PASS  grouping at 10 lakh — got "৳1,000,000.00", want "৳1,000,000.00"
+  PASS  huge amount — got "৳1,234,567,890,123.45", want "৳1,234,567,890,123.45"
+  PASS  the largest safe integer still prints — got "৳90,071,992,547,409.91", want "৳90,071,992,547,409.91"
+  PASS  negative money keeps its sign — got "-৳0.01", want "-৳0.01"
+  PASS  null is not a zero — got "—", want "—"
+  PASS  undefined is not a zero — got "—", want "—"
+  PASS  a non-numeric string is not a zero — got "—", want "—"
+  PASS  NaN is not a zero — got "—", want "—"
+  PASS  Infinity is not a zero — got "—", want "—"
+  PASS  an object is not a zero — got "—", want "—"
+  PASS  the unknown marker is a dash — got "—", want "—"
+  PASS  1,500 major units — got "৳1,500.00", want "৳1,500.00"
+  PASS  a padded string — got "৳1,200.50", want "৳1,200.50"
+  PASS  junk stays unknown — got "—", want "—"
+  PASS  a non-BDT label uses its own glyph — got "$1,234.56", want "$1,234.56"
+  PASS  an unknown currency falls back to the code — got "SEK 1,234.56", want "SEK 1,234.56"
+  PASS  BDT is the taka glyph
+  PASS  the module uses no toFixed/toLocaleString
+  PASS  minorUnits refuses junk rather than zeroing it
+
+3. every amount is carried as whole paisa before any arithmetic
+  PASS  sumMinor over junk (already-minor inputs) — got 124456, want 124456
+  PASS  minorValue reads a padded minor string — got 1000, want 1000
+  PASS  minorValue refuses junk — got null, want null
+  PASS  an absent amount contributes nothing — got null, want null
+  PASS  billed total — got 150050, want 150050
+  PASS  paid total — got 20050, want 20050
+  PASS  discount total — got 25, want 25
+  PASS  due total (amount − paid, per row, never negative) — got 130000, want 130000
+  PASS  row count — got 3, want 3
+  PASS  dueMinorOf clamps an over-paid row — got 0, want 0
+  PASS  an empty charge set is zero, not NaN — got 0, want 0
+  PASS  the term total prints all three figures
+  PASS  a typed amount becomes paisa — got 150050, want 150050
+  PASS  the formatter never converts twice — got "৳1,500.00", want "৳1,500.00"
+  PASS  a grouped amount is accepted — got 150000, want 150000
+  PASS  a trailing dot is accepted — got 150000, want 150000
+  PASS  three decimals are refused — got false, want false
+  PASS  an empty field is refused — got false, want false
+  PASS  zero is refused — got false, want false
+  PASS  a negative amount is refused — got false, want false
+  PASS  letters are refused — got false, want false
+  PASS  majorFromTyped round-trips through paisa — got 4500.75, want 4500.75
+  PASS  majorFromTyped refuses junk — got null, want null
+  PASS  the refusal for too many decimals says so
+
+4. money forms: disabled while in flight, refusals left to the server
+  PASS  a complete form is enabled — got false, want false
+  PASS  a busy form is disabled — got true, want true
+  PASS  a form with no charge is disabled — got true, want true
+  PASS  a form with no method is disabled — got true, want true
+  PASS  a form with an unreadable amount is disabled — got true, want true
+  PASS  an amount above the due is still submittable — got false, want false
+  PASS  the handler shares the button's rule — got true, want true
+  PASS  the busy label differs from the idle one — got true, want true
+  PASS  payment refused: structure form — got false, want false
+  PASS  structure form needs a programme — got true, want true
+  PASS  structure form needs a head — got true, want true
+  PASS  structure form needs a whole term — got true, want true
+  PASS  structure form needs a positive amount — got true, want true
+  PASS  generation needs a programme — got true, want true
+  PASS  generation is disabled while busy — got true, want true
+  PASS  a head needs a name — got true, want true
+  PASS  a head form is enabled with a name — got false, want false
+  PASS  the config form is disabled only while busy — got true, want true
+  PASS  a PERCENT award in range is submittable — got false, want false
+  PASS  a PERCENT award over 100 is refused — got true, want true
+  PASS  a FIXED award needs at least one head — got true, want true
+  PASS  a FIXED award with a head and an amount is submittable — got false, want false
+  PASS  labels read as busy — got true, want true
+  PASS  decide labels differ by state and busy — got true, want true
+  PASS  a payment receipt line prints the receipt, what was applied and what is left — Recorded ৳1,500.50 — CRCP-1. Still due: ৳50.25 (partly paid).
+
+5. D-7-18 at the page layer: who may write, who may only read, who is refused
+  PASS  the write-control map: 4 writers (ACCOUNTANT never decides), 1 read-only, 13 refused — exact
+  PASS  SUPER_ADMIN holding every write control — got true, want true
+  PASS  the ACCOUNTANT may propose — got true, want true
+  PASS  the ACCOUNTANT may not decide — got false, want false
+  PASS  the REGISTRAR sees no write control at all — got true, want true
+  PASS  a TEACHER sees no write control at all — got true, want true
+  PASS  no session yet → loading — got "loading", want "loading"
+  PASS  a session that failed with nothing cached → error — got "error", want "error"
+  PASS  a failed refresh of a LIVE session still renders — got "ready", want "ready"
+  PASS  a college tenant + a writer → ready — got "ready", want "ready"
+  PASS  a BOTH tenant + the registrar → ready — got "ready", want "ready"
+  PASS  a SCHOOL tenant → no-college — got "no-college", want "no-college"
+  PASS  an absent shape → no-college — got "no-college", want "no-college"
+  PASS  an unknown shape → no-college — got "no-college", want "no-college"
+  PASS  a TEACHER on a college tenant → refused — got "refused", want "refused"
+  PASS  a GUARDIAN on a BOTH tenant → refused — got "refused", want "refused"
+  PASS  a STUDENT on a college tenant → refused — got "refused", want "refused"
+  PASS  loading wins over a missing shape — got "loading", want "loading"
+  PASS  the page's read gate is the access rule — got true, want true
+  PASS  the page's write gate is the access rule — got true, want true
+  PASS  the proposer cannot decide their own award — got false, want false
+  PASS  another admin can decide it — got true, want true
+  PASS  a decided award cannot be re-decided — got false, want false
+  PASS  the ACCOUNTANT cannot decide any award — got false, want false
+
+6. the page asks the module, and never hard-codes a control or a format
+  PASS  the page uses the page-state gate
+  PASS  the page uses the write-control map
+  PASS  the page gates the pay form on busy
+  PASS  7 write controls are each guarded by a controls.<id> decision — all guarded
+  PASS  the pay button's disabled expression passes `busy`
+  PASS  the handler re-checks the same rule
+  PASS  the page does not use the school money formatter
+  PASS  the page does not format money by hand
+  PASS  money is printed by the one helper
+  PASS  the payment carries integer minor units
+  PASS  no charge amount is ever typed for generation — none
+  PASS  the page re-states no role list
+  PASS  the page reads only the 7c fee API
+  PASS  7 fee segments used, every one an existing route — heads, structure, dues, discounts, generate, payments, config
+  PASS  the tabs are the four screens of D-7-16 — heads, structure, dues, config
+  PASS  an unknown tab falls back to the first — got "heads", want "heads"
+  PASS  a known tab is honoured — got "dues", want "dues"
+  PASS  the nav href is the one route — got "/dashboard/college-fees", want "/dashboard/college-fees"
+
+7. the shared ledger: college money is TAGGED, and the two halves' totals never mix
+  PASS  a college payment is tagged — got true, want true
+  PASS  a college waiver is tagged — got true, want true
+  PASS  a school payment is not — got false, want false
+  PASS  an untagged null feeId is not college money — got false, want false
+  PASS  junk is not college money — got true, want true
+  PASS  the mode of a college row — got "COLLEGE", want "COLLEGE"
+  PASS  the mode of a school row — got "SCHOOL", want "SCHOOL"
+  PASS  the badge word — got "College", want "College"
+  PASS  no filter keeps every row — got 6, want 6
+  PASS  the college filter isolates the tagged rows — got 2, want 2
+  PASS  the school filter keeps the rest — got 4, want 4
+  PASS  an unknown filter is no filter — got 6, want 6
+  PASS  college money is detected — got true, want true
+  PASS  a purely school ledger has none — got false, want false
+  PASS  school collected excludes college money — got 123456, want 123456
+  PASS  school discounts — got 10000, want 10000
+  PASS  school late fees — got 5000, want 5000
+  PASS  school rows counted (including the pending one) — got 4, want 4
+  PASS  school by-method — got 123456, want 123456
+  PASS  college collected — got 50025, want 50025
+  PASS  college waivers — got 2550, want 2550
+  PASS  college rows counted — got 2, want 2
+  PASS  college by-method — got 50025, want 50025
+  PASS  a pending row is not collected — got 173481, want 173481
+  PASS  there is no combined total to print
+  PASS  a college row prints with paisa — got "৳500.25", want "৳500.25"
+  PASS  a school row is left to the school formatter — got null, want null
+  PASS  the note explains the badge
+  PASS  the note does not repeat the badge word it follows — Fee payments and waivers post to this same ledger. They carry a College badge, their totals are kept apart from the school's, and no figure on this page adds the two together.
+  PASS  the school by-method empty text names its half only when a college half exists — name the half conditionally
+  PASS  the filter offers both halves
+  PASS  the ledger page uses the tag
+  PASS  the ledger page splits its totals
+  PASS  the ledger page offers the mode filter
+  PASS  the ledger page renders the badge
+  PASS  the ledger page keeps the school's own money text
+  PASS  the ledger page excludes college rows from the school cards
+  PASS  the ledger page does no float formatting of college money
+
+8. ONE college fee nav entry behind requires:COLLEGE, grouped in finance
+  PASS  one registry line per carrying role — 4 entries
+  PASS  every one is a COLLEGE item
+  PASS  every one carries the one label
+  PASS  the item is grouped in `finance`
+  PASS  the fee entry is carried by exactly the v1 read roles with a dashboard — SCHOOL_ADMIN, BRANCH_ADMIN, REGISTRAR, ACCOUNTANT
+  PASS  a COLLEGE tenant's sidebar is the college list only — /dashboard/departments, /dashboard/programs, /dashboard/courses, /dashboard/registration, /dashboard/college-promotion, /dashboard/college-results, /dashboard/college-fees
+  PASS  …and it still lists the fee screen
+  PASS  a SCHOOL tenant's sidebar is untouched by 7d — 38 items
+
+9. the success screen names the tenant it created (7d closes the open item)
+  PASS  a COLLEGE tenant is told nothing about classes — got false, want false
+  PASS  …and prints no line at all when it has no college rows — got 0, want 0
+  PASS  a COLLEGE tenant's own counts are printed — got true, want true
+  PASS  a SCHOOL tenant reads the school line — got true, want true
+  PASS  a BOTH tenant reads BOTH of its halves — got 2, want 2
+  PASS  an absent shape reads as SCHOOL — got 1, want 1
+  PASS  an unknown shape reads as SCHOOL — got 1, want 1
+  PASS  no settings button for a COLLEGE tenant — got null, want null
+  PASS  a SCHOOL tenant keeps its settings button — got "/dashboard/settings", want "/dashboard/settings"
+  PASS  …with the label it has always had — got "School settings", want "School settings"
+  PASS  a BOTH tenant keeps it too — got "School settings", want "School settings"
+  PASS  an absent shape keeps it — got "/dashboard/settings", want "/dashboard/settings"
+  PASS  the wizard page uses the per-half lines
+  PASS  the wizard page uses the settings-link rule
+  PASS  the wizard page no longer hard-codes the school counts
+  PASS  the wizard page no longer hard-codes the settings button
+
+10. the pages' own contract with the 7c API
+  PASS  the structure read serves the programme picker — payload key present
+  PASS  the page reads the programmes from that read
+  PASS  the payments route takes integer minor units
+  PASS  the generate route takes no charge amount
+  PASS  the page's programme select is built from the served list
+  PASS  a served programme list is keyed by id — got "p1", want "p1"
+  PASS  a partial payload yields no bogus option — got 0, want 0
+  PASS  junk yields an empty list — got 0, want 0
+  PASS  bucket labels read as words — got "Library Fine", want "Library Fine"
+  PASS  an unknown bucket falls back — got "Other", want "Other"
+  PASS  cadence labels read as words — got "One time", want "One time"
+  PASS  unit labels say what a row covers — got "per approved course", want "per approved course"
+  PASS  basis labels name the v1 basis — got "flat", want "flat"
+  PASS  head state names inactivity — got "Inactive — never billed", want "Inactive — never billed"
+  PASS  due status reads as words — got "partly paid", want "partly paid"
+  PASS  a channel line names its kind — got true, want true
+  PASS  a channel kind label — got "Bank", want "Bank"
+  PASS  a count reads as words — got "1 charge", want "1 charge"
+  PASS  the currency label falls back to BDT — got "BDT", want "BDT"
+  PASS  a stored currency label wins — got "USD", want "USD"
+  PASS  rows are filtered to their own term — got 1, want 1
+  PASS  the structure totals line names both figures
+  PASS  the generation summary names the money
+  PASS  a refusal is shown verbatim
+  PASS  a network failure falls back
+  PASS  an API error exposes its message
+  PASS  the error copy is per screen
+  PASS  the read-only note explains the role
+  PASS  the section label for an undefined amount — got "—", want "—"
+
+11. the Dues header's figures = the rows beneath them = the API's own totals
+  PASS  the header counts the students — got 2, want 2
+  PASS  the header counts the CHARGE ROWS, not the students — got 3, want 3
+  PASS  billed = the API's billed — got 3510000, want 3510000
+  PASS  waived = the API's waivers — got 240000, want 240000
+  PASS  paid = the API's paid — got 2080000, want 2080000
+  PASS  due = the API's due — got 1430000, want 1430000
+  PASS  and billed really is the sum of the rows beneath — got 3510000, want 3510000
+  PASS  …as is due — got 1430000, want 1430000
+  PASS  the charge-shaped helper DOES collapse on summary rows (the 7d defect) — got 0, want 0
+  PASS  …and would have counted students as charges — got 2, want 2
+  PASS  the fixed helper does not — got true, want true
+  PASS  the header line names all six figures — 2 students · 3 charges · ৳35,100.00 billed · ৳2,400.00 waived · ৳20,800.00 paid · ৳14,300.00 due
+  PASS  the header line prints the API's own money — 2 students · 3 charges · ৳35,100.00 billed · ৳2,400.00 waived · ৳20,800.00 paid · ৳14,300.00 due
+  PASS  the header line is NOT the old zero row — 2 students · 3 charges · ৳35,100.00 billed · ৳2,400.00 waived · ৳20,800.00 paid · ৳14,300.00 due
+  PASS  zero students: all six figures are zero — got "{\"students\":0,\"charges\":0,\"billedMinor\":0,\"waivedMinor\":0,\"paidMinor\":0,\"dueMinor\":0}", want "{\"students\":0,\"charges\":0,\"billedMinor\":0,\"waivedMinor\":0,\"paidMinor\":0,\"dueMinor\":0}"
+  PASS  zero students: junk in is zero out, never NaN — got "{\"students\":0,\"charges\":0,\"billedMinor\":0,\"waivedMinor\":0,\"paidMinor\":0,\"dueMinor\":0}", want "{\"students\":0,\"charges\":0,\"billedMinor\":0,\"waivedMinor\":0,\"paidMinor\":0,\"dueMinor\":0}"
+  PASS  zero students still reads as a sentence — 0 students · 0 charges · ৳0.00 billed · ৳0.00 waived · ৳0.00 paid · ৳0.00 due
+  PASS  a fully paid set owes nothing — got 0, want 0
+  PASS  …and still shows what was billed — got 500000, want 500000
+  PASS  …and what was paid — got 500000, want 500000
+  PASS  a fully paid header still prints a due figure
+  PASS  the page prints the header through the one helper
+  PASS  the page no longer runs a charge total over the per-student summaries
+
+12. the Fee structure tab prints a pricing total, never billed/paid/due
+  PASS  the pricing total is the sum of the priced rows — got "৳27,500.00 in rows", want "৳27,500.00 in rows"
+  PASS  it never claims a charge was billed, paid or due — ৳27,500.00 in rows
+  PASS  an empty pricing table reads as zero, not NaN — got "৳0.00 in rows", want "৳0.00 in rows"
+  PASS  junk rows contribute nothing — got "৳0.00 in rows", want "৳0.00 in rows"
+  PASS  the charge-shaped total is the phantom the tab used to print — got "৳27,500.00 billed · ৳0.00 paid · ৳27,500.00 due", want "৳27,500.00 billed · ৳0.00 paid · ৳27,500.00 due"
+  PASS  the page's Term pricing header uses the pricing helper
+  PASS  the page's Term pricing header no longer uses the dues helper
+
+13. the Admin step does not prefill the platform SUPER_ADMIN's own identity
+  PASS  a SUPER_ADMIN creating a tenant gets NO prefill — got false, want false
+  PASS  a SCHOOL_ADMIN creating their own school keeps its prefill — got true, want true
+  PASS  the check is case-proof — got false, want false
+  PASS  extend mode is unchanged for a SUPER_ADMIN — got true, want true
+  PASS  extend mode is unchanged for anyone — got true, want true
+  PASS  a missing role is not the platform operator — got true, want true
+  PASS  the wizard page asks the rule
+  PASS  the wizard page no longer prefills the admin unconditionally
+  PASS  the rule lives with the wizard's other decisions
+
+14. the college fee STATEMENT and RECEIPT print pages (D-7-17)
+  PASS  the statement print route exists
+  PASS  the receipt print route exists
+  PASS  statement: requires a session
+  PASS  statement: a foreign tenant is NOT FOUND, never a 403 oracle
+  PASS  statement: the college gate is the pure decision (a page cannot use requireCollege)
+  PASS  statement: applies the v1 READ allow-list, the SAME rule as the API
+  PASS  statement: confines the read to the caller's branch
+  PASS  statement: never imports the NextResponse-shaped gate
+  PASS  statement: writes nothing (no write gate, no guarded write, no create)
+  PASS  statement: never reaches a school fee surface
+  PASS  statement: prints the tenant's own name
+  PASS  statement: reads through the 7c loaders, not a new query
+  PASS  receipt: requires a session
+  PASS  receipt: a foreign tenant is NOT FOUND, never a 403 oracle
+  PASS  receipt: the college gate is the pure decision (a page cannot use requireCollege)
+  PASS  receipt: applies the v1 READ allow-list, the SAME rule as the API
+  PASS  receipt: confines the read to the caller's branch
+  PASS  receipt: never imports the NextResponse-shaped gate
+  PASS  receipt: writes nothing (no write gate, no guarded write, no create)
+  PASS  receipt: never reaches a school fee surface
+  PASS  receipt: prints the tenant's own name
+  PASS  receipt: reads through the 7c loaders, not a new query
+  PASS  the statement href — got "/print/college-fee-statement/st_1", want "/print/college-fee-statement/st_1"
+  PASS  …narrowed to one term — got "/print/college-fee-statement/st_1?term=2", want "/print/college-fee-statement/st_1?term=2"
+  PASS  …and junk in the term means the whole programme — got "/print/college-fee-statement/st_1", want "/print/college-fee-statement/st_1"
+  PASS  no student ⇒ no href (never a broken link) — got "", want ""
+  PASS  a weird id is encoded — got "/print/college-fee-statement/a%2Fb%20c", want "/print/college-fee-statement/a%2Fb%20c"
+  PASS  the receipt href — got "/print/college-fee-receipt/cf_1", want "/print/college-fee-receipt/cf_1"
+  PASS  …selecting ONE payment — got "/print/college-fee-receipt/cf_1?receipt=CRCP-1", want "/print/college-fee-receipt/cf_1?receipt=CRCP-1"
+  PASS  …and a blank receipt number selects none — got "/print/college-fee-receipt/cf_1", want "/print/college-fee-receipt/cf_1"
+  PASS  no charge ⇒ no href — got "", want ""
+  PASS  both print paths are defined once, in the view module
+  PASS  the Dues tab links the statement through the helper
+  PASS  the Dues tab links the receipt through the helper
+  PASS  the receipt link appears only for a real receipt number
+  PASS  the receipt state is cleared when another student is picked
+  PASS  neither print page re-inlines its own path
+  PASS  no term ⇒ the whole programme — got null, want null
+  PASS  an empty term ⇒ the whole programme — got null, want null
+  PASS  an unreadable term ⇒ the whole programme — got null, want null
+  PASS  term 0 is refused — got null, want null
+  PASS  a fractional term is refused — got null, want null
+  PASS  a negative term is refused — got null, want null
+  PASS  a real term is read — got 2, want 2
+  PASS  …from a number too — got 3, want 3
+  PASS  the statement groups by term, in term order — got "1,2", want "1,2"
+  PASS  a term keeps its own rows — got "c1", want "c1"
+  PASS  …and its own billed total — got 20000, want 20000
+  PASS  …its own due total — got 15000, want 15000
+  PASS  …and its own waiver total — got 2500, want 2500
+  PASS  the second term totals independently — got 10000, want 10000
+  PASS  an unreadable term is term 1, so no charge is ever lost — got 1, want 1
+  PASS  …and both rows are on it — got 2, want 2
+  PASS  an empty statement has no groups — got 0, want 0
+  PASS  junk input has no groups — got 0, want 0
+  PASS  the scope line names the term — Term 1 · 1 charge · ৳200.00 billed · ৳50.00 paid · ৳150.00 due
+  PASS  …the charge count — Term 1 · 1 charge · ৳200.00 billed · ৳50.00 paid · ৳150.00 due
+  PASS  …and all three money figures — Term 1 · 1 charge · ৳200.00 billed · ৳50.00 paid · ৳150.00 due
+  PASS  …printing the rows' own money — Term 1 · 1 charge · ৳200.00 billed · ৳50.00 paid · ৳150.00 due
+  PASS  …and NOT the other term's — Term 1 · 1 charge · ৳200.00 billed · ৳50.00 paid · ৳150.00 due
+  PASS  the whole-programme scope says so, with its term count — Whole programme · 2 terms · 2 charges · ৳300.00 billed · ৳50.00 paid · ৳250.00 due
+  PASS  …and adds both terms' money — Whole programme · 2 terms · 2 charges · ৳300.00 billed · ৳50.00 paid · ৳250.00 due
+  PASS  an empty statement reads as zeros, never NaN — Whole programme · 0 terms · 0 charges · ৳0.00 billed · ৳0.00 paid · ৳0.00 due
+  PASS  the statement names its rates
+  PASS  …and the instant each took effect, read AND printed
+  PASS  the receipt names its rate too
+  PASS  both read the structure through the 7c loader
+  PASS  the statement totals come from the one charge helper
+
+15. the receipt prints one payment — and refuses to print another under its number
+  PASS  a tagged payment for THIS charge matches
+  PASS  a payment on ANOTHER charge does not
+  PASS  a school payment does not (it has its own feeId)
+  PASS  a college WAIVER is not a payment
+  PASS  a school FEE creation does not
+  PASS  an untagged entry never matches
+  PASS  an empty charge id matches nothing
+  PASS  its receipt number is read from the tag — got "CRCP-1", want "CRCP-1"
+  PASS  a missing tag has no receipt number — got "", want ""
+  PASS  asking for a receipt returns THAT payment — got "l1", want "l1"
+  PASS  …and says it was matched — got true, want true
+  PASS  asking for a receipt this charge does not hold returns NOTHING — got null, want null
+  PASS  without a number it prints the newest payment — got "l2", want "l2"
+  PASS  …and flags it as unmatched (the default selection) — got false, want false
+  PASS  a charge with no payments has no receipt — got null, want null
+  PASS  junk input has no receipt — got null, want null
+  PASS  free-text junk never matches — got null, want null
+  PASS  an equal timestamp breaks the tie deterministically — got "lb", want "lb"
+  PASS  the receipt page uses the one picker, ON the number it was asked for
+  PASS  …and prints nothing when it finds none
+  PASS  …saying WHICH number it could not find
+  PASS  …and reads the student's payments through the per-charge tag
+  PASS  a settled charge reads as paid in full — got "Paid in full", want "Paid in full"
+  PASS  a part-paid charge states the remainder — got "৳60.00 still due", want "৳60.00 still due"
+  PASS  an unpaid charge states the whole amount — got "৳100.00 still due", want "৳100.00 still due"
+  PASS  nothing billed says so — got "Nothing billed", want "Nothing billed"
+  PASS  no charge says nothing — got "", want ""
+  PASS  the receipt prints what the charge still owes
+  PASS  …beside what THIS receipt collected
+  PASS  …and names the payment as one instalment
+  PASS  the rate line carries the amount and the shape — got "৳1,500.00 per student · flat", want "৳1,500.00 per student · flat"
+  PASS  a course-priced row says so — got "৳1,500.00 per approved course · flat", want "৳1,500.00 per approved course · flat"
+  PASS  no structure row ⇒ no line — got "", want ""
+  PASS  the effective instant prefers the last edit — got "2026-02-01T00:00:00.000Z", want "2026-02-01T00:00:00.000Z"
+  PASS  …falling back to its creation — got "2026-01-01T00:00:00.000Z", want "2026-01-01T00:00:00.000Z"
+  PASS  an undated row has no instant — got null, want null
+  PASS  no row has no instant — got null, want null
+
+16. the 7d copy fixes are complete sentences, and the preview names itself
+  PASS  the Fee-structure intro is the complete sentence (7d item 3 — it read as clipped) — One row per programme, per term and per head. The programme's own term shape bounds the term number.
+  PASS  …and the OLD, clipped phrasing is gone
+  PASS  the Basis help line is the complete sentence — Per-credit pricing is not in v1 — it is refused by name.
+  PASS  …and the OLD mid-sentence version is gone
+  PASS  the preview panel names itself (7d item 4 — zeros beside committed money read as a wrong total) — Preview (nothing written)
+  PASS  …and only the dry-run branch says it
+
+✅ college fees page verification PASSED — 366 checks.
+(node:3184) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/USER/Downloads/SmartSchoolERP%20(4)/SmartSchoolERP%20(4)/SmartSchoolERP%20(2)/SmartSchoolERP/src/lib/college-fees-view.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to \\?\C:\Users\USER\Downloads\SmartSchoolERP (4)\SmartSchoolERP (4)\SmartSchoolERP (2)\SmartSchoolERP\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+===== verify-college-fees-data =====
+=== Phase 7b college fee data layer (offline) ===
+store: src/lib/db.ts (2576 lines)
+
+1. the collections — the four §24 models map to four distinct new collections
+  ✅ COLS maps collegeFeeHead/collegeFeeStructure/collegeFee/collegeFeeConfig to collegeFeeHeads, collegeFeeStructures, collegeFees, collegeFeeConfigs — once each, and none is a school fee collection
+
+2. additive only — dropping the four entries reproduces every pre-7b checksum
+  ✅ COLS 78 entries, RELS 74 models (74 bodies), prisma 78 accessors — dropping the 4 7b models and 7c's 1 reproduces all four recorded baselines, so no existing entry moved (bodies included), courseResult included
+
+3. the relations — the STORED foreign keys, and every target a registered model
+  ✅ 4 RELS blocks, 9 relations: every fk a STORED field, every target a registered model, and the config school-scoped (D-7-3)
+
+4. no derived id — the uniqueness stays a 7c refusal, and the id space is not the school's
+  ✅ no derived-id entry for any of the four; 7a's charge id is cf_st_1_h_1_1_1 (cf_…) and the school's is still fee_… — no shared id space
+
+5. the school fee spine is untouched — the same models, the same collections, no mode field
+  ✅ fee/feeSetting/feeCategory/feeTemplate/discount/payment/ledgerEntry still map where they did, and no college fee entry carries a mode field
+
+6. no school fee surface names a college fee model (libs, pages, print pages, scripts included)
+  ✅ none of the 14 school fee surfaces (routes, libs, pages, print pages, verify-fees-totals) names a college fee model, and the ONE shared-ledger exception (D-7-12's confirmCollegePayment) names it nowhere else in src/lib/ledger.ts
+
+7. the models are reachable only from a listed college segment — none yet, because 7b builds no route
+  ✅ no non-college route names a college fee model; the model is reached from the LISTED segment(s): college-fees
+
+8. the segment lands WITH its directory — 7c adds both in one change (§8 D-A)
+  ✅ COLLEGE_API_SEGMENTS holds the six pre-7b segments plus "college-fees" (7), and src/app/api/college-fees exists — the directory and its entry landed in one change (§8 D-A)
+
+9. the guard covers the new models (7b's four and 7c's collegeDiscount), and the segment list stays dependency-free
+  ✅ COLLEGE_MODEL_RE covers 10 models (the five pre-existing + 7b's four + 7c's collegeDiscount), matches each model name exactly, and college-routes.ts is dependency-free
+
+10. the ledger readers are the AUDITED set, and the college money in the shared ledger is only ever TAGGED (7c-follow-up)
+  ✅ the ledger's readers are exactly the 6 audited files (ledgerForSchool/ledgerForStudent in src/lib/ledger.ts, the /api/ledger route, the ?type=ledger CSV export, and 7d's two tenant-keyed college print pages), and the route still scopes a guardian/student to their own child; the DELETE cascade that nulls the FK is string-keyed and serves no report
+
+11. the college ledger entry is TAGGED and writes NO school `payment` row (D-7-12 — reported, not silently changed)
+  ✅ the college payment appends ONE tagged entry (`feeId: null` + `meta.collegeFeeId`), writes no school `payment` row, and uses its own CRCP- receipt sequence — so only the ledger's tenant-wide readers see it, and they can always tell it apart
+
+✅ COLLEGE FEES DATA LAYER OK — 11 check(s): the four college fee collections are registered in COLS/RELS/prisma as a purely additive change (the four recorded pre-7b baselines, RELS bodies included, still reproduce), the school fee spine is untouched and reachable from no college fee read, no derived-id entry makes a duplicate silent, no non-college route reaches the models, the college-fees segment and its directory landed together, the route guard covers every college fee model (7b's four plus 7c's collegeDiscount), the ledger's readers are exactly the audited ones, and the college entry in that shared ledger is tagged with feeId null + meta.collegeFeeId and writes no school payment row.
+(node:19584) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/USER/Downloads/SmartSchoolERP%20(4)/SmartSchoolERP%20(4)/SmartSchoolERP%20(2)/SmartSchoolERP/src/lib/college-routes.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to \\?\C:\Users\USER\Downloads\SmartSchoolERP (4)\SmartSchoolERP (4)\SmartSchoolERP (2)\SmartSchoolERP\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+===== verify-college-fees-logic =====
+=== Phase 7a college fee logic (offline) ===
+module: src/lib/college-fees.ts (1292 lines)
+
+1. dependency-free — no import, no require() in the pure module
+  ✅ no `import` and no `require(` — no prisma, no node:, no React, no college-terms import
+
+2. money is integer minor units — finite, 2 decimals, junk-safe
+  ✅ 13 money inputs: paisa rounding, 2 decimals, junk reads 0, and huge amounts stay finite
+
+3. the term model is ONE model (college-terms.ts ↔ college-fees.ts)
+  ✅ 182 (duration × system) probes agree with college-terms.ts on the count, the per-year rate, the normalising read, the term label and the validity predicate
+
+4. the head is the school's shape, and the two enum lists are the school's lists (D-7-2/D-7-5)
+  ✅ the 8 buckets and 5 cadences are byte-equal to the school route's own lists, and each predicate accepts exactly its list
+  ✅ a name is required and bounded, junk enums fall back, dueDay clamps 1..28 (junk → null), a 500-char note is bounded, and the lenient reader never throws
+
+5. the structure row — a positive amount, the programme's own term, and PER_CREDIT refused (D-7-6…D-7-8)
+  ✅ a valid row normalises; an unknown unit/basis is refused by name (only absent fields default), and a missing programme/head, a non-positive amount, a fractional or out-of-range term and PER_CREDIT are all refused
+
+6. presets are editable starting points, all valid, none privileged (D-7-4)
+  ✅ all 3 presets (and all 8 heads) validate, each call returns an independent copy, and no credit-based preset exists while PER_CREDIT is refused
+
+7. the cadence rule — one row = one event, the frequency decides how many (D-7-7)
+  ✅ 11 cadence/length anchors exact (MONTHLY per month, WEEKLY per week, TERM/YEARLY/ONE_TIME once, YEARLY once per year); every frequency gives a whole number ≥ 1 and junk reads as a year of MONTHLY
+
+8. term totals — the row sum, and the money a term raises (D-7-6/D-7-7)
+  ✅ structureTotal sums the rows once each; termBillTotal is amount × events and excludes an inactive head; an empty structure is 0 and the breakdown names every line
+
+9. charge derivation — deterministic ids, one row per event, idempotent, late top-up (D-7-10)
+  ✅ 10 charges derived (6 monthly + 1 term + 3 per course), ids deterministic and unique, order-independent, paidAmount 0, an inactive head refused, an optional head only on request, a re-run writes nothing, and a late registration tops up exactly one charge
+  ✅ a COURSE head on a MONTHLY cadence bills every event of the term for each course (6 then 12), and a late registration appends the new course's 6 events — the ids already billed keep their own course and event
+  ✅ a PER_CREDIT row is refused by name even with approved registrations, and null creditHours can never produce a NaN
+  ✅ empty input, an empty structure, junk, a missing student/programme, a fractional/zero/out-of-range term and an unknown head all resolve to an empty finite plan — never a throw
+
+10. discounts — percent and fixed, proposed/approved, rounded in paisa, never over-discounted (D-7-13)
+  ✅ validation: 1..100 percent, a positive fixed amount with a head, and an APPROVED award must record its approver — junk is refused rather than defaulted
+  ✅ percent-first with paisa rounding on an odd amount (1001.05 × 33% = 330.35), then the fixed waiver, and both are reported
+  ✅ a fixed waiver lands once per head (1000 + 500 across six monthly charges), an exhausted one clamps and reports it, a 100% waiver reaches 0 with no negative amount, and PROPOSED/REJECTED/junk awards are inert
+  ✅ two overlapping awards clamp at zero, a term/programme scoped award reaches only its own charges, and the same awards in either order give the same rows
+
+11. dues and payments — finite, derived status, over-payment refused (D-7-14)
+  ✅ dues are Σ(amount − paid) and finite (including a ৳9-billion set), the status is derived, junk money reads 0, and an over-paid charge owes 0
+  ✅ a partial payment leaves PARTIAL, an exact one PAID, and an over-payment (even by ৳0.01), a zero/negative/junk payment, a paid-up charge and an amount-less charge are all refused
+
+12. the ONE settings resolver — one config per tenant in v1 (D-6-18 pattern)
+  ✅ resolveCollegeFeeSettings is the one entry point, ignores the programme/term in v1, normalises channels/note/currency and falls back to the shipped defaults
+
+13. purity — frozen inputs twice, nothing mutated, no store/HTTP surface
+  ✅ a frozen input derives twice to the same plan, nothing is mutated, and the module names no store/HTTP surface
+
+✅ COLLEGE FEES LOGIC OK — 21 check(s): heads and structure validate around the school's own buckets and cadences, the cadence decides the billing events, a charge set is derived from the enrolment plus APPROVED registrations with deterministic ids and a late-registration top-up, discounts are rounded in paisa and never over-discount, dues are finite with over-payment refused, and one resolver owns the tenant's settings.
+(node:8572) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/USER/Downloads/SmartSchoolERP%20(4)/SmartSchoolERP%20(4)/SmartSchoolERP%20(2)/SmartSchoolERP/src/lib/college-fees.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to \\?\C:\Users\USER\Downloads\SmartSchoolERP (4)\SmartSchoolERP (4)\SmartSchoolERP (2)\SmartSchoolERP\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+===== verify-college-routes =====
+=== Phase 3 college route guard (offline) ===
+
+1. classification — every src/app/api directory is classified
+  ✅ 65 directories classified: 7 college (departments, programs, courses, course-registrations, college-promotion, course-results, college-fees) + 58 frozen non-college; no unclassified directory
+
+2. the gate — requireCollege() after getSession() and before every authorization/data access
+  ✅ 47 handler(s) across 22 route file(s): every one reads the session, then calls requireCollege({ schoolId }) and obeys it, before any can()/writeGuard()/prisma access
+
+3. no misplaced college access — a non-college directory may not gate or touch a college model
+  ✅ 99 file(s) under 58 non-college director(ies): none calls requireCollege() or touches a college model
+
+✅ COLLEGE ROUTE GUARD OK — 22 college route file(s), 47 gated handler(s), no unclassified API directory
