@@ -72,6 +72,86 @@ failing the taka sign, **not** a rendering defect. What is worth a human eye:
    buttons (2 students · 2 charges · billed/paid/due ৳0) is the **preview** result, but it sits right next to the
    committed per-student figures (৳24,750 / ৳27,500), so the zeros read like a wrong total. **Reads ambiguously.**
 
+---
+
+# 7d remainder — the print pages and the four look-at items (2026-10-13)
+
+HEAD `e5ee07d`, same branch, emulator only (`127.0.0.1:8080`, `demo-ss-test`), app on `:3000`,
+fixture created and the app restarted after it. **Uncommitted working tree** — nothing was staged,
+committed or pushed. This section records the second half of 7d: D-7-17's two print pages, the links
+that reach them, and the disposition of the four look-at items above.
+
+## The print pages (D-7-17)
+
+| route | what it is | guard chain |
+|---|---|---|
+| `/print/college-fee-statement/[studentId]` | one student's charges, dues and payments for a term (`?term=2`) or the whole programme; each term's footer names the structure rows that priced it **and the instant each took effect**, and the page prints its own print date | session → the student's tenant (a foreign id is NOT FOUND, never a 403 oracle) → `collegeGateDecision` (a SCHOOL tenant renders "college tenants only") → `canReadCollegeFees` (the D-7-18 v1 read allow-list, the SAME rule the API applies) → `canAccessBranch` |
+| `/print/college-fee-receipt/[chargeId]` | ONE confirmed college payment, `?receipt=CRCP-…` selecting which when a charge was paid in instalments; the charge's own billed/paid/due at print time, the head label the admin chose, and the rate that priced it | the same chain, keyed by the charge's `schoolId`/`branchId` |
+
+Both read through 7c's own loaders (`loadCharges` / `loadStructure` / `loadCollegeFeeConfig`) in
+process, so a print can never disagree with `GET /api/college-fees/dues`; a receipt is read from the
+shared ledger by its ONE tag (`feeId: null` + `meta.collegeFeeId`), and asking for a receipt number the
+charge does not hold prints *nothing* rather than a different payment under that number.
+
+Proved offline by `verify-college-fees-page.mjs` **sections 14–16** (the routes existing, the
+guard chain including the *returning* `if`, the single definition of both hrefs in the view module, the
+`?term=` reader's junk handling, term grouping and per-term totals, the scope line, `structureRateText`
+**and** `structureEffectiveAt` read *and printed*, `chargeTotals`, the per-charge tag match,
+`pickReceiptEntry`'s "the asked-for payment or the newest", and the pages not re-inlining their paths).
+Section **16** was added on 2026-10-13 during the pre-commit review, when the reviewer found that the
+copy item below was **not** pinned by any assertion: it now carries six source-level text pins (the
+complete intro and Basis sentences, the OLD clipped fragments' absence, and the preview label bound to
+the dry-run flag). The whole file re-ran **366/366** — see [../7f/production-build.txt](../7f/production-build.txt)
+for the batch that ran the 360-check version; the 366-check run is recorded at the end of
+`mutate-restored.txt` in this directory.
+
+## The four look-at items
+
+| # | item (from the list above) | disposition | evidence |
+|---|---|---|---|
+| 1 | the school-side empty state read "No payments yet" on a college tenant's ledger | **FIXED** in `cac825c` (phase 7d-fix) — the panel now says "No school payments yet" whenever the page holds college money | `src/app/dashboard/ledger/page.tsx:120`, screenshot `../7d-fix/ledger-college-tenant.png` |
+| 2 | "College College fee payments…" (the badge word repeated) | **FIXED** in `cac825c` — the sentence no longer repeats the badge word | `src/lib/college-fees-view.ts` (the 7d-screens comment at the fix), `../7d-fix/ledger-college-tenant.png` |
+| 3 | the Fee-structure intro and the Basis help line looked clipped mid-sentence | **FIXED here** — both are complete sentences now: "One row per programme, per term and per head. The programme's own term shape bounds the term number." and "Per-credit pricing is not in v1 — it is refused by name." | `src/app/dashboard/college-fees/page.tsx`; the page's copy is a client render (the SSR HTML is a loading shell), so it is pinned at **source level** by `verify-college-fees-page.mjs` **section 16** (added 2026-10-13 after the reviewer found this row claimed a pin that did not exist) and mutation-proved (M4/M5 below) — **no new screenshot**; the wording is visible on the next screenshot pass |
+| 4 | the preview chip's zeros sitting beside the committed money read like a wrong total | **FIXED** in `cac825c` — the Dues header sums the rows the table renders through one pure helper (`duesScopeText`), the Term pricing table shows a pricing total instead of a phantom "due" (`structureRowsText`), and the preview panel is labelled **"Preview (nothing written)"** | `verify-college-fees-page.mjs` sections 11–12 (the phantom-total check is explicitly a text pin: it asserts the OLD charge-shaped string as the thing the tab used to print), plus section 16, which pins the label itself and that only the dry-run branch says it |
+
+Nothing in the two print pages exposes another tenant's or another branch's money: the ledger search
+is keyed by the `schoolId` read off the student/charge the page has already authorized, and
+`scripts/verify-college-fees-data.mjs`'s ledger-reader audit now **names both pages** — so a future page
+that reads the shared ledger still fails until someone reviews it (check 10, 11/11).
+
+## Mutation proofs for these print-page checks (2026-10-13)
+
+Each mutation was made in the working tree, the verifier run, and the file restored to its **exact
+bytes** (`sha1sum -c` OK afterwards). Transcripts: `mutate-1-…txt`, `mutate-2-…txt`, `mutate-3-…txt`,
+`mutate-restored.txt` in this directory.
+
+| # | mutation (representative incorrect behaviour) | where | expected | observed | restored |
+|---|---|---|---|---|---|
+| 1 | the statement page no longer **confines the read to the caller's branch** | `src/app/print/college-fee-statement/[studentId]/page.tsx` (the `canAccessBranch` line deleted) | the guard-chain check fails | `verify-college-fees-page` **1 ❌ of 360** — `statement: confines the read to the caller's branch` | yes — sha1 identical, 360 PASSED |
+| 2 | the receipt page **ignores the `?receipt=` number** and prints the newest payment under it | `src/app/print/college-fee-receipt/[chargeId]/page.tsx` (`pickReceiptEntry(payments, receiptParam)` → `(payments, undefined)`) | the one-payment rule fails | **1 ❌ of 360** — `the receipt page uses the one picker, ON the number it was asked for` | yes — sha1 identical |
+| 3 | **any** college payment matches **any** charge (`isCollegePaymentEntryFor` drops the id comparison) | `src/lib/college-fees-view.ts` (the tag comparison → `return true`) | the tag checks fail | **1 ❌ of 360** — `a payment on ANOTHER charge does not` | yes — sha1 identical |
+| 4 | the Fee-structure intro **re-clipped** to its old phrasing | `src/app/dashboard/college-fees/page.tsx` (the `subtitle` string) | the two intro copy pins fail | **2 ❌ of 366** — `the Fee-structure intro is the complete sentence` and `…and the OLD, clipped phrasing is gone` (`mutate-4-copy-reclipped.txt`) | yes — sha1 identical |
+| 5 | the preview label **dropped** to plain `"Preview"` | `src/app/dashboard/college-fees/page.tsx` (the `dryRun` ternary) | the two label pins fail | **2 ❌ of 366** — `the preview panel names itself` and `…and only the dry-run branch says it` (`mutate-5-preview-label-changed.txt`) | yes — sha1 identical |
+
+Rows 1–3 were captured against the file at **360 checks**, before section 16 existed; rows 4–5 against
+**366**. **No transcript was rewritten** to match a number — the counts above are read from the files in
+this directory, and the script's own count line is what moved when section 16 was added.
+
+The restored run is `✅ college fees page verification PASSED — 366 checks.` (`mutate-restored.txt`,
+whose first block is the original 360-check restoration and whose last block is the post-section-16 one).
+**No assertion was weakened, skipped or deleted** — the failures above are the checks doing their job.
+
+## What this section does NOT claim
+
+- Items 1, 2 and 4 were fixed BEFORE this session (in `cac825c`); this section records where, not that
+they were re-done.
+- Item 3 is pinned at the source level, not by a fresh screenshot: the college fee page is a client
+  component whose server HTML is a loading shell, so the rendered sentence cannot be read from HTTP.
+- The four `01-…`–`04-…` screenshots and `college-fees-tab-and-nav.webm` from the earlier session are
+  still the visual record of the screens themselves; the two print pages have no screenshot in this
+  session — their evidence is the offline verifier plus the production-build role probe (which renders
+  both pages over HTTP against a real production binary and asserts the tenant's own money is on them).
+
 ## Teardown
 
 ```

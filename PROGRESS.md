@@ -5,7 +5,7 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** GitHub — `github.com/shufayetahamedt4-collab/smart-school-erp` (any clone works — see "Working from a different PC/device" below)
-**Last updated:** 2026-10-11 — **college Phase 6 is FINISHED** (results, GPA/CGPA, transcript) on `integration/main-into-college`, where the school and college lines are now merged; production still runs on `smart-school-db` (asia-southeast1). The newest session record is the **2026-10-11** block at the bottom of this file.
+**Last updated:** 2026-10-13 — **college Phase 7 is FINISHED** (fee basis: logic 7a, data 7b, API 7c, screens + print pages 7d, isolation/Q3 7e, finished record + production-build role probe 7f) on `integration/main-into-college`, where the school and college lines are merged; production still runs on `smart-school-db` (asia-southeast1). **Phase 7's last three parts are UNCOMMITTED working-tree changes on HEAD `e5ee07d`** — review and commit them before anything else. The newest session record is the **2026-10-13** block at the bottom of this file.
 
 ---
 
@@ -305,7 +305,7 @@ its own branch until the merge below):
   proof. Keys: 6a `cb05811`, 6b `0b1a3bb`, 6c `f12d227` (+ `e20f4f2` reads are admin/registrar only),
   6d `58d9c85`, 6e `fc8ff62`, 6f the docs commit. The full record and counts are in
   `docs/COLLEGE-STATUS.md` and `docs/COLLEGE-DECISIONS.md` §23.7.1. **Real Phase 7 (college fee basis)
-  and Phase 8a/8b/8c are NOT started.**
+  and Phase 9a/9b/9c (the dashboard / reports / import trio — renumbered from 8a/8b/8c on 2026-10-11, when attendance took Phase 8) were NOT started at that point.**
 - **Harness Host fix** — `d497f96` makes the host-scoped checks really run (they had been silently
   skipping).
 
@@ -336,9 +336,84 @@ its own branch until the merge below):
    on this branch; do **not** re-apply them (`docs/INTEGRATION-LOG.md`).
 10. **Archive date 2026-10-08 has passed** — do **not** delete the old `(default)` database yet; it is
     the rollback target.
-11. **Go-live: role probe on a production build** — not yet done.
+11. **Go-live: role probe on a production build** — **DONE 2026-10-13 (7f)** against a **local** production build (`npm run build` + `npx next start -p 3111`, `scripts/verify-role-probe.mjs` **24/24**, build `bTZhoZ8u8HFwxegmI4rKq`). Only a **hosted/deployed** run remains undone.
 12. **Go-live: production line decision** — `origin/main` vs `deploy/app-hosting` is still undecided
     (**NOT PROVEN**).
 13. **Go-live: check whether the in-process read cache can serve stale data across multiple App
     Hosting instances (maxInstances 10)** — the per-instance memo (`src/lib/db.ts`, ~30 s TTL + 120 s
     stale-while-revalidate grace) can answer a read with data another instance has already replaced.
+
+---
+
+## 🔁 Session — 2026-10-13 (college Phase 7 COMPLETE: 7d remainder, 7e, 7f — uncommitted)
+
+**Where this started.** Branch `integration/main-into-college`, HEAD `e5ee07d` (verified current before
+any edit). The task was the rest of College Phase 7: 7d's print pages and its four open UX items, 7e's
+isolation + Q3 mode-mixing proof, the D-7-18 production-build role probe, and the 7f record.
+**`git log -1` is still `e5ee07d`: everything below is the working tree — nothing was staged, committed,
+pushed or deployed, and no production secret, environment variable or deployment setting was touched.**
+
+### What was built
+
+1. **7d remainder — the two D-7-17 print pages.** `/print/college-fee-statement/[studentId]` (a
+   student's charges, dues and payments for a term or the whole programme; per-term totals; the
+   structure rows that priced each term **and the instant each took effect**; its own print date) and
+   `/print/college-fee-receipt/[chargeId]` (ONE confirmed college payment, `?receipt=CRCP-…` selecting
+   one instalment; the charge's own billed/paid/due; the rate that priced it). Both run 7c's own
+   loaders in process and apply the SAME guard chain as the API: session → the row's tenant → the
+   college gate → the D-7-18 read allow-list → branch. The Dues tab links each row's statement and the
+   payment it just recorded.
+2. **The four 7d look-at items are all closed.** Items 1, 2 and 4 were already fixed in `cac825c`
+   (7d-fix); item 3 (the truncated Fee-structure intro and Basis hint) was completed here, and the
+   wording is pinned at source level because the page's copy is a client render.
+3. **7e — isolation and the Q3 mode-mixing proof.** `isolation-fixture.mjs` now seeds the BOTH tenant's
+   **two halves** with non-overlapping money (school 12,000 + 5,000; college 45,000) plus the three
+   refused-role users. New `scripts/verify-mode-mixing.mjs` (**33**) measures the school fee list and
+   `/api/stats`' fee payload, creates a college head + structure + charge over HTTP for the same
+   tenant, and proves the school side comes back **byte-identical** while the college half gains
+   exactly its own new money — plus the ledger's ONE-tag separation and cross-tenant 404s.
+   `verify-fees-totals.mjs` grows by **9 college checks** (24 total) with its **15 school checks
+   untouched**.
+4. **The D-7-18 production-build role probe is RUN** — `scripts/verify-role-probe.mjs` (**24**), a real verifier file in this
+   change set (untracked until the change is committed, like every other Phase 7 file) covering the
+   college fee screen and both print pages (it reports which build answered by
+   matching the served page against `.next/BUILD_ID`). Two builds, both green: `J8dv3wQUnWhHl5Yxf2rz_`
+   (the phase's first run) and `bTZhoZ8u8HFwxegmI4rKq` (an independent re-run this session).
+5. **7f — the record**: `proof/7f/REPORT.md` (counts, files, verifiers with exit codes, the school
+   baseline, isolation/Q3, the probe, what could not run, known unresolved issues) and `proof/7e/` with
+   the baseline transcripts and four mutation proofs.
+
+### Numbers (verified this session, emulator only, fresh fixture, app restarted after it)
+
+| verifier | exit | count |
+|---|---|---|
+| `verify-mode-mixing` (new) | 0 | 33 |
+| `verify-fees-totals` | 0 | 24 = 15 school (unchanged) + 9 college |
+| `verify-tenant-isolation` | 0 | 106 |
+| `verify-branch-isolation` | 0 | 73 |
+| `verify-college-fees-api` (LAST) | 0 | 112 |
+| `verify-role-probe` (production build) | 0 | 24/24 |
+| `verify-college-fees-page` (offline) | 0 | 366 (360 in the production-build batch, before section 16) |
+| `verify-college-fees-data` / `-logic` / `-routes` (offline) | 0 | 11 / 21 / 22 |
+| `npm run typecheck` / `npm run build` | 0 | 0 errors / 187 pages |
+
+**Mutation proofs**: 7e's four (a school-read leak, a college-read leak, a mis-tagged ledger row, and
+GUARDIAN added to the read allow-list) plus **three new ones for the print pages** made this session (the
+statement's branch guard deleted; the receipt ignoring `?receipt=`; the tag matcher matching any charge) —
+each fails its verifier and each file was restored byte-identically (`sha1sum -c` OK).
+
+### Two honest caveats
+
+- **The probe has an ordering precondition** (found by re-running it): it asserts the fixture's college
+  spine, and `verify-college-fees-api` resets that spine on purpose, so run the probe **before** it or
+  re-create the fixture. Both the failing attempt (20/24) and the pass (24/24) are in
+  `proof/7f/production-role-probe-24-of-24-recheck.txt`.
+- **`verify-tenant-isolation` / `verify-branch-isolation` read 106 / 73 here, not the 97 / 65** in the
+  Phase 6 record — 7c's college fee sweep grew them; they were re-run **unchanged** by 7e.
+
+### The one thing to do next
+
+**Review and commit the Phase 7 working tree.** Then Phase 8 (`8-pre` first — the course↔teacher link)
+and 9a/9b/9c (college dashboard / reports / import), and the go-live items: a **hosted** role-probe run,
+the production-line decision (`origin/main` vs `deploy/app-hosting`), and the multi-instance read-cache
+question.

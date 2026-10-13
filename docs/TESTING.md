@@ -248,6 +248,12 @@ nothing to do with the code under test. The same rule is why the demo-school ver
 onboarding verifiers, and why the app is restarted after every emulator wipe. **Add new college fee verifiers
 before it, never after.**
 
+The same rule reaches one more verifier that does not read through the memo: **`verify-role-probe` (D-7-18)
+must run before `verify-college-fees-api` too**, because the reset above deletes the fixture's BOTH-tenant
+college spine that the probe's `authorized college access` checks assert against. The probe run recorded in
+`proof/7f/production-role-probe-24-of-24-recheck.txt` shows both states: 20/24 immediately after the reset,
+24/24 after `node scripts/isolation-fixture.mjs create`.
+
 Phase 7d (the college fee screens, the ledger's college badge and the college sidebar) adds one more
 **unguarded, offline** verifier:
 
@@ -265,6 +271,72 @@ Phase 7d (the college fee screens, the ledger's college badge and the college si
   money in a page, a write control rendered without its `controls.<id>` guard, the ledger's two halves summed
   together, a "School settings" button on a college tenant's success screen, the fee nav entry's
   `requires:"COLLEGE"` marker removed, and the structure read's additive `programmes` payload dropped.
+
+Phase 7d's **remainder** (D-7-17's two print pages, 2026-10-13) grows that same offline verifier — it
+stays unguarded, offline and mutation-proved, at **366 checks** (255 at `54e9ea4`; the 7d-remainder batch of 2026-10-13 ran it at **360**, section 16's six copy pins coming after):
+
+- **sections 14–15** pin the two new routes as text — `/print/college-fee-statement/[studentId]` and
+  `/print/college-fee-receipt/[chargeId]` exist, each applies the SAME guard chain in the SAME order as
+  the API (session → the student's/charge's tenant → `collegeGateDecision` → `canReadCollegeFees` →
+  `canAccessBranch`, with the *returning* `if` asserted, not a bare mention), neither imports the
+  NextResponse-shaped `requireCollege`, neither writes, neither reaches a school fee surface, both read
+  through 7c's own loaders (`loadCollegeFeeConfig` / `loadStructure`, `chargeTotals`), the statement names
+  its rates **and the instant each took effect** (read AND printed — a read whose value is dropped fails),
+  and the receipt prints ONE payment through the tagged per-charge rule (`pickReceiptEntry` on the number
+  it was asked for; the newest only when none was asked for). The pure halves (`statementTermValue`,
+  `statementTerms`, `statementScopeText`, `isCollegePaymentEntryFor`, `paymentReceiptNo`,
+  `pickReceiptEntry`, `structureRateText`, `structureEffectiveAt`, `chargeSettlementText`, the two
+  `…Href` builders) are exercised directly.
+- **three mutations, each making it fail, each restored byte-identically** (`sha1sum -c` OK; transcripts
+  `proof/7d/mutate-1-…`, `-2-…`, `-3-…`, `mutate-restored.txt`): the statement page's branch confinement
+  deleted (`1 ❌ of 360` — the file's count before section 16), the receipt page ignoring the `?receipt=` number
+  (`1 ❌`), and `isCollegePaymentEntryFor` matching any charge (`1 ❌`).
+  The restored run then was `PASSED — 360 checks.`; with
+  section 16 in the file, the same run ends `PASSED — 366 checks.` and its two copy mutations each fail
+  `2 ❌ of 366` (proof/7d's rows 4–5).
+
+Phase 7e (the fee rows' isolation and the BOTH-tenant Q3 proof) adds one **guarded, HTTP** verifier and
+grows an existing one:
+
+- `scripts/verify-mode-mixing.mjs` — **guarded** (`requireEmulator()`), needs the app and
+  `node scripts/isolation-fixture.mjs create`. It is the D-7-12/Q3 condition measured rather than
+  assumed, on the ONLY tenant that holds both modes' money at once: it captures the BOTH tenant's school
+  fee list and `/api/stats` fee payload, creates a college head + structure row + charge for that same
+  tenant **over HTTP**, re-reads the school side and compares **byte for byte** (identical), then checks
+  the college half gained exactly the new charge's money and nothing of the school's, that the shared
+  ledger keeps the two apart by its ONE tag (`feeId: null` + `meta.collegeFeeId` vs a school `feeId`),
+  that the mode cookie is UI context and not a filter, and cross-tenant 404s in both directions.
+  `SMOKE_PORT=3000 node scripts/verify-mode-mixing.mjs` (**33 checks**).
+- `scripts/verify-fees-totals.mjs` — unchanged in its school contract: the **15 school checks** are the
+  same 15 and still pass; **+9 college checks** add the other half of the same money rule on the BOTH
+  tenant (finite money, the fixture's own charge, totals that are exactly their own rows, and neither
+  half's money in the other's read). **24 PASS / 0 FAIL.** The college half **skips loudly** when the
+  fixture is absent (a hosted `SMOKE_ORIGIN=` run) instead of reporting an unrun check as green.
+- `scripts/isolation-fixture.mjs` gains the **money both halves need** on the BOTH tenant (a school fee
+  spine of 12,000 + 5,000 with one payment and one ledger entry, a college spine of a head, a structure
+  row, a `cfc_…` config, one 45,000 charge and one TAGGED ledger entry) plus the three refused-role
+  users (`TEACHER`, `GUARDIAN`, `STUDENT`) the D-7-18 probe needs **inside a college-capable tenant**.
+  `verify-mode-mixing` joins `suite-all.mjs` **after** `verify-branch-isolation`.
+
+D-7-18 (the role probe on a production build, Phase 7f) adds one more **guarded, HTTP** verifier:
+
+- `scripts/verify-role-probe.mjs` — **guarded** (`requireEmulator()`), needs the app, the fixture, and a
+  target: `PROBE_ORIGIN=http://127.0.0.1:3111 node scripts/verify-role-probe.mjs` (**24 checks**). It
+  probes the surface a person touches — the college fee **screen** and both **print pages** — over HTTP:
+  authentication (no session ⇒ no data, 401/403), authorized college access (admin + ACCOUNTANT +
+  read-only REGISTRAR, with the admin's own ৳45,000 charge and `CRCP-` receipt really on the paper), the
+  SCHOOL-tenant refusal (403 with zero data; the print pages say "college tenants only"), the
+  TEACHER/GUARDIAN/STUDENT refusal **inside a college-capable tenant** while their own school fee read
+  still works, and tenant isolation (a foreign id is the SAME 404 as a ghost id, no foreign money in the
+  HTML). It also reports **which build answered**: it reads `.next/BUILD_ID` and requires the served page
+  to embed it, so a run against a dev server fails exactly that one check by design (see
+  `proof/7f/role-probe-against-a-dev-server.txt`). Run it against a production build:
+  `npm run build` → `NODE_ENV=production npx next start -p 3111` → the command above.
+- **The probe is MANUAL (registered in no suite — `suite-all.mjs` / `smoke-all.mjs` do not, and cannot, run it without a production build) and ORDERING-SENSITIVE: it must run on a freshly created fixture and BEFORE `verify-college-fees-api`.** Its one precondition, found by re-running it (2026-10-13, `proof/7f/REPORT.md` §D-bis): the probe
+  asserts the fixture's college spine (its ৳45,000 charge and `CRCP-900001` entry), and
+  `verify-college-fees-api` **resets that spine on purpose** (`resetCollegeFees(\`${P}both\`)`). So the
+  probe runs **on a freshly created fixture and BEFORE that verifier**; run after it without a re-create,
+  it correctly reports an empty college half and fails 4 of 24. Nothing was changed to make it pass.
 
 **One additive 7c payload, named here so nobody hunts for it.** `GET /api/college-fees/structure` now also
 returns `programmes` (id, name, term shape) — the picker the 7d screens need. The college fee pages may not use
