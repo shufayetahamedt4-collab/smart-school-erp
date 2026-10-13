@@ -334,6 +334,34 @@ export function schoolPaymentIds(
   return { paymentId: `pay_${base}`, ledgerId: `le_${base}` };
 }
 
+/**
+ * Deterministic id for ONE admission-intake attempt (pilot P2b): one `admission`
+ * row per (tenant, client idempotency key).
+ *
+ * The desk's intake route writes a whole family in one request — admission,
+ * student, guardian login, family link, fee rows, a payment, kit and a
+ * notification — and its only duplicate guard was a read-then-act check on the
+ * guardian's phone + the child's name, which two simultaneous submits both pass.
+ * The admission row is that request's FIRST write, so giving it the identity of
+ * the attempt makes the invariant structural: the second submit loses the
+ * `$guardedUpdate` race (a real Firestore transaction — `decide(null)` inserts,
+ * the loser is handed the winner's row) and answers from the record instead of
+ * writing anything.
+ *
+ * The id IS the key's hash, so the raw client key never has to be stored on the
+ * row (or returned by any API) and the check "is this request the one that
+ * started this attempt?" is a hash comparison, not a secret comparison.
+ *
+ * The key belongs to a tenant: the same key under two schools derives two
+ * different ids, so one tenant's key can never see or block another's.
+ *
+ * Only a KEYED intake derives an id. A keyless caller (an operator script, an
+ * API client, the pre-P2b form) keeps the random id it has always had.
+ */
+export function intakeAdmissionId(schoolId: string, key: string): string {
+  return `adm_${sha1(`${String(schoolId)}|${String(key)}`)}`;
+}
+
 /** Deterministic doc id for models with a unique key (upsert-friendly). */
 function idFor(model: string, where: Record<string, any>): string | undefined {
   if (typeof where.id === "string") return where.id;

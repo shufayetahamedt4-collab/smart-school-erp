@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, invalidateReferenceCache, ON_ROLL_STUDENT } from "@/lib/db";
+import { prisma, invalidateReferenceCache, ON_ROLL_STUDENT, intakeAdmissionId, schoolPaymentIds } from "@/lib/db";
 import { enrollStudent } from "@/lib/enroll";
 import { resolveSessionId } from "@/lib/academic";
 import { getSession, audit } from "@/lib/auth";
@@ -10,6 +10,7 @@ import { invalidateStats } from "@/lib/stats-cache";
 import { qrPin, qrToken } from "@/lib/qr";
 import { confirmPayment } from "@/lib/ledger";
 import { notifyUsers } from "@/lib/notify";
+import { money } from "@/lib/utils";
 import {
   admissionFeeDefaults,
   findSiblingCandidates,
@@ -37,6 +38,23 @@ import {
 
 const METHODS = ["CASH", "BANK", "BKASH", "NAGAD", "ROCKET", "CARD"] as const;
 type Method = (typeof METHODS)[number];
+
+/**
+ * pilot P2b — how a REPLAY of one intake attempt is answered.
+ *
+ * The winner writes the admission row FIRST and stamps it with `startedAt`; the
+ * student link (`convertedStudentId`) appears when the whole flow is done. A
+ * loser of the race polls for that link for up to `REPLAY_WAIT_MS` (the flow is
+ * a handful of writes — a second or two in production), and an attempt whose
+ * stamp is already older than `REPLAY_STALE_MS` is refused at once instead of
+ * waited on: that is a crash, and the operator must open the APPLIED admission
+ * (or start a new attempt) rather than re-run the flow and duplicate the family.
+ */
+const REPLAY_WAIT_MS = 15_000;
+const REPLAY_POLL_MS = 300;
+const REPLAY_STALE_MS = 180_000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const str = (v: unknown): string => String(v ?? "").trim();
 const num = (v: unknown, fallback = 0): number => {
@@ -84,6 +102,27 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
 
+  // ------------------------------------------------------------------- P2b key
+  // The intake key is OPTIONAL (absent/empty = the old behaviour, unchanged for
+  // every API caller), and it may arrive in the body or as `x-idempotency-key`.
+  // A key that IS present must be usable: silently ignoring a malformed one
+  // would quietly turn a once-only admission into a repeatable one, so it is
+  // refused by name before any read or write (the pay route's own rule, same
+  // text). Nothing but the key's HASH is ever stored (see intakeAdmissionId).
+  const rawKey = body?.idempotencyKey ?? req.headers.get("x-idempotency-key");
+  let idempotencyKey: string | null = null;
+  if (rawKey !== undefined && rawKey !== null && rawKey !== "") {
+    if (typeof rawKey !== "string" || rawKey.trim().length < 8 || rawKey.trim().length > 120) {
+      return NextResponse.json({ error: "idempotencyKey must be between 8 and 120 characters." }, { status: 400 });
+    }
+    idempotencyKey = rawKey.trim();
+  }
+  // One admission, one admission-fee payment: the payment's own key is derived
+  // from the intake key, so a second attempt at the same fee row can only ever
+  // replay the receipt the first one wrote.
+  const attemptAdmissionId = idempotencyKey ? intakeAdmissionId(schoolId, idempotencyKey) : null;
+  const paymentAttemptKey = idempotencyKey ? `${idempotencyKey}:admission-fee` : null;
+
   // ------------------------------------------------------------------ validate
   const stud = body?.student || {};
   const guard = body?.guardian || {};
@@ -116,6 +155,158 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A guardian email is needed to create the login." }, { status: 400 });
   }
 
+  /**
+   * P2b — answer a request whose keyed attempt already exists, writing NOTHING.
+   *
+   * The first request's admission row is the record: the student, its fee rows
+   * and the payment row are read back FROM it, so a sequential retry, a second
+   * tab or the loser of a simultaneous pair all get the ORIGINAL admission, the
+   * ORIGINAL receipt and the SAME QR slip (the token and PIN live on the student
+   * row) — never a second family.
+   *
+   * A row without `convertedStudentId` is either the winner still working (the
+   * caller waits for the link above) or a crash (refused by name, with the
+   * admission id and the state it was left in).
+   */
+  const answerFromRecord = async (row: any) => {
+    // The id this attempt is filed under. A row handed back by the gate carries
+    // the DATA it was written with — not the document id — so the id is taken
+    // from the row when it has one and from the key's own derivation otherwise:
+    // every message and every re-read below must name THIS admission, never
+    // whatever a lookup with an undefined id happens to return.
+    const recordId = String(row?.id || attemptAdmissionId || "");
+    const storedName = String(row?.fullName || "").trim();
+    if (storedName.toLowerCase() !== name.toLowerCase()) {
+      return NextResponse.json(
+        { error: `This admission key was already used for ${storedName}. Start a new admission to admit someone else.` },
+        { status: 409 }
+      );
+    }
+    if (row?.classId && classId && String(row.classId) !== classId) {
+      return NextResponse.json(
+        { error: "This admission key was already used for a different class. Start a new admission to move the child." },
+        { status: 409 }
+      );
+    }
+
+    let current = row;
+    const startedAt = current?.intake?.startedAt ? new Date(current.intake.startedAt).getTime() : 0;
+    const crashed = !current?.convertedStudentId && startedAt > 0 && Date.now() - startedAt > REPLAY_STALE_MS;
+    const deadline = Date.now() + REPLAY_WAIT_MS;
+    while (!current?.convertedStudentId && !crashed && Date.now() < deadline) {
+      await sleep(REPLAY_POLL_MS);
+      const again = await prisma.admission.findUnique({ where: { id: recordId } }).catch(() => null);
+      if (again) current = again;
+    }
+    if (!current?.convertedStudentId) {
+      return NextResponse.json(
+        {
+          error: `This admission attempt was already started (${recordId}, ${row.status || "APPLIED"}) and nothing new was written. Open that admission to finish it, or start a new admission.`,
+        },
+        { status: 409 }
+      );
+    }
+
+    const student = await prisma.student.findUnique({ where: { id: current.convertedStudentId } });
+    if (!student) {
+      return NextResponse.json(
+        { error: `This admission attempt was already started (${recordId}) and nothing new was written. Open that admission to finish it.` },
+        { status: 409 }
+      );
+    }
+
+    const fees = await prisma.fee.findMany({ where: { schoolId, studentId: student.id } });
+    const admissionFeeRow = fees.find((f: any) => String(f.feeType) === "ADMISSION") || null;
+    const monthlyRow = fees.find((f: any) => String(f.feeType) === "MONTHLY") || null;
+    const extras = fees.filter((f: any) => String(f.feeType) !== "ADMISSION" && String(f.feeType) !== "MONTHLY");
+    const discounts = await prisma.discount.findMany({ where: { schoolId, admissionId: row.id } });
+    const proposed = discounts.find((d: any) => String(d.status) === "PROPOSED") || null;
+
+    // The payment row is deterministic for a keyed attempt, so the replay reads
+    // the ORIGINAL receipt (with its refNo) instead of minting or guessing one.
+    let payment: any = null;
+    if (admissionFeeRow) {
+      const seen = paymentAttemptKey
+        ? await prisma.payment
+            .findUnique({ where: { id: schoolPaymentIds(schoolId, admissionFeeRow.id, paymentAttemptKey).paymentId } })
+            .catch(() => null)
+        : null;
+      const stamp = admissionFeeRow.idempotency && typeof admissionFeeRow.idempotency === "object" ? admissionFeeRow.idempotency : null;
+      if (seen) {
+        payment = {
+          collected: true,
+          method: (seen as any).method ?? null,
+          refNo: (seen as any).refNo ?? null,
+          amount: money((seen as any).amount),
+          receiptNo: (seen as any).receiptNo ?? null,
+        };
+      } else if (stamp?.receiptNo) {
+        payment = { collected: true, method: stamp.method ?? null, refNo: null, amount: money(stamp.amount), receiptNo: String(stamp.receiptNo) };
+      }
+    }
+
+    let family: any = null;
+    if (student.familyId) {
+      const familyRows = await prisma.student.findMany({ where: { schoolId, familyId: student.familyId } });
+      const sibling = familyRows.find((s: any) => s.id !== student.id) || null;
+      family = { familyId: student.familyId, siblingName: sibling?.name ?? null, guardianUserId: student.guardianUserId ?? null };
+    }
+
+    const feeAmount = money(admissionFeeRow?.amount ?? row.admissionFee);
+    const due = Math.max(0, feeAmount - money(admissionFeeRow?.paidAmount));
+    const pending: string[] = [];
+    if (due > 0 && money(row.payableAmount) > 0) pending.push(`Admission fee ${due} not collected yet — collect it from the Fees page.`);
+    if (proposed) pending.push("The discount is proposed and needs an admin's approval.");
+    if (!student.guardianUserId && guardianEmail) pending.push("The guardian login for this child is not linked yet.");
+    if (!student.guardianEmail) pending.push("No guardian email — no parent login was created.");
+    if (Array.isArray(current.pendingKit) && current.pendingKit.length) pending.push(`Kit to hand over later: ${current.pendingKit.join(", ")}.`);
+    if (current.idCardIssued !== true) pending.push("ID card not printed yet.");
+
+    return NextResponse.json({
+      data: {
+        admissionId: recordId,
+        studentId: student.id,
+        admissionNo: student.admissionNo ?? row.admissionNo ?? null,
+        qrToken: student.qrToken ?? null,
+        qrPin: student.qrPin ?? null,
+        classRoom: classRow ? { id: classRow.id, name: classRow.name } : null,
+        guardian: { linked: !!student.guardianUserId, created: false, email: student.guardianEmail ?? null },
+        family,
+        fees: {
+          admissionFeeId: admissionFeeRow?.id ?? null,
+          admissionFee: feeAmount,
+          monthlyFeeId: monthlyRow?.id ?? null,
+          monthlyFee: monthlyRow ? money(monthlyRow.amount) : null,
+          discountAmount: Math.max(0, money(row.admissionFee) - money(row.payableAmount)),
+          proposedDiscount: proposed ? money(proposed.amount) : 0,
+          payable: money(row.payableAmount),
+          extraLines: extras.map((f: any) => ({ title: f.title, type: f.feeType, amount: money(f.amount) })),
+        },
+        discount: null,
+        payment,
+        kit: {
+          issued: Array.isArray(current.checklist) ? current.checklist.map((title: string) => ({ title })) : [],
+          unavailable: [],
+          unknown: [],
+          pending: Array.isArray(current.pendingKit) ? current.pendingKit : [],
+        },
+        uniformSize: current.uniformSize ?? null,
+        idCardIssued: current.idCardIssued === true,
+        done: ["Replayed from the admission already recorded — nothing new was written"],
+        pending,
+        replay: true,
+      },
+    });
+  };
+
+  // A keyed request whose attempt already exists is answered BEFORE any other
+  // work: the replay must not need the pricing, the phone+name guard or the kit
+  // reads to return the original result.
+  if (attemptAdmissionId) {
+    const already = await prisma.admission.findUnique({ where: { id: attemptAdmissionId } }).catch(() => null);
+    if (already) return await answerFromRecord(already);
+  }
+
   // ------------------------------------------------------- duplicate applicants
   // The desk is the one place a family can be admitted twice by accident (the demo
   // data already had one). An active child of the same guardian with the same name
@@ -128,6 +319,14 @@ export async function POST(req: NextRequest) {
     });
     const clash = samePhone.find((s: any) => String(s.name).trim().toLowerCase() === name.toLowerCase());
     if (clash) {
+      // P2b — a KEYED request that lost the race to its own first submit must be
+      // answered from its record, not refused as a duplicate applicant. A
+      // DIFFERENT key (a deliberately new admission for the same child) still
+      // hits this guard, which is exactly what it is for.
+      if (attemptAdmissionId) {
+        const mine = await prisma.admission.findUnique({ where: { id: attemptAdmissionId } }).catch(() => null);
+        if (mine) return await answerFromRecord(mine);
+      }
       return NextResponse.json(
         { error: `${clash.name} (${clash.admissionNo}) is already enrolled for this guardian phone — open that student instead of admitting them twice.` },
         { status: 400 }
@@ -181,36 +380,75 @@ export async function POST(req: NextRequest) {
   // Written in the pipeline's own order so a failure part-way leaves an APPLIED
   // admission an operator can open and finish, never a silent half-record.
   const done: string[] = [];
-  const admission = await prisma.admission.create({
-    data: {
-      schoolId,
-      branchId,
-      fullName: name,
-      fullNameBn: str(stud.nameBn) || null,
-      guardianName: str(guard.name) || null,
-      guardianPhone,
-      guardianEmail,
-      guardianRelation: str(guard.relation) || null,
-      dob: dateOrNull(stud.dob),
-      gender: str(stud.gender) || "OTHER",
-      bloodGroup: str(stud.bloodGroup) || null,
-      religion: str(stud.religion) || null,
-      birthCertificateNo: str(stud.birthCertificateNo) || null,
-      permanentAddress: str(stud.address) || null,
-      currentAddress: str(stud.currentAddress) || null,
-      previousSchoolName: str(stud.previousSchoolName) || null,
-      previousSchoolAddress: str(stud.previousSchoolAddress) || null,
-      previousClass: str(stud.previousClass) || null,
-      leavingReason: str(stud.leavingReason) || null,
-      photoUrl: str(stud.photoUrl) || null,
-      classId,
-      sectionId,
-      status: "APPLIED",
-      source: "WALK_IN",
-      admissionFee,
-      payableAmount: payable,
-    },
-  });
+  const admissionData = {
+    schoolId,
+    branchId,
+    fullName: name,
+    fullNameBn: str(stud.nameBn) || null,
+    guardianName: str(guard.name) || null,
+    guardianPhone,
+    guardianEmail,
+    guardianRelation: str(guard.relation) || null,
+    dob: dateOrNull(stud.dob),
+    gender: str(stud.gender) || "OTHER",
+    bloodGroup: str(stud.bloodGroup) || null,
+    religion: str(stud.religion) || null,
+    birthCertificateNo: str(stud.birthCertificateNo) || null,
+    permanentAddress: str(stud.address) || null,
+    currentAddress: str(stud.currentAddress) || null,
+    previousSchoolName: str(stud.previousSchoolName) || null,
+    previousSchoolAddress: str(stud.previousSchoolAddress) || null,
+    previousClass: str(stud.previousClass) || null,
+    leavingReason: str(stud.leavingReason) || null,
+    photoUrl: str(stud.photoUrl) || null,
+    classId,
+    sectionId,
+    status: "APPLIED",
+    source: "WALK_IN",
+    admissionFee,
+    payableAmount: payable,
+  };
+
+  // ------------------------------------------------ P2b — the create-once gate
+  // The admission row is the request's FIRST write, so it is the boundary: a
+  // keyed attempt is created inside a real Firestore transaction
+  // (`$guardedUpdate`; deciding on a missing row inserts it, and the loser of a
+  // race is handed the winner's row), and anything it hands back that already
+  // exists is answered from that record — never re-run. The keyless path is
+  // byte-for-byte the old create, so every existing caller is untouched.
+  let admission: any = null;
+  if (attemptAdmissionId) {
+    const gate = await prisma.$guardedUpdate("admission", attemptAdmissionId, (current) =>
+      current
+        ? { ok: false, error: "already recorded" }
+        : {
+            ok: true,
+            data: {
+              ...admissionData,
+              // Server-side only (never returned): which keyed attempt this row
+              // belongs to (the id IS the key's hash), when it started and who
+              // started it. The replay uses `startedAt` to tell a crash from a
+              // race it should wait for.
+              intake: { keyId: attemptAdmissionId, startedAt: new Date(), by: session.id },
+            },
+          }
+    );
+    if (gate.ok) admission = gate.row;
+    else if (gate.reason === "REFUSED") return await answerFromRecord(gate.holder);
+    else
+      return NextResponse.json(
+        { error: "The admission could not be reserved just now — nothing was written. Try again." },
+        { status: 500 }
+      );
+  } else {
+    admission = await prisma.admission.create({ data: admissionData });
+  }
+  if (!admission) {
+    return NextResponse.json(
+      { error: "The admission could not be reserved just now — nothing was written. Try again." },
+      { status: 500 }
+    );
+  }
   done.push("admission record created");
 
   let studentId: string | null = null;
@@ -341,6 +579,9 @@ export async function POST(req: NextRequest) {
         refNo,
         actorId: session.id,
         notify: true,
+        // P2b — the intake key derives the payment key, so a repeat of this
+        // attempt can only ever replay the receipt written the first time.
+        idempotencyKey: paymentAttemptKey,
       });
       receiptNo = payment.receiptNo;
       done.push(`payment of ${payable} confirmed (${receiptNo})`);
@@ -448,6 +689,9 @@ export async function POST(req: NextRequest) {
           idCardIssued: kitIn.idCardIssued === true,
           done,
           pending,
+          // P2b — a keyed write says so explicitly (the school fee route's own
+          // shape); a keyless caller's response is exactly what it always was.
+          ...(idempotencyKey ? { replay: false } : {}),
         },
       },
       { status: 201 }

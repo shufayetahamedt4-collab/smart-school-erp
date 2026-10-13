@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft, Save, QrCode, Check, Users, Wallet, Package,
@@ -30,6 +30,13 @@ import { useMe } from "@/components/Shell";
  *
  * Fees and kit are priced from the school's own settings: the class's Fee Template
  * when it has one, else Fee Settings, and live stock for every catalogue item.
+ *
+ * pilot P2b — ONE key per admission attempt: minted on this form's first submit,
+ * KEPT if the request fails (a retry of the same attempt replays the recorded
+ * admission instead of admitting the family twice) and cleared only when the
+ * admission succeeded or the form starts a new one. The server never trusts the
+ * button being disabled, so a double click, a second tab or a retried POST all
+ * land exactly once.
  */
 
 interface ClassRow { id: string; name: string; sections: { id: string; name: string }[] }
@@ -91,6 +98,21 @@ export interface AdmissionIntakeFormProps {
   subtitle?: string;
 }
 
+/**
+ * pilot P2b — the key that makes ONE submit one admission.
+ *
+ * Minted on the first submit of an attempt and kept while that attempt is
+ * unfinished, so a retry can only replay the result the first call recorded; a
+ * crashed attempt is refused by naming the APPLIED admission instead of being
+ * re-run. It is cleared after a success, so "Admit another" is a new attempt.
+ * Same shape as the school fee Collect form's key.
+ */
+function newIntakeKey(): string {
+  const c: any = typeof crypto !== "undefined" ? crypto : null;
+  if (c && typeof c.randomUUID === "function") return String(c.randomUUID());
+  return `ik_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export default function AdmissionIntakeForm({
   cancelHref = "/dashboard/students",
   cancelLabel = "Students",
@@ -112,6 +134,8 @@ export default function AdmissionIntakeForm({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState<any>(null);
+  /** pilot P2b — this attempt's idempotency key (see newIntakeKey). */
+  const attemptKey = useRef("");
 
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
   const cls = classes.find((c) => c.id === form.classId);
@@ -199,9 +223,14 @@ export default function AdmissionIntakeForm({
     if (form.discountOn && Number(form.discountValue) > 0 && form.discountType === "FIXED" && Number(form.discountValue) > Number(form.admissionFee)) {
       return setError("The discount is more than the admission fee.");
     }
+    // pilot P2b — ONE key per attempt: minted here on the first submit and KEPT
+    // if this request fails, so pressing Admit again can only replay the record
+    // the first call wrote, never a second family.
+    const idempotencyKey = attemptKey.current || (attemptKey.current = newIntakeKey());
     setSaving(true);
     try {
       const payload = {
+        idempotencyKey,
         student: {
           name: form.name, nameBn: form.nameBn, admissionNo: form.admissionNo, dob: form.dob,
           gender: form.gender, bloodGroup: form.bloodGroup, religion: form.religion, roll: form.roll,
@@ -234,6 +263,7 @@ export default function AdmissionIntakeForm({
         },
       };
       const res = await api("/api/admissions/intake", { method: "POST", body: JSON.stringify(payload) });
+      attemptKey.current = ""; // this attempt is done — the next admission is a new attempt
       setCreated(res);
     } catch (e: any) {
       setError(e?.message || "Admission failed");
@@ -347,7 +377,7 @@ export default function AdmissionIntakeForm({
             {successHref && <Link href={successHref} className="btn btn-secondary">{successLabel || "Back"}</Link>}
             <button
               className="btn btn-ghost"
-              onClick={() => { setCreated(null); setForm(initial); setSiblingId(""); setKitNow({}); setKitLater({}); loadIntake(); }}
+              onClick={() => { attemptKey.current = ""; setCreated(null); setForm(initial); setSiblingId(""); setKitNow({}); setKitLater({}); loadIntake(); }}
             >
               Admit another
             </button>
