@@ -1,0 +1,44 @@
+
+=== A. offline pins ===
+
+  PASS  [off-1] db.ts exports intakeAdmissionId
+  PASS  [off-2] intakeAdmissionId derives the id from sha1 (deterministic)
+  PASS  [off-3] intakeAdmissionId has NO clock and NO randomness (mutation i)
+  PASS  [off-4] the id is a function of the TENANT and the key (one tenant cannot block another)
+  PASS  [off-5] the id is namespaced apart from the payment ids (`adm_`)
+  PASS  [off-6] the GENERIC id machinery does NOT re-id every admission (only the keyed intake is gated)
+  PASS  [off-7] the replay wait is shorter than the stale (crash) threshold
+  PASS  [off-8] the key is optional and read from the body OR the x-idempotency-key header
+  PASS  [off-9] an unusable key is refused by NAME (400), never silently ignored
+  PASS  [off-10] the admission id is DERIVED from the key (create-once, mutation i)
+ FAIL  [off-11] the payment key is DERIVED from the intake key with NO clock and NO randomness (mutation iii) — the payment key is not a pure function of the intake key
+  PASS  [off-12] a keyed request whose attempt exists is answered from the record before any other work (mutation ii)
+  PASS  [off-13] the replay return sits BEFORE the kit hand-out and the notification (mutation v)
+  PASS  [off-14] the replay return also sits BEFORE the phone+name duplicate guard
+  PASS  [off-15] answerFromRecord has a body
+  PASS  [off-16] answering a replay WRITES NOTHING — no kit, no notification, no payment (mutation v)
+  PASS  [off-17] a replay flags itself and is NOT a 201
+  PASS  [off-18] a keyed attempt that never linked a student is refused by NAME (409) with its state
+  PASS  [off-19] the same key aimed at a different child is refused (409)
+  PASS  [off-20] the first write is a real transaction gate — deciding on a MISSING row inserts it (create-once)
+  PASS  [off-21] the loser of the race is answered from the WINNER's row, not re-run
+  PASS  [off-22] a keyed loser caught by the duplicate guard is answered from its record too
+  PASS  [off-23] only the key's HASH is stored on the row (never the raw key)
+  PASS  [off-24] the KEYLESS path is still exactly the old create (unchanged for every existing caller)
+  PASS  [off-25] the admission fee is paid through the existing keyed confirmPayment (caller-supplied key)
+  PASS  [off-26] the replay reads the ORIGINAL receipt from the deterministic payment id
+  PASS  [off-27] a keyed write says so in its 201, and a keyless caller's response is untouched
+  PASS  [off-28] the keyed attempt still mints one QR slip per student (the kernel's own token/pin)
+  PASS  [off-29] the form mints a key (crypto.randomUUID with a fallback)
+  PASS  [off-30] ONE key per attempt, REUSED on a retry of that attempt
+  PASS  [off-31] the attempt's key is cleared after a success (a new admission is a new attempt)
+  PASS  [off-32] the payload carries the key
+  PASS  [off-33] the Submit button is disabled while the request is in flight (mutation iv)
+  PASS  [off-34] a server refusal is surfaced verbatim and nothing auto-retries
+  PASS  [off-35] enroll.ts is not keyed (the shared kernel learned nothing about intake keys)
+
+offline: 34 pass / 1 fail
+
+live half: SKIP (--offline)
+
+❌ 1 FAILURE(S) — 34 pass

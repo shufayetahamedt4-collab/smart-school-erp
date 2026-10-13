@@ -1,0 +1,434 @@
+[
+ {
+  "name": "verify-college-gate",
+  "exit": 0,
+  "ok": 4,
+  "fail": 0,
+  "secs": 0,
+  "own": "4 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-college-fees-logic",
+  "exit": 0,
+  "ok": 22,
+  "fail": 0,
+  "secs": 0,
+  "own": "✅ COLLEGE FEES LOGIC OK — 21 check(s): heads and structure validate around the school's own buckets and cadences, the ca"
+ },
+ {
+  "name": "verify-college-fees-data",
+  "exit": 0,
+  "ok": 12,
+  "fail": 0,
+  "secs": 1,
+  "own": "✅ COLLEGE FEES DATA LAYER OK — 11 check(s): the four college fee collections are registered in COLS/RELS/prisma as a pur"
+ },
+ {
+  "name": "verify-college-results-data",
+  "exit": 0,
+  "ok": 9,
+  "fail": 0,
+  "secs": 0,
+  "own": "✅ COLLEGE RESULTS DATA LAYER OK — 8 check(s): courseResults is registered in COLS/RELS/prisma as a purely additive chang"
+ },
+ {
+  "name": "verify-college-results-page",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 0,
+  "own": "✅ college results page verification PASSED — 106 checks."
+ },
+ {
+  "name": "verify-college-fees-page",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 0,
+  "own": "✅ college fees page verification PASSED — 255 checks."
+ },
+ {
+  "name": "verify-college-promotion-logic",
+  "exit": 0,
+  "ok": 13,
+  "fail": 0,
+  "secs": 0,
+  "own": "✅ COLLEGE PROMOTION LADDER OK — 12 check(s): the pure ladder advances a term, graduates at the last one, selects a stric"
+ },
+ {
+  "name": "verify-college-promotion-page",
+  "exit": 0,
+  "ok": 19,
+  "fail": 0,
+  "secs": 0,
+  "own": "✅ COLLEGE PROMOTION PAGE OK — 18 check(s): the page's non-visual logic (warnings, D6 phrasing, disabled predicates, conf"
+ },
+ {
+  "name": "verify-college-grading-logic",
+  "exit": 0,
+  "ok": 14,
+  "fail": 0,
+  "secs": 0,
+  "own": "✅ COLLEGE GRADING LOGIC OK — 13 check(s): showGpa is backward-compatible, the four retake policies and the single pass m"
+ },
+ {
+  "name": "verify-college-routes",
+  "exit": 0,
+  "ok": 4,
+  "fail": 0,
+  "secs": 0,
+  "own": "4 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-college-terms",
+  "exit": 0,
+  "ok": 9,
+  "fail": 0,
+  "secs": 0,
+  "own": "9 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-onboarding-seed",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 0,
+  "own": "✅ ONBOARDING SEED OK — 87/87 checks — shape table == institution, school + college defaults well-formed, refusals explic"
+ },
+ {
+  "name": "verify-database-id",
+  "exit": 0,
+  "ok": 9,
+  "fail": 0,
+  "secs": 0,
+  "own": "✅ DATABASE-ID RESOLUTION OK — 8 check(s): the canonical name wins by agreement, either single name selects its database,"
+ },
+ {
+  "name": "verify-nav-scope",
+  "exit": 0,
+  "ok": 10,
+  "fail": 0,
+  "secs": 0,
+  "own": "10 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-registration-status",
+  "exit": 0,
+  "ok": 10,
+  "fail": 0,
+  "secs": 0,
+  "own": "10 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-college-permissions",
+  "exit": 0,
+  "ok": 8,
+  "fail": 0,
+  "secs": 0,
+  "own": "8 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-pilot-hardening",
+  "exit": 0,
+  "ok": 260,
+  "fail": 0,
+  "secs": 81,
+  "own": "PASS: 260/260 checks passed"
+ },
+ {
+  "name": "verify-mode-foundation",
+  "exit": 0,
+  "ok": 65,
+  "fail": 0,
+  "secs": 51,
+  "own": "65 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-user-secrets",
+  "exit": 0,
+  "ok": 0,
+  "fail": 0,
+  "secs": 79,
+  "own": "10 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-onboarding-monitor",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 53,
+  "own": "44 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-tenant-isolation",
+  "exit": 0,
+  "ok": 107,
+  "fail": 0,
+  "secs": 89,
+  "own": "107 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-branch-isolation",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 80,
+  "own": "72 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-college-enrollment",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 53,
+  "own": "40 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-course-registrations",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 65,
+  "own": "50 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-enroll-paths",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 50,
+  "own": "17 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-enrollment-fees",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 53,
+  "own": "19 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-fees-totals",
+  "exit": 0,
+  "ok": 0,
+  "fail": 0,
+  "secs": 37,
+  "own": "15 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-school-fee-idempotency",
+  "exit": 0,
+  "ok": 0,
+  "fail": 0,
+  "secs": 45,
+  "own": "RESULT: 69/69 checks passed"
+ },
+ {
+  "name": "verify-fee-reconciliation",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 45,
+  "own": "✅ PASS — 56 checks (fee reconciliation)"
+ },
+ {
+  "name": "verify-qr-credentials",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 43,
+  "own": "18 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-notifications",
+  "exit": 0,
+  "ok": 0,
+  "fail": 0,
+  "secs": 44,
+  "own": "46 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-grading",
+  "exit": 0,
+  "ok": 0,
+  "fail": 0,
+  "secs": 44,
+  "own": "39 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-guardian-child",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 39,
+  "own": "25 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-read-cache",
+  "exit": 1,
+  "ok": 0,
+  "fail": 0,
+  "secs": 51,
+  "own": "0 PASS / 1 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-routine-config",
+  "exit": 1,
+  "ok": 0,
+  "fail": 1,
+  "secs": 73,
+  "own": "❌ verify-routine-config: 2 failure(s), 1 skipped"
+ },
+ {
+  "name": "verify-cache-scoping",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 38,
+  "own": "15 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-invalidation",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 32,
+  "own": "8 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-exams-invalidation",
+  "exit": 0,
+  "ok": 9,
+  "fail": 0,
+  "secs": 33,
+  "own": "9 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-write-freshness",
+  "exit": 0,
+  "ok": 0,
+  "fail": 0,
+  "secs": 31,
+  "own": "4 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-write-integrity",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 42,
+  "own": "✅ verify-write-integrity: all checks passed · 2 skipped"
+ },
+ {
+  "name": "verify-academic-sessions",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 37,
+  "own": "13 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-class-sessions",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 102,
+  "own": "56 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-bulk-import",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 54,
+  "own": "117 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-admission-intake",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 42,
+  "own": "52 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "verify-onboarding-type",
+  "exit": 0,
+  "ok": 0,
+  "fail": 0,
+  "secs": 45,
+  "own": "===== RESULT: 44 passed, 0 failed ====="
+ },
+ {
+  "name": "verify-promotion-rollover",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 55,
+  "own": "50 PASS / 0 FAIL (the script's own lines)"
+ },
+ {
+  "name": "qa-phase23",
+  "exit": 0,
+  "ok": 0,
+  "fail": 0,
+  "secs": 45,
+  "own": "===== RESULT: 36 passed, 0 failed ====="
+ },
+ {
+  "name": "qa-certificates",
+  "exit": 1,
+  "ok": 0,
+  "fail": 0,
+  "secs": 42,
+  "own": "===== RESULT: 40 passed, 1 failed ====="
+ },
+ {
+  "name": "verify-phase7-e2e",
+  "exit": 0,
+  "ok": 0,
+  "fail": 0,
+  "secs": 79,
+  "own": "TOTAL: 160 passed, 0 failed"
+ },
+ {
+  "name": "verify-college-results-api",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 48,
+  "own": "✅ COLLEGE RESULTS API OK — 77 checks: the gate, the approval rule, the visible duplicate refusal, maxRetakes, all four p"
+ },
+ {
+  "name": "verify-college-promotion-api",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 53,
+  "own": "✅ COLLEGE PROMOTION API OK — preview/apply, strict cohort, branch + tenant confinement, SCHOOL 403 with no write, idempo"
+ },
+ {
+  "name": "verify-college-promotion-lease",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 57,
+  "own": "✅ COLLEGE PROMOTION LEASE OK — one run at a time per programme, renewed by the heartbeat, released on success and on fai"
+ },
+ {
+  "name": "verify-sweep-routes",
+  "exit": 0,
+  "ok": 46,
+  "fail": 0,
+  "secs": 37,
+  "own": "46 ✅ / 0 ❌ markers"
+ },
+ {
+  "name": "verify-college-fees-api",
+  "exit": 0,
+  "ok": 1,
+  "fail": 0,
+  "secs": 76,
+  "own": "RESULT: 112/112 checks passed"
+ }
+]

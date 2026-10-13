@@ -1,0 +1,311 @@
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+  PASS  the sign-in form rendered on the college tenant's host — http://school.localhost:3000
+  PASS  the sign-in form accepted the fixture credentials
+  PASS  the college admin signed in and landed on a dashboard — /dashboard
+  PASS  the Dues tab lists the fixture's college student — ZZ Iso College Student A
+  PASS  the payment form appeared for that student
+  PASS  the form offers the charge the STORE says owes most (the page's dues text can be stale) — cf_zziso-col-stu-a_zziso-col-fee-head-a_1_1 {"selected":true,"text":"ZZ Iso Fee Head A — Year 1 — ৳9,939.00 due"}
+
+--- payment-form-before-submit.png (amount typed, before submitting) ---
+ZZ Iso College
+SCHOOL ADMIN
+PRO
+ACADEMICS
+FINANCE
+College Fees
+Sign out
+ZZ Iso College
+SCHOOL ADMIN
+ZI
+ZZ Iso College Admin
+zz-iso-college-admin@test.local
+College Fees
+The college's own fee heads, its programme × term pricing, its dues and its payment channels
+Fee heads
+Fee structure
+Dues & generation
+Payment config
+Charge generation
+Charges are DERIVED: a programme, a term, the structure priced for it and each student's approved registrations. No amount is typed here.
+Programme
+Choose a programme…
+ZZ Iso College Program A
+ZZ Iso College Program B
+Term
+Due date
+Optional
+Run preview (writes nothing)
+Commit these charges
+Dues
+3 students · 10 charges · ৳25,800.00 billed · ৳200.00 waived · ৳4,114.00 paid · ৳21,686.00 due
+STUDENT	CHARGES	BILLED	WAIVED	PAID	DUE	STATUS
+ZZ Fee Probe StudentZZFP-mv4tpt71	1	৳300.00	৳0.00	৳0.00	৳300.00	unpaid
+ZZ Iso College Student AZZ4D-COL-A	7	৳15,200.00	৳200.00	৳4,114.00	৳11,086.00	partly paid
+ZZ Iso College Student BZZ4D-COL-B	2	৳10,300.00	৳0.00	৳0.00	৳10,300.00	unpaid
+ZZ Iso College Student A — charges and payments
+7 charges · still due ৳11,086.00
+Close
+CHARGE	TERM	AMOUNT	WAIVED	PAID	DUE	STATUS
+ZZ Idem Replay — Year 1
+ZZ Idem Replay
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Idem NoKey — Year 1
+ZZ Idem NoKey
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Idem ParallelSameKey — Year 1
+ZZ Idem ParallelSameKey
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Tuition — Year 1
+ZZ Tuition
+	1	৳1,000.00	৳0.00	৳53.00	৳947.00	partly paid
+ZZ Exam — Year 1
+ZZ Exam
+	1	৳200.00	৳200.00	৳0.00	৳200.00	unpaid
+ZZ Idem ParallelKeys — Year 1
+
+  PASS  the amount holds 10.00 and the pay button is armed — stuck=true armed="Record payment"
+  PASS  the first mouse press landed on the pay button; at 60ms the form had already disabled/re-rendered it (the busy guard) — [{"x":1284,"y":450,"hits":true,"label":"Record payment"},null]
+
+--- payment-after-quick-double-mouse-click.png (after a quick double mouse click) ---
+ZZ Iso College
+SCHOOL ADMIN
+PRO
+ACADEMICS
+FINANCE
+College Fees
+Sign out
+ZZ Iso College
+SCHOOL ADMIN
+ZI
+ZZ Iso College Admin
+zz-iso-college-admin@test.local
+College Fees
+The college's own fee heads, its programme × term pricing, its dues and its payment channels
+Fee heads
+Fee structure
+Dues & generation
+Payment config
+Recorded ৳10.00 — CRCP-8610821630. Still due: ৳9,929.00 (partly paid).
+Charge generation
+Charges are DERIVED: a programme, a term, the structure priced for it and each student's approved registrations. No amount is typed here.
+Programme
+Choose a programme…
+ZZ Iso College Program A
+ZZ Iso College Program B
+Term
+Due date
+Optional
+Run preview (writes nothing)
+Commit these charges
+Dues
+3 students · 10 charges · ৳25,800.00 billed · ৳200.00 waived · ৳4,124.00 paid · ৳21,676.00 due
+STUDENT	CHARGES	BILLED	WAIVED	PAID	DUE	STATUS
+ZZ Fee Probe StudentZZFP-mv4tpt71	1	৳300.00	৳0.00	৳0.00	৳300.00	unpaid
+ZZ Iso College Student AZZ4D-COL-A	7	৳15,200.00	৳200.00	৳4,124.00	৳11,076.00	partly paid
+ZZ Iso College Student BZZ4D-COL-B	2	৳10,300.00	৳0.00	৳0.00	৳10,300.00	unpaid
+ZZ Iso College Student A — charges and payments
+7 charges · still due ৳11,076.00
+Close
+CHARGE	TERM	AMOUNT	WAIVED	PAID	DUE	STATUS
+ZZ Idem Replay — Year 1
+ZZ Idem Replay
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Idem NoKey — Year 1
+ZZ Idem NoKey
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Idem ParallelSameKey — Year 1
+ZZ Idem ParallelSameKey
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Tuition — Year 1
+ZZ Tuition
+	1	৳1,000.00	৳0.00	৳53.00	৳947.00	partly paid
+ZZ Exam — Year 1
+ZZ Exam
+	1	৳200.00	৳200.00	৳0.00	৳200.00	unpaid
+
+  PASS  a quick double mouse click recorded exactly ONE payment: one ledger row, one audit row, one 10.00 on the charge — charge=cf_zziso-col-stu-a_zziso-col-fee-head-a_1_1 paid 61 -> 71 rows 5 -> 6 audits 6 -> 7
+  PASS  the form is armed again for the same-task double submit — stuck=true armed="Record payment"
+  PASS  two clicks were dispatched in one JS task — two clicks in one task
+
+--- payment-after-two-clicks-one-task.png (after TWO clicks in one JS task) ---
+ZZ Iso College
+SCHOOL ADMIN
+PRO
+ACADEMICS
+FINANCE
+College Fees
+Sign out
+ZZ Iso College
+SCHOOL ADMIN
+ZI
+ZZ Iso College Admin
+zz-iso-college-admin@test.local
+College Fees
+The college's own fee heads, its programme × term pricing, its dues and its payment channels
+Fee heads
+Fee structure
+Dues & generation
+Payment config
+Recorded ৳10.00 — CRCP-8611120634. Still due: ৳9,919.00 (partly paid).
+Charge generation
+Charges are DERIVED: a programme, a term, the structure priced for it and each student's approved registrations. No amount is typed here.
+Programme
+Choose a programme…
+ZZ Iso College Program A
+ZZ Iso College Program B
+Term
+Due date
+Optional
+Run preview (writes nothing)
+Commit these charges
+Dues
+3 students · 10 charges · ৳25,800.00 billed · ৳200.00 waived · ৳4,134.00 paid · ৳21,666.00 due
+STUDENT	CHARGES	BILLED	WAIVED	PAID	DUE	STATUS
+ZZ Fee Probe StudentZZFP-mv4tpt71	1	৳300.00	৳0.00	৳0.00	৳300.00	unpaid
+ZZ Iso College Student AZZ4D-COL-A	7	৳15,200.00	৳200.00	৳4,134.00	৳11,066.00	partly paid
+ZZ Iso College Student BZZ4D-COL-B	2	৳10,300.00	৳0.00	৳0.00	৳10,300.00	unpaid
+ZZ Iso College Student A — charges and payments
+7 charges · still due ৳11,066.00
+Close
+CHARGE	TERM	AMOUNT	WAIVED	PAID	DUE	STATUS
+ZZ Idem Replay — Year 1
+ZZ Idem Replay
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Idem NoKey — Year 1
+ZZ Idem NoKey
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Idem ParallelSameKey — Year 1
+ZZ Idem ParallelSameKey
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Tuition — Year 1
+ZZ Tuition
+	1	৳1,000.00	৳0.00	৳53.00	৳947.00	partly paid
+ZZ Exam — Year 1
+ZZ Exam
+	1	৳200.00	৳200.00	৳0.00	৳200.00	unpaid
+
+  PASS  …and the second click was answered as a REPLAY: exactly one audit row (a replay writes no audit entry) — audit rows 7 -> 8
+  PASS  TWO clicks in one task recorded exactly ONE payment: one ledger row, one 10.00 added to the charge — charge=cf_zziso-col-stu-a_zziso-col-fee-head-a_1_1 (ZZ Iso Fee Head A — Year 1 — ৳9,929.00 due) notice="Recorded ৳10.00 — CRCP-8611120634. Still due: ৳9,919.00 (partly paid)." paid 71 -> 81 rows 6 -> 7
+  PASS  an open charge exists for the retry probe — {"id":"cf_zziso-col-stu-a_zziso-col-fee-head-a_1_1","due":9919}
+  PASS  a retry after the first response was DROPPED is answered as a replay with the FIRST receipt and adds NO second row — dropped=null status=200 replayed=true receipt=CRCP-8611519996 rowReceipt=CRCP-8611519996 rows 7 -> 8
+
+--- dues-after-retry-one-payment.png (the student's charges and payments after the retry) ---
+ZZ Iso College
+SCHOOL ADMIN
+PRO
+ACADEMICS
+FINANCE
+College Fees
+Sign out
+ZZ Iso College
+SCHOOL ADMIN
+ZI
+ZZ Iso College Admin
+zz-iso-college-admin@test.local
+College Fees
+The college's own fee heads, its programme × term pricing, its dues and its payment channels
+Fee heads
+Fee structure
+Dues & generation
+Payment config
+Charge generation
+Charges are DERIVED: a programme, a term, the structure priced for it and each student's approved registrations. No amount is typed here.
+Programme
+Choose a programme…
+ZZ Iso College Program A
+ZZ Iso College Program B
+Term
+Due date
+Optional
+Run preview (writes nothing)
+Commit these charges
+Dues
+3 students · 10 charges · ৳25,800.00 billed · ৳200.00 waived · ৳4,154.00 paid · ৳21,646.00 due
+STUDENT	CHARGES	BILLED	WAIVED	PAID	DUE	STATUS
+ZZ Fee Probe StudentZZFP-mv4tpt71	1	৳300.00	৳0.00	৳0.00	৳300.00	unpaid
+ZZ Iso College Student AZZ4D-COL-A	7	৳15,200.00	৳200.00	৳4,154.00	৳11,046.00	partly paid
+ZZ Iso College Student BZZ4D-COL-B	2	৳10,300.00	৳0.00	৳0.00	৳10,300.00	unpaid
+ZZ Iso College Student A — charges and payments
+7 charges · still due ৳11,046.00
+Close
+CHARGE	TERM	AMOUNT	WAIVED	PAID	DUE	STATUS
+ZZ Idem Replay — Year 1
+ZZ Idem Replay
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Idem NoKey — Year 1
+ZZ Idem NoKey
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Idem ParallelSameKey — Year 1
+ZZ Idem ParallelSameKey
+	1	৳1,000.00	৳0.00	৳1,000.00	৳0.00	paid
+ZZ Tuition — Year 1
+ZZ Tuition
+	1	৳1,000.00	৳0.00	৳53.00	৳947.00	partly paid
+ZZ Exam — Year 1
+ZZ Exam
+	1	৳200.00	৳200.00	৳0.00	৳200.00	unpaid
+ZZ Idem ParallelKeys — Year 1
+
+
+--- ledger-after-retry.png (the shared ledger, college payments tagged) ---
+ZZ Iso College
+SCHOOL ADMIN
+PRO
+ACADEMICS
+FINANCE
+College Fees
+Sign out
+ZZ Iso College
+SCHOOL ADMIN
+ZI
+ZZ Iso College Admin
+zz-iso-college-admin@test.local
+Central Ledger
+Every financial event, immutable and queryable (PRD §10.1)
+All money
+School money
+College money
+All kinds
+Fee created
+Payments
+Discounts
+Late fees
+SCHOOL COLLECTED (PAYMENTS)
+৳0
+DISCOUNTS GIVEN
+৳0
+LATE FEES
+৳0
+BY METHOD
+No school payments yet
+College
+Fee payments and waivers post to this same ledger. They carry a College badge, their totals are kept apart from the school's, and no figure on this page adds the two together.
+COLLEGE COLLECTED (PAYMENTS)
+৳4,153.00
+COLLEGE WAIVERS
+৳200.00
+COLLEGE LATE FEES
+৳0.00
+BY METHOD
+CASH
+৳3,953.00
+BANK
+৳200.00
+Ledger entries
+51 entries (latest first)
+DATE	KIND	DESCRIPTION	STUDENT	METHOD	REF	BY	AMOUNT	STATUS
+—	
+PAYMENT
+College
+	College payment — ZZ Iso Fee Head A — Year 1	ZZ Iso College Student A	CASH	CRCP-8593668115	ZZ Iso College Admin	৳10.00	Confirmed
+—	
+PAYMENT
+College
+	College payment — ZZ Tuition — Year 1	ZZ Iso College Student A	CASH	CRCP-8598822098	ZZ Iso College Admin	৳20.00	Confirmed
+—	
+
+  PASS  the ledger screen shows the college payment rows under the tenant's school ledger — 	College payment — ZZ Iso Fee Head A — Year 1	ZZ Iso College Student A	CASH	CRCP-8593668115	ZZ Iso College Admin	৳10.00	Confirmed | 	College payment — ZZ Tuition — Year 1	ZZ Iso College Student A	CASH	CRCP-8598822098	ZZ Iso College Admin	৳20.00	Confirmed
+
+summary: mouse charge cf_zziso-col-stu-a_zziso-col-fee-head-a_1_1 paid 71 (rows 6); same-task charge cf_zziso-col-stu-a_zziso-col-fee-head-a_1_1 paid 81 (rows 7); retry charge cf_zziso-col-stu-a_zziso-col-fee-head-a_1_1 paid 101 (rows 8)
+
+7e-pre browser proof: ALL CHECKS PASSED

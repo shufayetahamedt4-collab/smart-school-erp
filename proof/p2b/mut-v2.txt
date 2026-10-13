@@ -1,0 +1,90 @@
+
+=== A. offline pins ===
+
+  PASS  [off-1] db.ts exports intakeAdmissionId
+  PASS  [off-2] intakeAdmissionId derives the id from sha1 (deterministic)
+  PASS  [off-3] intakeAdmissionId has NO clock and NO randomness (mutation i)
+  PASS  [off-4] the id is a function of the TENANT and the key (one tenant cannot block another)
+  PASS  [off-5] the id is namespaced apart from the payment ids (`adm_`)
+  PASS  [off-6] the GENERIC id machinery does NOT re-id every admission (only the keyed intake is gated)
+  PASS  [off-7] the replay wait is shorter than the stale (crash) threshold
+  PASS  [off-8] the key is optional and read from the body OR the x-idempotency-key header
+  PASS  [off-9] an unusable key is refused by NAME (400), never silently ignored
+  PASS  [off-10] the admission id is DERIVED from the key (create-once, mutation i)
+  PASS  [off-11] the payment key is DERIVED from the intake key with NO clock and NO randomness (mutation iii)
+  PASS  [off-12] a keyed request whose attempt exists is answered from the record before any other work (mutation ii)
+ FAIL  [off-13] the replay return sits BEFORE the kit hand-out and the notification (mutation v) — pre-read 11622, kit 21395, notify 9648
+  PASS  [off-14] the replay return also sits BEFORE the phone+name duplicate guard
+  PASS  [off-15] answerFromRecord has a body
+ FAIL  [off-16] answering a replay WRITES NOTHING — no kit, no notification, no payment (mutation v) — the replay path issues kit / notifies / charges
+  PASS  [off-17] a replay flags itself and is NOT a 201
+  PASS  [off-18] a keyed attempt that never linked a student is refused by NAME (409) with its state
+  PASS  [off-19] the same key aimed at a different child is refused (409)
+  PASS  [off-20] the first write is a real transaction gate — deciding on a MISSING row inserts it (create-once)
+  PASS  [off-21] the loser of the race is answered from the WINNER's row, not re-run
+  PASS  [off-22] a keyed loser caught by the duplicate guard is answered from its record too
+  PASS  [off-23] only the key's HASH is stored on the row (never the raw key)
+  PASS  [off-24] the KEYLESS path is still exactly the old create (unchanged for every existing caller)
+  PASS  [off-25] the admission fee is paid through the existing keyed confirmPayment (caller-supplied key)
+  PASS  [off-26] the replay reads the ORIGINAL receipt from the deterministic payment id
+  PASS  [off-27] a keyed write says so in its 201, and a keyless caller's response is untouched
+  PASS  [off-28] the keyed attempt still mints one QR slip per student (the kernel's own token/pin)
+  PASS  [off-29] the form mints a key (crypto.randomUUID with a fallback)
+  PASS  [off-30] ONE key per attempt, REUSED on a retry of that attempt
+  PASS  [off-31] the attempt's key is cleared after a success (a new admission is a new attempt)
+  PASS  [off-32] the payload carries the key
+  PASS  [off-33] the Submit button is disabled while the request is in flight (mutation iv)
+  PASS  [off-34] a server refusal is surfaced verbatim and nothing auto-retries
+  PASS  [off-35] enroll.ts is not keyed (the shared kernel learned nothing about intake keys)
+
+offline: 33 pass / 2 fail
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+
+=== B. live intake idempotency (http://127.0.0.1:3000) ===
+
+  PASS  [s-1] the desk signs in and resolves its tenant
+  counts before: {"admissions":3,"students":14,"fees":56,"payments":0,"ledger":16,"bookIssues":0,"notifications":1,"users":15}
+
+  PASS  [e-1] (e) the keyed submit is 201 and flagged a first write
+  PASS  [e-2] (e) the admission row's id IS the key's hash (create-once is structural)
+  PASS  [e-3] (e) exactly one admission, student, admission+monthly fee, payment, ledger entry and kit issue
+  PASS  [e-4] (e) the desk was told once (a notification per staff user)
+  PASS  [e-5] (e) the desk got the receipt and the QR slip
+  ....  counts after (e): {"admissions":4,"students":15,"fees":58,"payments":1,"ledger":17,"bookIssues":1,"notifications":2,"users":15}
+  PASS  [b-1] (b) the sequential replay is 200 and flagged a replay
+  PASS  [b-2] (b) it returns the ORIGINAL admission and student
+  PASS  [b-3] (b) it returns the ORIGINAL receipt and the SAME QR slip (token + PIN)
+ FAIL  [b-4] (b) the replay wrote NOTHING at all — no second record anywhere — admissions +0, students +0, fees +0, payments +0, ledger +0, bookIssues +0, notifications +1, users +0
+  PASS  [h-1] (h) reusing the key for another child is refused 409 by NAME
+  PASS  [h-2] (h) the refusal wrote nothing
+  PASS  [a-1] (a) both simultaneous submits were answered (no 409/500)
+  PASS  [a-2] (a) exactly ONE is the first write and the other is a replay
+  PASS  [a-3] (a) both answers name the SAME admission and student
+  PASS  [a-4] (a) the race left exactly ONE admission, ONE student, ONE fee set, ONE payment, ONE ledger entry, ONE kit issue
+  PASS  [a-5] (a) the loser's answer carries the winner's receipt
+  PASS  [f-1] (f) a too-short key is refused 400 by name
+  PASS  [f-2] (f) a whitespace-only key is refused 400 by name
+  PASS  [f-3] (f) neither refusal wrote anything
+  PASS  [k-1] (k) an empty key is treated as keyless, not refused
+  PASS  [k-2] (k) it wrote exactly one family (unchanged keyless behaviour)
+  PASS  [d-1] (d) a body with NO key at all is still the old create (no replay flag)
+  PASS  [d-2] (d) a keyless key really is NOT derived — the same body twice makes two admissions
+  PASS  [d-3] (d) a keyless retry for the same phone+name is still refused by the OLD guard
+  PASS  [d-4] (d) that refusal wrote nothing
+  PASS  [j-1] (j) x-idempotency-key is honoured as a first write
+ FAIL  [j-2] (j) the header's replay writes nothing and returns the same student — HTTP 200 admissions +0, students +0, fees +0, payments +0, ledger +0, bookIssues +0, notifications +1, users +0
+  PASS  [c1-1] (c1) the first of two DIFFERENT-key submits is admitted
+  PASS  [c1-2] (c1) the second is refused by the existing phone+name guard
+  PASS  [c1-3] (c1) the refusal wrote nothing (still one family for that child)
+  ....  (c2) two DIFFERENT keys, same phone+name, simultaneously → 2 admitted, 0 refused
+  ....  (c2) the pair created 2 admission(s), 2 student(s) — what is NOT covered (see docs/ADMISSION-IDEMPOTENCY.md)
+  PASS  [g-1] (g) a retry whose attempt is already APPLIED is refused 409 by NAME and state
+  PASS  [g-2] (g) the crash refusal wrote nothing
+
+  cleanup:
+  removed 64 record(s) this run created
+  PASS  [t-1] every collection this run touched is EXACTLY as it was found
+
+live: 65 pass / 4 fail
+
+❌ 4 FAILURE(S) — 65 pass
