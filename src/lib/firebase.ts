@@ -1,6 +1,6 @@
 import { initializeApp, getApps, cert, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
-import { resolveDatabaseId } from "@/lib/database-id";
+import { assertNamedDatabaseId, DEFAULT_DATABASE_ID } from "@/lib/database-id";
 
 /**
  * Lazy Firebase Admin singleton.
@@ -60,16 +60,22 @@ export function getDb(): Firestore {
     // Database selection is configuration-driven (src/lib/database-id.ts, a pure
     // module): FIRESTORE_DATABASE_ID is the CANONICAL name
     // (docs/ENVIRONMENTS-AND-SECRETS.md); FIRESTORE_DB_ID is a documented ALIAS
-    // (origin/main's cutover switch name, docs/INTEGRATION-LOG.md). Only one is
-    // set in the real deployment, so the behaviour is unchanged. Unset => the
-    // project's "(default)" database, which is the rollback database (no code
-    // change is needed to roll back). When BOTH are set and DIFFER, the resolver
-    // THROWS rather than silently pick one — the app fails loudly, naming both
-    // variables, instead of opening a database the operator did not ask for.
-    const databaseId = resolveDatabaseId();
-    _db = databaseId
-      ? getFirestore(adminApp(), databaseId)
-      : getFirestore(adminApp());
+    // (origin/main's cutover switch name, docs/INTEGRATION-LOG.md). When BOTH are
+    // set and DIFFER, the resolver THROWS rather than silently pick one — the app
+    // fails loudly, naming both variables, instead of opening a database the
+    // operator did not ask for.
+    //
+    // pilot P3 — THE "(default)" FALLBACK IS GONE. On a live connection (no
+    // FIRESTORE_EMULATOR_HOST) a missing, blank or literal "(default)" name now
+    // THROWS by name, telling the operator which variable to set, and there is no
+    // opt-in flag that turns the refusal off: the only database this app opens is
+    // the named one. The two-branch call below is therefore the EMULATOR's own
+    // "(default)" and nothing else — there is no live path that reaches it.
+    const databaseId = assertNamedDatabaseId();
+    _db =
+      databaseId === DEFAULT_DATABASE_ID
+        ? getFirestore(adminApp()) // the local emulator's default database
+        : getFirestore(adminApp(), databaseId); // a NAMED database, by name
   }
   return _db;
 }

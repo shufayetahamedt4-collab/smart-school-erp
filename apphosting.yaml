@@ -52,7 +52,7 @@ runConfig:
   # college-support from the perf(infra) session on main so rolling out this
   # branch does not undo it.
   minInstances: 1
-  maxInstances: 10
+  maxInstances: 1
   concurrency: 80
   cpu: 1
   memoryMiB: 512

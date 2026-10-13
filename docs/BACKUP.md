@@ -24,10 +24,16 @@ none.
 Two facts read from the repo, worth stating plainly:
 
 - The app selects its database by `FIRESTORE_DATABASE_ID`. In `apphosting.yaml` that value is
-  `smart-school-db` (`apphosting.yaml:20-21`). Unset, it resolves to `(default)`, described in the
-  code as "the rollback database" (`src/lib/firebase.ts:59-68`). So **`(default)` is a second,
-  older database** — confirm in the console whether it still exists and whether it also needs a
-  backup. **To be confirmed in the console.**
+  `smart-school-db` (`apphosting.yaml:20-21`). **pilot P3 — this is now the ONLY value it accepts:**
+  the app REFUSES to open a live connection when the variable is unset, blank or the literal
+  `"(default)"` (`src/lib/database-id.ts` → `assertNamedDatabaseId`), and no flag turns that refusal
+  off. **The old `(default)` fallback is gone, so removing the variable is NO LONGER the rollback** —
+  rollback is the App Hosting console's **Rollback** button (which serves a previous rollout with its
+  own environment), exactly as `docs/ENVIRONMENTS-AND-SECRETS.md` §2 records.
+- **`(default)` therefore stays reachable only by an operator tool that names it explicitly** (it is
+  the migration tools' SOURCE and the restore target in §4). It is a second, older database — confirm
+  in the console whether it still exists and whether it also needs a backup. **To be confirmed in the
+  console.**
 - The database **location** is not readable from this repo. The deployment region used in
   `firebase.json` and `apphosting.yaml` is `asia-southeast1`, which strongly suggests the database
   lives there, but the database's own location is a console fact. **To be confirmed in the console.**
@@ -176,7 +182,8 @@ are absent from the export. That is another reason to import only into an empty 
 ### After the restore
 
 1. Point a **throwaway** environment at the restored database by setting `FIRESTORE_DATABASE_ID` to
-   `smart-school-db-restore` **there only** — never in production. A local dev server needs
+   `smart-school-db-restore` **there only** — never in production, and never left unset or as
+   `"(default)"` (pilot P3 refuses both: a real NAMED id is required). A local dev server needs
    `ALLOW_LIVE_FIRESTORE=1` before it may open a live database (`src/lib/firebase.ts:45-56`).
 2. Check a few known rows: a school, its students, one attendance day, one fee row, one college
    programme. Counts should look sane, not zero.

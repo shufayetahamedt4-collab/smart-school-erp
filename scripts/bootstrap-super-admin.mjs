@@ -73,6 +73,15 @@ registerHooks({
 
 const { adminPasswordProblem, MIN_ADMIN_PASSWORD } = await import("../src/lib/pilot-guards.ts");
 
+/**
+ * pilot P3 — the app may only ever open a NAMED database, and this script opens
+ * the same database the app does. It therefore uses the SAME decision
+ * (`liveDatabaseProblem` / `assertNamedDatabaseId` in src/lib/database-id.ts)
+ * rather than a second copy of the rule, which is what keeps the two from ever
+ * drifting apart.
+ */
+const { liveDatabaseProblem, assertNamedDatabaseId, DEFAULT_DATABASE_ID } = await import("../src/lib/database-id.ts");
+
 /** The acknowledgement that gates every write in this repo. */
 export const LIVE_FLAG = "ALLOW_LIVE_FIRESTORE";
 /** The one accepted spelling of that acknowledgement. */
@@ -438,6 +447,15 @@ async function main() {
     liveConfirmation,
   }).filter((p) => !/SUPER_ADMIN already exists/.test(p));
 
+  // pilot P3 — a live run must NAME its database ("(default)" is refused, and so
+  // is an unset name). Deliberately part of the EARLY list: the refusal has to
+  // happen BEFORE the connection is opened and before any prompt, which is the
+  // order verify-pilot-hardening pins ("refuses before it opens a connection").
+  // It is a separate call rather than a rule inside `bootstrapProblems` so the
+  // app's own decision stays the single source: one rule, two callers.
+  const databaseProblem = liveDatabaseProblem(env);
+  if (databaseProblem) early.push(databaseProblem);
+
   if (early.length) {
     console.error("\nREFUSING TO RUN\n");
     for (const p of early) console.error(`  - ${p}`);
@@ -469,7 +487,12 @@ async function main() {
       });
     }
   }
-  const db = getFirestore();
+  // pilot P3 — open the RESOLVED name, never a bare default. `liveDatabaseProblem`
+  // has already refused a live run with no name, so this is either a real named
+  // database or — emulator only — the emulator's own "(default)".
+  const databaseName = assertNamedDatabaseId(env);
+  const db =
+    databaseName === DEFAULT_DATABASE_ID ? getFirestore() : getFirestore(undefined, databaseName);
 
   // The one database read this script makes: is there already an owner?
   const existing = await db.collection("users").where("role", "==", "SUPER_ADMIN").limit(1).get();

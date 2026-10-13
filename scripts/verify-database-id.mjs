@@ -62,7 +62,18 @@ registerHooks({
 const MODULE_URL = new URL("../src/lib/database-id.ts", import.meta.url);
 const source = readFileSync(MODULE_URL, "utf8");
 
-const { DATABASE_ID_VAR, DATABASE_ID_ALIAS_VAR, resolveDatabaseId } = await import(MODULE_URL.href);
+const {
+  DATABASE_ID_VAR,
+  DATABASE_ID_ALIAS_VAR,
+  DEFAULT_DATABASE_ID,
+  resolveDatabaseId,
+  isEmulatorEnvironment,
+  liveDatabaseProblem,
+  assertNamedDatabaseId,
+} = await import(MODULE_URL.href);
+
+/** Read a repository file as text (the source pins below judge CODE, not prose). */
+const readRel = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
 
 /**
  * Blank out comments and string literals, PRESERVING LENGTH, so a token search
@@ -328,6 +339,177 @@ console.log("\n8. purity — deterministic, the env is not mutated, and the defa
   }
 }
 
+/* ------------------------------------------------------------------------ 9 */
+
+console.log("\n9. pilot P3 — a LIVE environment must NAME its database: \"(default)\" is refused");
+{
+  const named = { FIRESTORE_DATABASE_ID: "smart-school-db" };
+
+  // (a) A named database is allowed, is returned verbatim, and is what the client opens.
+  const allowed = liveDatabaseProblem(named);
+  let namedId = null;
+  try {
+    namedId = assertNamedDatabaseId(named);
+  } catch (e) {
+    namedId = `threw: ${e?.message}`;
+  }
+  if (allowed !== null) {
+    bad("p3-live", `a named database was refused: ${JSON.stringify(allowed)}`);
+  } else if (namedId !== "smart-school-db") {
+    bad("p3-live", `a named database resolved to ${JSON.stringify(namedId)}, expected "smart-school-db"`);
+  } else {
+    ok("a live environment with a named database is allowed, and opened by that name");
+  }
+
+  // (b) unset, (c) blank/whitespace, (d) the literal "(default)" — every form is refused,
+  //     by `liveDatabaseProblem` (the text) AND by `assertNamedDatabaseId` (the throw).
+  const refused = [
+    ["both absent", {}],
+    ["canonical empty", { FIRESTORE_DATABASE_ID: "" }],
+    ["alias empty", { FIRESTORE_DB_ID: "" }],
+    ["canonical whitespace", { FIRESTORE_DATABASE_ID: "   " }],
+    ["alias whitespace", { FIRESTORE_DB_ID: "\t" }],
+    ["canonical is (default)", { FIRESTORE_DATABASE_ID: "(default)" }],
+    ["alias is (default)", { FIRESTORE_DB_ID: "(default)" }],
+    ["both are (default)", { FIRESTORE_DATABASE_ID: "(default)", FIRESTORE_DB_ID: "(default)" }],
+  ];
+  let missed = null;
+  let threwFor = 0;
+  for (const [label, env] of refused) {
+    const text = liveDatabaseProblem(env);
+    if (!text) {
+      missed = `${label} was ALLOWED by liveDatabaseProblem`;
+      break;
+    }
+    let threw = null;
+    try {
+      assertNamedDatabaseId(env);
+    } catch (e) {
+      threw = e;
+    }
+    if (!threw) {
+      missed = `${label} did not throw in assertNamedDatabaseId`;
+      break;
+    }
+    if (!String(threw.message).includes(DATABASE_ID_VAR) || !String(threw.message).includes(DATABASE_ID_ALIAS_VAR)) {
+      missed = `${label} threw a message that does not name BOTH variables: ${JSON.stringify(String(threw.message))}`;
+      break;
+    }
+    threwFor += 1;
+  }
+  if (missed) bad("p3-live", missed);
+  else ok(`${threwFor} unnamed/"(default)" live environments are refused, and each refusal names both variables`);
+
+  // (e) The alias still works on its own — the pre-existing rules are untouched.
+  let aliasId = null;
+  try {
+    aliasId = assertNamedDatabaseId({ FIRESTORE_DB_ID: "smart-school-db" });
+  } catch (e) {
+    aliasId = `threw: ${e?.message}`;
+  }
+  if (aliasId !== "smart-school-db") bad("p3-live", `the alias alone resolved to ${JSON.stringify(aliasId)}`);
+  else ok('the ALIAS alone still selects the database on a live environment (rule unchanged)');
+
+  // (f) A disagreeing pair still throws the CONFLICT message, not the new refusal.
+  let conflict = "";
+  try {
+    assertNamedDatabaseId({ FIRESTORE_DATABASE_ID: "smart-school-db", FIRESTORE_DB_ID: "some-other-db" });
+  } catch (e) {
+    conflict = String(e?.message || "");
+  }
+  if (!conflict.includes("disagree")) bad("p3-live", `a disagreeing pair did not raise the conflict error: ${JSON.stringify(conflict)}`);
+  else ok("a disagreeing canonical/alias pair still raises the conflict error, not the P3 refusal");
+
+  // (g) NO OPT-IN FLAG. A flag would only re-arm the accident this stops, so the
+  //     module may read no environment name beyond the emulator host; the two
+  //     database names are read through their constants. Any `env.<OTHER>` in the
+  //     module fails here.
+  const envReads = [...new Set([...source.matchAll(/\benv\.([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]))];
+  const unexpected = envReads.filter((n) => n !== "FIRESTORE_EMULATOR_HOST");
+  if (unexpected.length) {
+    bad("p3-live", `the module reads env.${unexpected.join(", env.")} — an opt-in flag is exactly what P3 removed`);
+  } else {
+    ok("there is no opt-in flag: the module reads no env name beyond FIRESTORE_EMULATOR_HOST");
+  }
+}
+
+/* ----------------------------------------------------------------------- 10 */
+
+console.log('\n10. the EMULATOR is unchanged — its own "(default)" is the local database');
+{
+  const emu = { FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080" };
+  if (isEmulatorEnvironment({})) bad("p3-emulator", "an empty environment reported itself as the emulator");
+  else if (isEmulatorEnvironment({ FIRESTORE_EMULATOR_HOST: "   " })) bad("p3-emulator", "a whitespace emulator host counted as the emulator");
+  else if (!isEmulatorEnvironment(emu)) bad("p3-emulator", "a loopback emulator host was not detected");
+  else if (liveDatabaseProblem(emu) !== null) bad("p3-emulator", `the emulator was refused: ${JSON.stringify(liveDatabaseProblem(emu))}`);
+  else if (liveDatabaseProblem({ ...emu, FIRESTORE_DATABASE_ID: "(default)" }) !== null) {
+    bad("p3-emulator", 'the emulator with an explicit "(default)" was refused');
+  } else if (assertNamedDatabaseId(emu) !== DEFAULT_DATABASE_ID) {
+    bad("p3-emulator", `an unnamed emulator run resolved to ${JSON.stringify(assertNamedDatabaseId(emu))}`);
+  } else if (assertNamedDatabaseId({ ...emu, FIRESTORE_DATABASE_ID: "smart-school-db" }) !== "smart-school-db") {
+    bad("p3-emulator", "a NAMED database inside an emulator run was not honoured");
+  } else {
+    let emuConflict = "";
+    try {
+      assertNamedDatabaseId({ ...emu, FIRESTORE_DATABASE_ID: "a-db", FIRESTORE_DB_ID: "b-db" });
+    } catch (e) {
+      emuConflict = String(e?.message || "");
+    }
+    if (!emuConflict.includes("disagree")) {
+      bad("p3-emulator", `the conflict rule was relaxed for the emulator: ${JSON.stringify(emuConflict)}`);
+    } else {
+      ok('emulator runs are unchanged: an unnamed run is its own "(default)", a named one is honoured, conflicts still throw');
+    }
+  }
+}
+
+/* ----------------------------------------------------------------------- 11 */
+
+console.log("\n11. the APP and the live-capable scripts use this decision (source pins)");
+{
+  const firebaseSrc = readRel("src/lib/firebase.ts");
+  const bootSrc = readRel("scripts/bootstrap-super-admin.mjs");
+  const cleanupSrc = readRel("scripts/qa-cleanup-users.mjs");
+  const certsSrc = readRel("scripts/qa-certificates.mjs");
+
+  const strictCall = firebaseSrc.indexOf("assertNamedDatabaseId(");
+  const appFallback = firebaseSrc.indexOf("getFirestore(adminApp())");
+  if (strictCall === -1) {
+    bad("p3-wiring", "src/lib/firebase.ts does not call assertNamedDatabaseId");
+  } else if (appFallback === -1) {
+    bad("p3-wiring", "src/lib/firebase.ts no longer has the emulator's default-database branch");
+  } else if (strictCall > appFallback) {
+    bad("p3-wiring", "src/lib/firebase.ts reaches getFirestore(adminApp()) before the guard runs");
+  } else if (!firebaseSrc.includes("databaseId === DEFAULT_DATABASE_ID")) {
+    bad("p3-wiring", "the default-database branch is not gated on DEFAULT_DATABASE_ID (it could be reached live)");
+  } else {
+    ok("the app resolves through assertNamedDatabaseId, and the only unnamed branch is gated on DEFAULT_DATABASE_ID");
+  }
+
+  const bootGuard = bootSrc.indexOf("liveDatabaseProblem(env)");
+  const bootOpen = bootSrc.indexOf("initializeApp(");
+  if (bootGuard === -1) {
+    bad("p3-wiring", "bootstrap-super-admin.mjs does not use the app's own refusal");
+  } else if (bootOpen === -1 || bootGuard > bootOpen) {
+    bad("p3-wiring", "bootstrap-super-admin.mjs reaches initializeApp before refusing an unnamed database");
+  } else if (!bootSrc.includes("assertNamedDatabaseId(env)")) {
+    bad("p3-wiring", "bootstrap-super-admin.mjs no longer opens the database by its resolved name");
+  } else if (!bootSrc.includes("getFirestore(undefined, databaseName)")) {
+    bad("p3-wiring", "bootstrap-super-admin.mjs no longer opens a NAMED database by name");
+  } else {
+    ok("the first-owner bootstrap refuses an unnamed live run before it connects, then opens the resolved name");
+  }
+
+  const refusal = 'DATABASE_NAME === "(default)"';
+  if (!cleanupSrc.includes("FIRESTORE_DATABASE_ID || process.env.FIRESTORE_DB_ID") || !cleanupSrc.includes(refusal)) {
+    bad("p3-wiring", "qa-cleanup-users.mjs does not read the canonical name and refuse \"(default)\"");
+  } else if (!certsSrc.includes("FIRESTORE_DATABASE_ID || process.env.FIRESTORE_DB_ID") || !certsSrc.includes('databaseName === "(default)"')) {
+    bad("p3-wiring", "qa-certificates.mjs does not read the canonical name and refuse \"(default)\"");
+  } else {
+    ok("both QA sweeps read the canonical name (and the alias) and refuse \"(default)\"");
+  }
+}
+
 /* ---------------------------------------------------------------------- end */
 
 console.log("");
@@ -337,5 +519,9 @@ if (failures) {
 }
 console.log(
   `✅ DATABASE-ID RESOLUTION OK — ${checks} check(s): the canonical name wins by agreement, either single ` +
-    `name selects its database, a blank value means "(default)", and two DISAGREEING names throw rather than guess.`
+    `name selects its database, a blank value means "(default)" for the resolver, and two DISAGREEING names throw rather than guess.`
+);
+console.log(
+  `✅ pilot P3 — that resolver value is no longer ACTED ON live: a missing/blank/"(default)" name now throws by name ` +
+    `(no opt-in flag), the emulator is unchanged, and the app plus the live-capable scripts use that one decision.`
 );

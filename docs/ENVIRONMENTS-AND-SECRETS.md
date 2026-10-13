@@ -33,7 +33,7 @@ Verified in the repo: `.env` and every `.env.*` except `.env.example` are ignore
 | Variable | Consequence of changing it |
 |----------|----------------------------|
 | **`JWT_SECRET`** | It signs every session. **Changing it signs out every user on every host at once.** It must be one stable value everywhere the app runs (App Hosting, Netlify, local) — see `scripts/deploy-guide.md` and `netlify.toml`. Rotate only deliberately, as an incident response, and expect every user to log in again. |
-| **`FIRESTORE_DATABASE_ID`** | Points at the live database. Changing it in production repoints the whole app at a different database. Only ever changed as a planned cutover/rollback. |
+| **`FIRESTORE_DATABASE_ID`** | Points at the live database. Changing it in production repoints the whole app at a different database. Only ever changed as a planned cutover/rollback. **pilot P3: it must never be unset or `"(default)"`** — the app now REFUSES to open a live connection in that case, and there is no opt-in flag that turns the refusal off. |
 | **`FIREBASE_*` credentials** | The Admin SDK cannot reach Firestore without them; every data route then returns an empty 500. If the service-account key is revoked, all hosts must be updated together. |
 
 `FIREBASE_STORAGE_BUCKET` is **not** a secret (the bucket name is already in the web-app config),
@@ -60,7 +60,7 @@ current setup uses the explicit secrets, so treat them as required.
 
 | Name | Value in `apphosting.yaml` | Notes |
 |------|---------------------------|-------|
-| `FIRESTORE_DATABASE_ID` | `smart-school-db` | Unset → `(default)` = the rollback database (`src/lib/firebase.ts:59-68`). |
+| `FIRESTORE_DATABASE_ID` | `smart-school-db` | **pilot P3 — the `(default)` fallback is GONE.** Unset/blank (or the literal `"(default)"`) now makes a live connection THROW by name (`src/lib/database-id.ts` → `assertNamedDatabaseId`; `src/lib/firebase.ts`), so there is no silent fallback to the old africa database. The emulator is unchanged: its own `"(default)"` is the local database. **Rollback is the App Hosting console's Rollback button — not an unset variable.** |
 | `FIREBASE_STORAGE_BUCKET` | `amar-e-school.firebasestorage.app` | Wrong value 404s every upload/download URL. |
 | `APP_URL` | `https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app` | Public origin for QR links and storage URLs. **Must match the real host**; `scripts/deploy-guide.md` still describes the older placeholder step (its Phase 5 is stale — the real URL is now committed). |
 | `ALLOW_LIVE_FIRESTORE` | `"1"` | The fail-closed guard: without an emulator host **and** without `ALLOW_LIVE_FIRESTORE=1`, `getDb()` refuses to open a live database (`src/lib/firebase.ts:45-56`). |
@@ -134,6 +134,8 @@ is a `apphosting.yaml` edit + redeploy, and must respect the "never change" note
 - [ ] **`git status` is clean** of stray files, and **no `.env`, `service-account.json`, or `*.pem`
       is staged or committed.**
 - [ ] **No secret value is in a changed file.** Quick check: `git diff --cached | grep -iE "BEGIN .*PRIVATE KEY|JWT_SECRET="`.
+- [ ] **`FIRESTORE_DATABASE_ID` is set to `smart-school-db`** — pilot P3 removed the `(default)`
+      fallback, so a missing/blank/`"(default)"` value now refuses a live connection outright.
 - [ ] **`APP_URL`** matches the host actually being deployed to (QR links and file URLs depend on it).
 - [ ] **Variable changes deploy with the change** (App Hosting and Netlify both need a redeploy for a
       new/changed variable to take effect).

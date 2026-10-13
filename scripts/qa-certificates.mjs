@@ -314,8 +314,20 @@ async function main() {
     });
   }
   if (getApps().length) {
-    // FIRESTORE_DB_ID selects the database (migration cutover switch); unset = (default).
-    const db = getFirestore(undefined, process.env.FIRESTORE_DB_ID || "(default)");
+    // pilot P3 — the canonical name first, the alias second; the literal
+    // "(default)" is refused on a live run (this sweep DELETES user documents and
+    // storage objects, so an unpointed live run is exactly the accident to stop).
+    // The emulator is unchanged: its own "(default)" is the local database.
+    const emulator = String(process.env.FIRESTORE_EMULATOR_HOST || "").trim();
+    const databaseName = String(process.env.FIRESTORE_DATABASE_ID || process.env.FIRESTORE_DB_ID || "").trim();
+    if (!emulator && (!databaseName || databaseName === "(default)")) {
+      console.error(
+        'Refusing to open the "(default)" Firestore database: set FIRESTORE_DATABASE_ID (or FIRESTORE_DB_ID) to the ' +
+          'named database — "smart-school-db". The "(default)" fallback was removed (pilot P3).'
+      );
+      process.exit(1);
+    }
+    const db = getFirestore(undefined, databaseName || "(default)");
     const snap = await db.collection("users").get();
     const batch = db.batch();
     let n = 0;
