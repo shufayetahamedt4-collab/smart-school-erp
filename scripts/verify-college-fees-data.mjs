@@ -694,6 +694,14 @@ console.log("\n10. the ledger readers are the AUDITED set, and the college money
     "lib/ledger.ts", //            ledgerForStudent / ledgerForSchool + the write-path guards
     "app/api/ledger/route.ts", //  the ONLY route that serves a ledger read (school, guardian, student)
     "app/api/export/route.ts", //  ?type=ledger — the CSV a school viewer exports
+    // pilot P2c — REVIEWED, and the answer to this phase's question is NO: the
+    // reconciliation report reads CONFIRMED PAYMENT entries only to check a fee
+    // header against its own rows, and every one of its ledger queries is keyed
+    // by a fee id taken from the school's OWN fee rows (`feeId: { in: chunk }`),
+    // while a college entry carries `feeId: null` + `meta.collegeFeeId` (D-7-12).
+    // It can therefore never return, sum or display college money — the read is
+    // a fee-book audit of the caller's tenant, not a tenant-wide ledger view.
+    "app/api/fees/reconciliation/route.ts",
   ];
   const LEDGER_READ_RE = /\bprisma\.ledgerEntry\.(?:findMany|findFirst|findUnique)\b|\bledgerForSchool\b|\bledgerForStudent\b/g;
 

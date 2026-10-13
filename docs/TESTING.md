@@ -192,6 +192,42 @@ Pilot P2 adds one more **guarded, HTTP** verifier:
   run and the five verifier counts corrected against what the scripts print — is
   [docs/PILOT-FIX-2.md](docs/PILOT-FIX-2.md).
 
+Pilot P2c adds one more **guarded, HTTP** verifier — and the suite runner the earlier runs kept outside
+the repository:
+
+- `scripts/verify-fee-reconciliation.mjs` — **guarded** (`requireEmulator()`), and it needs the app
+  running: it creates one fee per drift class directly in the emulator and proves each is reported with
+  the right class and INTEGER amounts, proves a fee paid through the keyed `POST /api/fees/[id]/pay` path
+  is NOT reported, walks the school with `limit` + `cursor` and checks the REPORTED read cost against the
+  rows that really exist for each page, proves another tenant's fees never appear (and that the same read
+  by a super admin for that other school does show them), checks the role matrix (SCHOOL_ADMIN /
+  ACCOUNTANT / SUPER_ADMIN(+`?schoolId`) in; REGISTRAR, TEACHER, STUDENT, GUARDIAN, a branch-confined
+  ACCOUNTANT and an unauthenticated caller out, none of them receiving a fee row), and proves the route
+  writes nothing (a content hash of the money books plus the total document count of EVERY collection,
+  before and after, after first proving the database quiescent). `--mutations` then reverses the route one
+  property at a time — drop class (i), drop the tenant scope, allow GUARDIAN, make it write — shows the
+  matching check FAIL, and restores the file byte-identical (sha256). **53 checks** (65 with `--mutations`).
+
+- `scripts/suite-all.mjs` — the suite runner, now IN the repository. The earlier runs were driven by a
+  wrapper in a temp directory, which is exactly why `BASE`/`BASE_URL` never reached
+  `verify-exams-invalidation`, `qa-phase23` and `qa-certificates`: each dialled its own dead port instead
+  of the running app ([docs/PILOT-FIX-2.md](docs/PILOT-FIX-2.md) §8). It exports `SMOKE_PORT`,
+  `VERIFY_PORT`, `BASE` and `BASE_URL` for every verifier, wipes the emulator + `seed.mjs` +
+  `isolation-fixture.mjs create` (+ `seed-kit-demo.mjs` for `verify-admission-intake` and
+  `verify-write-integrity`) and RESTARTS the app before every server-backed verifier — which is what makes
+  the order-sensitive group (`verify-sweep-routes`, `verify-admission-intake`, the bulk-import/onboarding
+  pair) deterministic — keeps `verify-college-fees-api` LAST (see below), prints each verifier's exit code
+  and **its own count**, and fails on any unexpected non-zero exit. `node scripts/suite-all.mjs`;
+  `SUITE_ONLY=a,b`, `SUITE_FROM=<name>` and `SUITE_PURE=0` resume a long run. Logs go to
+  `$SUITE_LOG_DIR` (default `<tmp>/sspr/suite-logs`): one file per verifier, plus `progress.log` and
+  `results.json`.
+
+Also in P2c: `GET /api/fees/reconciliation` — a READ-ONLY, admin-only, school-scoped report over the
+school's own fee book (the drift classes `fee_above_sums`, `payment_ledger_mismatch`, `sums_above_fee`),
+whose ledger read is registered in `verify-college-fees-data.mjs`'s ledger-reader audit. It was reviewed
+in that audit's terms: every query is keyed by a fee id taken from the school's own fee rows, so a college
+entry (`feeId: null` + `meta.collegeFeeId`, D-7-12) can never be returned, summed or displayed.
+
 **One ordering rule the college fee verifiers share with the demo-school ones.** A verifier that reads a row an
 earlier verifier created *through the app* is safe (the app's own writes clear its memo), but one that reads a row
 created **and deleted** by an earlier verifier can still see the deleted row in the memo for up to 150 s. That is
