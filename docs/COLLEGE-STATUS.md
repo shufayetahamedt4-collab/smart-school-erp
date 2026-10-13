@@ -1,15 +1,16 @@
 # COLLEGE-STATUS.md — the college work, whole story in one place
 
 **Date written:** 2026-10-09. **Updated 2026-10-11 (Phase 7c-follow-up).**
-**Updated 2026-10-13 (Phase 7d/7e/7f).** Phase 7 is **complete** — including 7e and 7f — and its last
-two parts (the 7d remainder, 7e, 7f) are **uncommitted working-tree changes** on top of `e5ee07d`:
-nothing was staged, committed, pushed or deployed. The evidence is `proof/7d/`, `proof/7e/` and
-`proof/7f/`, and the sections below carry the counts that were re-run on 2026-10-13.
+**Updated 2026-10-14 (Phase 7 committed).** Phase 7 is **complete** — including 7e and 7f — and its last
+two parts (the 7d remainder, 7e, 7f) are **committed and pushed** on `integration/main-into-college`:
+`f542405` code + verifiers, `efb97c0` docs, `946e4e3` evidence records. The sections below carry the
+counts that were re-run on 2026-10-13.
 **Branch:** `integration/main-into-college` — the **school and college lines are merged here** (see §2,
 "integration"). The branch that had the story to itself was `college-support`.
-**HEAD when first written:** `dc0e970` (`phase 6-pre 6: …`). **HEAD now (2026-10-13):** `e5ee07d`
-(`pilot P3: the app can never open the (default) Firestore database`) — **the same HEAD as before the
-7d/7e/7f work started**, which is why every Phase 7 claim below is qualified as *working tree*. The last
+**HEAD when first written:** `dc0e970` (`phase 6-pre 6: …`). **HEAD at the Phase 7 close-out
+(2026-10-14):** `946e4e3` — the 7d/7e/7f work was written on `e5ee07d` (`pilot P3: the app can never open
+the (default) Firestore database`) and **committed afterwards** (`f542405`, `efb97c0`, `946e4e3`), which
+is why some Phase 7 claims below are qualified as *working tree* for the moment they were written. The last
 **committed** fee work is `41d4f41` (`phase 7c: the college fee API`) plus the `cac825c` / `824e80d`
 7d-fix / 7e-pre commits; `a9d1326` (`phase 7b: college fee data layer`) precedes those. The Phase 6 record
 below is kept as it was written, with the fee phases' own numbers added in §3.
@@ -38,8 +39,8 @@ Read this before the tables, or the phase names will mislead you.
   §2 below. Nothing is still "not started" about it.
 - The **real Phase 7** (college fee basis, 7-pre → 7f) is **FINISHED** — the logic (7a), the data layer
   (7b), the API (7c), the screens and print pages (7d), the isolation and BOTH-tenant Q3 proof (7e) and
-  the finished record with the D-7-18 production-build role probe (7f). Its last three parts are
-  **uncommitted** on top of `e5ee07d`. **Phase 9a/9b/9c** (college dashboard / reports / import; renumbered
+  the finished record with the D-7-18 production-build role probe (7f). Its last three parts were written
+  on `e5ee07d` and are now **committed and pushed** (`f542405`, `efb97c0`, `946e4e3`). **Phase 9a/9b/9c** (college dashboard / reports / import; renumbered
   from 8a/8b/8c on 2026-10-11, when attendance took Phase 8) and
   Phase 8's attendance work (`8-pre` first) have **not started**. The per-programme scale override
   (D-6-19) is parked **with the owner**.
@@ -100,7 +101,7 @@ All hashes are on this line, in `git log --oneline` order (newest first within a
 | **7c** | `41d4f41` the college fee API (`/api/college-fees`) | Nothing on screen yet (7d owns the pages). The **API**: heads, the programme × term structure, generation (dry-run + idempotent top-up), charges/dues, payments in integer minor units, awards (propose/approve) and the tenant's college payment config — each handler behind `requireCollege` → the D-7-18 allow-list → `writeGuard` on a mutation. |
 | **7c-follow-up** | the scripts + docs commits this document belongs to | Nothing user-visible. The shared ledger's **read audit** (every reader enumerated and ruled on, then pinned by checks) and the **permanent staff matrix** (ACCOUNTANT / REGISTRAR / BRANCH_ADMIN proved by the committed suite instead of by hand). |
 | **7d (earlier session)** | `cac825c` phase 7d-fix: the college money totals agree with their rows | **The college fee screens**: Fee heads, Fee structure, Dues & generation and Payment config behind the one `requires:"COLLEGE"` nav entry — plus the four UX fixes that commit carries. |
-| **7d remainder, 7e, 7f (2026-10-13, UNCOMMITTED)** | no commit — working tree on `e5ee07d` | **D-7-17 print pages** (`/print/college-fee-statement/[studentId]`, `/print/college-fee-receipt/[chargeId]`) reached from the Dues tab; **7e's isolation + Q3 mode-mixing proof** (`verify-mode-mixing` 33, `verify-fees-totals` 24 = the unchanged 15 school + 9 college); the **D-7-18 role probe on a production build** (24/24, build `bTZhoZ8u8HFwxegmI4rKq`); and the 7f record in [proof/7f/REPORT.md](../proof/7f/REPORT.md). **Phase 7 is complete**; what remains uncommitted is the whole of it. |
+| **7d remainder, 7e, 7f (2026-10-13, committed 2026-10-14)** | `f542405` code + verifiers, `efb97c0` docs, `946e4e3` records | **D-7-17 print pages** (`/print/college-fee-statement/[studentId]`, `/print/college-fee-receipt/[chargeId]`) reached from the Dues tab; **7e's isolation + Q3 mode-mixing proof** (`verify-mode-mixing` 33, `verify-fees-totals` 24 = the unchanged 15 school + 9 college); the **D-7-18 role probe on a production build** (24/24, build `bTZhoZ8u8HFwxegmI4rKq`); and the 7f record in [proof/7f/REPORT.md](../proof/7f/REPORT.md). **Phase 7 is complete, committed and pushed.** |
 
 **Safety / test-infrastructure commits in the same range** (they change no product behaviour):
 `25c439f`, `e31f454`, `e31822e`, `e538e74`, `48d8dc5`, `c9b6207`, `e01e321`, `43e8595`, `3e6b702`,
@@ -209,7 +210,7 @@ Build and types:
 — 2 fails, or 3 on a day its section 7 runs (the seed writes only **section-scoped** routines while the route's class-wide read returns
 the `sectionId == null` rows). Four browser checks in `scripts/smoke-all.mjs` (the two `/print/*` pages
 and two `/teacher/marks` checks) are also known-failing, analysed in
-[docs/SMOKE-FAILURES.md](docs/SMOKE-FAILURES.md) (which is untracked and a snapshot, see §8). They are
+[docs/SMOKE-FAILURES.md](docs/SMOKE-FAILURES.md) (a tracked snapshot of an older state, see §8). They are
 **not** green, and claiming "the tests are green" would be wrong.
 
 **Re-confirmed 2026-10-11 (Phase 7c-follow-up)**, from a wiped emulator, a fresh seed and a restarted app,
@@ -282,7 +283,7 @@ verifier runs. Steps graded from the code alone are marked where a live run is n
 
 **Journey gaps that sit outside these 21 steps** (the parts a real college needs and does not have):
 
-- **College fees** — **built end to end (7a → 7f), uncommitted.** A college admin can now define heads and
+- **College fees** — **built end to end (7a → 7f), committed 2026-10-14.** A college admin can now define heads and
   a programme-term structure, preview and commit charge generation, take a payment and propose/approve an
   award, and print a statement or a receipt — all behind the D-7-18 allow-list, with the money landing in
   the ONE shared ledger tagged so the two modes can never be confused. What is *not* built is what 8/9 own:
@@ -308,7 +309,7 @@ verifier runs. Steps graded from the code alone are marked where a live run is n
 
 | # | Item | Where | Size | Who it blocks | Blocks a sale? |
 |---|------|-------|------|---------------|----------------|
-| 1 | ~~**Phase 7 remainder**~~ — **DONE (2026-10-13, uncommitted)**: the fee **screens / print pages** (7d), the fee rows' isolation + Q3 regression proof (7e) and the finished record with the production-build role probe (7f). The logic (7a), the data layer (7b) and the API (7c) were already done | `COLLEGE-DECISIONS.md` §24.7; [proof/7e/REPORT.md](../proof/7e/REPORT.md), [proof/7f/REPORT.md](../proof/7f/REPORT.md) | — | — | No — **the one thing to do now is review and commit it** |
+| 1 | ~~**Phase 7 remainder**~~ — **DONE AND COMMITTED (built 2026-10-13, committed 2026-10-14)**: the fee **screens / print pages** (7d), the fee rows' isolation + Q3 regression proof (7e) and the finished record with the production-build role probe (7f). The logic (7a), the data layer (7b) and the API (7c) were already done | `COLLEGE-DECISIONS.md` §24.7; [proof/7e/REPORT.md](../proof/7e/REPORT.md), [proof/7f/REPORT.md](../proof/7f/REPORT.md) | — | — | No — **committed and pushed (`f542405`, `efb97c0`, `946e4e3`); nothing is left on this row** |
 | 2 | Phase **9a/9b/9c** (renumbered from 8a/8b/8c — attendance took Phase 8): college dashboard / reports / import — **comes after Phase 8** by decision (D-CA-6) | §10 | Large | College admin | Partly |
 | 3 | ~~Per-course college attendance model undecided~~ — **DECIDED 2026-10-11 (owner, Q1/Q8): it is Phase 8**, and its model is D-CA-1…D-CA-7 — a NEW `courseAttendance` collection keyed `ca_<courseId>_<dateKey>_<slot>_<studentId>`, never retrofitted onto the school's `attendance` key, with `8-pre` (the course↔teacher link) built first and v1 marking staff-only. **Not built** | `COLLEGE-DECISIONS.md` §24.6/§24.8, §10's dated correction | Medium | College teachers | **Yes**, for a college running attendance |
 | 4 | ~~College fee heads / structures not modelled~~ — **DONE (7a/7b/7c)**: modelled, stored and served behind `/api/college-fees` | §24 | — | — | No |
@@ -319,10 +320,10 @@ verifier runs. Steps graded from the code alone are marked where a live run is n
 | 9 | ~~Super-admin `POST /api/schools` still writes `feeSetting` for a college tenant~~ — **FIXED in `cccbd37` (7-pre)**: the create now guards `feeSetting` with `wizardAcceptsFees(institutionType)`, so a COLLEGE-only tenant is created without one | `src/app/api/schools/route.ts:105-124` | — | — | No |
 | 10 | Wizard success screen says "school"; college sidebar still shows school items | onboarding page, `src/components/nav.ts` | Small | College admin | No |
 | 11 | `firestore.indexes.json` `schoold` typo: fixed in the file, still live in both databases | `firestore.indexes.json` + the live DBs | Small | Nobody (the shim sorts in memory) | No |
-| 12 | Firestore backup not yet confirmed; the old `(default)` database is the rollback insurance and its archive date (2026-10-08) has passed | `apphosting.yaml`, `src/lib/firebase.ts` | Decision | The operator | No |
+| 12 | Firestore backup not yet confirmed; the old `(default)` database is the **last copy of the pre-cutover data**, and since **pilot P3 (`e5ee07d`)** it is no longer reachable by configuration — a live start with an unnamed or `"(default)"` database is REFUSED, and the rollback is the App Hosting console's **Rollback** button. Its archive date (2026-10-08) has passed; deletion is an owner decision | `src/lib/database-id.ts`, `src/lib/firebase.ts` | Decision | The operator | No |
 | 13 | ~~Go-live: role probe on a **production** build~~ — **DONE (7f, 2026-10-13)** for a **local** production build (`npm run build` + `next start`, 24/24 against build `bTZhoZ8u8HFwxegmI4rKq`). A **hosted** (deployed) run has still not been made | `scripts/verify-role-probe.mjs`; [proof/7f/REPORT.md](../proof/7f/REPORT.md) | Small (hosted run) | The operator | No |
-| 14 | Go-live: production line decision — `origin/main` vs `deploy/app-hosting` | — | Decision | The operator | No |
-| 15 | `docs/PHASE1-DECISION-WORKSHEET.md` and `docs/SMOKE-FAILURES.md` are **untracked** and outdated | those files | Small (doc) | A future reader | No |
+| 14 | ~~Go-live: production line decision~~ — **DECIDED (owner console, 2026-10-11): the live branch is `main`.** Backend `smart-school-erp-1` serves branch `main` with automatic rollouts on and **no console variable overrides**, so **`origin/main` (`f4ed2a5`) is production** and `deploy/app-hosting` (`96f4762`) is **NOT** the live branch (pre-integration snapshot only) | owner console screenshot, 2026-10-11 | — | — | No |
+| 15 | ~~`docs/PHASE1-DECISION-WORKSHEET.md` and `docs/SMOKE-FAILURES.md` are **untracked** and outdated~~ — **FIXED (2026-10-14): both files are TRACKED** (they entered git in `dfa41aa`); they stay snapshots of an older state, so read them as history | those files | — | — | No |
 | 16 | `docs/COLLEGE-PLAN.md` (the original A–I plan) is absent from the repo by design | preamble of `COLLEGE-DECISIONS.md` | n/a | A phase-4+ preflight | No |
 
 Items 7–10 and 15 are cheap documentation/CI/hardening debt; item 1 (the fee screens) is the real
@@ -346,7 +347,7 @@ remaining product work on the fee line, and the dashboard/reports/import trio is
 - **Grades are derived, never frozen (v1).** Editing a scheme re-interprets stored marks and reprints
   them; a transcript therefore names the scheme, its scale, the pass mark and the print date, which is
   the recorded mitigation (D-6-12's known limitation).
-- **The fee line runs end to end — API, screens, print pages and paper — uncommitted.** Heads, structure,
+- **The fee line runs end to end — API, screens, print pages and paper — committed 2026-10-14.** Heads, structure,
   generation, dues, payments and awards are served, gated and proved over HTTP (112 checks); the **Fee
   heads / Fee structure / Dues & generation / Payment config** screens and the two D-7-17 **print pages**
   exist and are linked from the Dues tab; the money lands in the ONE ledger the school already reads,
@@ -377,7 +378,7 @@ remaining product work on the fee line, and the dashboard/reports/import trio is
 | 6 | "Multi-branch / CSV / billing / white-label **not yet**" | `PROGRESS.md` (2026-09-18 session) | Stale. Branches and CSV student import exist; the wizard/billing/export exist on the merged line. |
 | 7 | "The tests are green" | — | A few checks are known-failing and documented (§3), not fixed. |
 | 8 | Phase numbers 3, 4, 5, 6, 7 mean the same thing everywhere | `COLLEGE-PLAN-DELTA.md` vs `COLLEGE-DECISIONS.md` | The delta's Phase 3 was **deferred then dropped**; its catalogue half moved into implementation Phase 3; its Phase 5 is this document's Phase 6. Only §10 of the decisions document is authoritative. |
-| 9 | "College fees are done" (7c) — and, since 2026-10-13, "College fees are done" (7f) | commit `41d4f41`, then the uncommitted 7d-remainder/7e/7f work | Both sentences need the same qualifier. **At 7c** the API was proved and **no fee screen existed** (7d owned it). **At 7f** the whole line is built and proved (screens, print pages, isolation/Q3, production-build role probe) but **none of it is committed** — `git log -1` is still `e5ee07d`, so a reader of the repository alone sees no Phase 7 screen at all. |
+| 9 | "College fees are done" (7c) — and, since 2026-10-13, "College fees are done" (7f) | commit `41d4f41`, then the 7d-remainder/7e/7f work, committed 2026-10-14 (`f542405` code, `efb97c0` docs, `946e4e3` records) | Both sentences need the same qualifier. **At 7c** the API was proved and **no fee screen existed** (7d owned it). **At 7f** the whole line is built and proved (screens, print pages, isolation/Q3, production-build role probe) and **it is now committed and pushed** (`f542405`, `efb97c0`, `946e4e3`) — the earlier "none of it is committed, `git log -1` is still `e5ee07d`" reading was right for the moment it was written and is superseded now. |
 | 10 | The college ledger read is a *school* read, so a college row in it must be a bug | D-7-12 / Q3 | It is the tenant's **ONE** ledger: a college payment and an approved award are legitimately on it, **tagged** (`feeId: null` + `meta.collegeFeeId` / `meta.collegeDiscountId`). What must never show college money is a school **fee** surface, and 7c-follow-up pins both halves. |
 | 11 | A role probe in a scratch script is the same as a committed check | 7c-follow-up | The ACCOUNTANT / REGISTRAR / BRANCH_ADMIN matrix was a scratch probe during 7c; 7c-follow-up moved it **into** `scripts/verify-college-fees-api.mjs`, where a mutation (adding REGISTRAR to the write list) makes it fail. |
 
@@ -385,10 +386,13 @@ remaining product work on the fee line, and the dashboard/reports/import trio is
 
 ## 8. NOT PROVEN — items this report cannot settle
 
-- Whether `deploy/app-hosting` or `origin/main` is the production line. **NOT PROVEN** — still an open
-  go-live decision.
+- ~~Whether `deploy/app-hosting` or `origin/main` is the production line.~~ **RESOLVED 2026-10-11 (owner
+  console): `main` is the live branch** — backend `smart-school-erp-1` serves `main` with automatic
+  rollouts enabled and no console variable overrides; `origin/main` = `f4ed2a5`, `deploy/app-hosting` =
+  `96f4762` (**not** live).
 - Whether the four known-failing browser checks are caused by stale fixtures today (the analysis in
-  `SMOKE-FAILURES.md` predates the current `smoke-all.mjs`; that file is also untracked).
+  `SMOKE-FAILURES.md` predates the current `smoke-all.mjs`; that file is a **tracked** snapshot, not a
+  live report).
 - A **hosted** production-build role probe of the college screens. The D-7-18 probe has been **run**
   against a local production build (`bTZhoZ8u8HFwxegmI4rKq`, 24/24, 2026-10-13); no deployment was
   created or dialled, so the deployed environment remains unprobed.

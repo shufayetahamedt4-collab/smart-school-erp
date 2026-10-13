@@ -138,9 +138,13 @@ work. Where both sides changed the same function the union was written and marke
   and `FIRESTORE_DATABASE_ID` selection.
 - **Kept:** the guard **and** the configuration-driven selection, with a documented alias:
   `const databaseId = process.env.FIRESTORE_DATABASE_ID || process.env.FIRESTORE_DB_ID;` — unset ⇒ the
-  project's `(default)` database (the rollback database). Canonical name: `FIRESTORE_DATABASE_ID`;
+  project's `(default)` database. Canonical name: `FIRESTORE_DATABASE_ID`;
   `FIRESTORE_DB_ID` is accepted as an explicit alias and is documented in the file, in
   `apphosting.yaml`, in `scripts/lib/guard.mjs` and in `docs/ENVIRONMENTS-AND-SECRETS.md`.
+  **Superseded by pilot P3 (`e5ee07d`, 2026-10-13):** "unset ⇒ `(default)`" is no longer reachable in a
+  live environment — the app REFUSES an unnamed or `"(default)"` database and the rollback is the App
+  Hosting console's **Rollback** button. `resolveDatabaseId` still returns `null`; `liveDatabaseProblem`
+  and `assertNamedDatabaseId` now refuse to act on it.
 - **No production behaviour had to be chosen:** both names point at `smart-school-db`. The only
   difference is which name wins when *both* are set (canonical), and that never happens in the
   deployment because `apphosting.yaml` sets only the canonical one.

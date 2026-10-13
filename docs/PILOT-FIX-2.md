@@ -1,7 +1,7 @@
 # pilot-fix-2 — a school fee payment can no longer be recorded twice
 
 Branch `integration/main-into-college`, commit `9d8fb22`, parent `fbf0c70`. Emulator only.
-`proof/p2/` is untracked and deliberately not committed; the durable record is this document.
+`proof/p2/` was untracked while this stage ran and deliberately not committed then; **CORRECTED 2026-10-14: it is tracked now** (the Phase 7 evidence-record commit), so the evidence is durable too — the rule for the directory is [../proof/README.md](../proof/README.md).
 
 ## 1. The change, and what proves it
 
@@ -38,7 +38,7 @@ Evidence:
 | Mutation proof | each of five reversals flips a pin; each restore is byte-identical |
 | Export safety | every other export of `ledger.ts` byte-identical between `fbf0c70` and `9d8fb22`; `confirmPayment` differs, as it must |
 
-Full detail (scenario table, DOM transcripts, PNGs, mutation table) lives in the untracked
+Full detail (scenario table, DOM transcripts, PNGs, mutation table) lives in the now-tracked
 `proof/p2/REPORT.md` and `proof/p2/BROWSER-PROOF.md`.
 
 ## 2. The full suite — every script, one run (2026-10-13)

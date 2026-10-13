@@ -5,7 +5,7 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** GitHub — `github.com/shufayetahamedt4-collab/smart-school-erp` (any clone works — see "Working from a different PC/device" below)
-**Last updated:** 2026-10-13 — **college Phase 7 is FINISHED** (fee basis: logic 7a, data 7b, API 7c, screens + print pages 7d, isolation/Q3 7e, finished record + production-build role probe 7f) on `integration/main-into-college`, where the school and college lines are merged; production still runs on `smart-school-db` (asia-southeast1). **Phase 7's last three parts are UNCOMMITTED working-tree changes on HEAD `e5ee07d`** — review and commit them before anything else. The newest session record is the **2026-10-13** block at the bottom of this file.
+**Last updated:** 2026-10-14 — **college Phase 7 is FINISHED AND COMMITTED** (fee basis: logic 7a, data 7b, API 7c, screens + print pages 7d, isolation/Q3 7e, finished record + production-build role probe 7f) on `integration/main-into-college` (`f542405` code + verifiers, `efb97c0` docs, the evidence records in `946e4e3`), where the school and college lines are merged; production still runs on `smart-school-db` (asia-southeast1), and its **live branch is `main`** (`f4ed2a5`). Nothing is left uncommitted but ignored artifacts. The newest session record is the **2026-10-14** block at the bottom of this file.
 
 ---
 
@@ -35,13 +35,21 @@
 
 Warm prod endpoints did NOT get faster because their ~450 ms envelope is the **client↔Singapore HTTP round trip from Bangladesh** — even a bare HTML page costs ~450 ms RTT here. The DB hop inside that envelope is now ~5–20 ms instead of ~500 ms; from Bangladesh the internet's RTT is the floor, and no database change moves physics. Server-side and in-app (via the backend, same region) every query is 25–60× cheaper, so multi-query pages and cache misses benefit most.
 
-### Rollback procedure (keep until archive retirement)
-- Set `FIRESTORE_DB_ID: "(default)"` in `apphosting.yaml`, push → one rollout (~5–10 min) back to the africa database. Local dev: remove the var from `.env`.
+### Rollback procedure (keep until archive retirement) — CORRECTED by pilot P3 (`e5ee07d`)
+
+> **Pilot P3 (2026-10-13) supersedes the bullet below.** In a live environment the app now REFUSES to
+> open an unnamed or `"(default)"` database (`src/lib/database-id.ts` → `assertNamedDatabaseId`;
+> `src/lib/firebase.ts`), with **no opt-in flag**. So **removing or unsetting the variable is no longer a
+> rollback — it is a refused start**, and so is setting it to the literal `"(default)"`. **The rollback
+> is the App Hosting console's Rollback button**, which serves a previous rollout together with its own
+> configuration. **Never unset the variable.**
+
+- ~~Set `FIRESTORE_DB_ID: "(default)"` in `apphosting.yaml`, push → one rollout (~5–10 min) back to the africa database. Local dev: remove the var from `.env`.~~ **Superseded — see the note above.** The africa `(default)` database is no longer reachable by configuration; pointing at it again would need a code change, not a variable.
 - The africa database is untouched and current as of the **final delta copy 2026-09-24 ~18:52 UTC+6** (after it, writes land only in the new DB). Data written to the new DB between cutover and a rollback would need a reverse copy first (run `migrate-firestore.mjs` with source/target swapped, or accept the loss for throwaway data).
 - `scripts/migrate-firestore.mjs` / `verify-firestore-parity.mjs` are permanent tools — re-runnable any time (the copy is idempotent upserts; parity fails loudly).
 
 ### Notes for future sessions
-- **2026-10-08 (≈2 weeks after cutover): delete the africa-south1 `(default)` database** after one last parity spot-check — until then it is the free rollback insurance. Deletion needs delete-protection OFF (it is).
+- **2026-10-08 (≈2 weeks after cutover): delete the africa-south1 `(default)` database** after one last parity spot-check — until then it is the free rollback insurance. Deletion needs delete-protection OFF (it is). **P3 correction (2026-10-14):** the configuration fallback that made this "insurance" reachable is gone (see the rollback note above), so this is now an **owner decision, not a scheduled task** — do not delete it without one, and note that restoring it later would take a code change, not an unset variable.
 - `FIRESTORE_DB_ID` is now a load-bearing env var: `apphosting.yaml` (prod), local `.env`, and the 12 scripts. A fresh checkout copy-pasting `.env` gets the right database automatically.
 - Known CLI bug hit during the work: `firebase deploy --only firestore:indexes` crashes with `TypeError: Cannot read properties of undefined (reading 'map')` in the `--only` filter path (firebase-tools); deploying via the Firestore API directly works, and rules/indexes also deploy per-database from the two-entry `firebase.json` firestore config.
 - ~~Remaining perf follow-up~~ **Done 2026-09-24 (commit `7c29f65`): `minInstances: 1`** — one always-warm instance. Measured cold penalty on this backend was small (+150–300 ms on the first request after an 8–20 min idle gap: Firestore channel + container reconnection on top of the ~450 ms RTT envelope); post-change idle-gap probes return at warm speed. Cost: one always-on instance (~$10–15/mo at cpu 1 / 512 MiB).
@@ -265,24 +273,28 @@ wizard, plan-limit enforcement, CSV import/export, certificate templates, the ti
 the Firestore cutover) onto the college work; see **`docs/INTEGRATION-LOG.md`** for every conflict
 resolution.
 
-**Rollback-name note (integration 1):** the rollback procedure above says to set
-`FIRESTORE_DB_ID: "(default)"` in `apphosting.yaml`. After the merge, `apphosting.yaml` sets the
-**canonical** name `FIRESTORE_DATABASE_ID: smart-school-db`, and `src/lib/firebase.ts` reads
-`FIRESTORE_DATABASE_ID || FIRESTORE_DB_ID` — so on this branch a rollback must change
-**`FIRESTORE_DATABASE_ID`** (or remove it). Setting `FIRESTORE_DB_ID` alone would be ignored while the
-canonical variable is still set. Both names select the same database otherwise, and the guard in
-`scripts/lib/guard.mjs` refuses either name for emulator runs.
+**Rollback-name note (integration 1) — SUPERSEDED by pilot P3 (`e5ee07d`).** The rollback procedure
+above says to set `FIRESTORE_DB_ID: "(default)"` in `apphosting.yaml`. After the merge, `apphosting.yaml`
+sets the **canonical** name `FIRESTORE_DATABASE_ID: smart-school-db`, and `src/lib/firebase.ts` reads
+`FIRESTORE_DATABASE_ID || FIRESTORE_DB_ID` — so the *old* rollback would have had to change
+**`FIRESTORE_DATABASE_ID`**; setting `FIRESTORE_DB_ID` alone is ignored while the canonical variable is
+still set, and the guard in `scripts/lib/guard.mjs` refuses either name for emulator runs. **P3 removes
+the point of all of it: changing OR removing the variable rolls nothing back** — a live start with an
+unnamed/(default) database throws by name, and the rollback is the hosting console's Rollback button.
 
-**Database-id guard (integration 2, `b96ca63`):** `src/lib/database-id.ts` makes
-`FIRESTORE_DATABASE_ID` the **canonical** name and `FIRESTORE_DB_ID` the **alias**; unset means the
-project's `(default)` database, so removing the variable IS the rollback. When **both** are set and
+**Database-id guard (integration 2, `b96ca63`; refined by pilot P3, `e5ee07d`):** `src/lib/database-id.ts`
+makes `FIRESTORE_DATABASE_ID` the **canonical** name and `FIRESTORE_DB_ID` the **alias**; an unset pair
+resolves to `null`, i.e. the project's `(default)` database — **but P3 refuses that result in a live
+environment, so removing the variable is NO LONGER the rollback** (`liveDatabaseProblem` /
+`assertNamedDatabaseId`; the emulator is unchanged). When **both** are set and
 **differ**, the resolver **throws** — the app fails loudly, naming both variables, instead of silently
 opening a database the operator did not ask for. For emulator runs `scripts/lib/guard.mjs` refuses
 either name, because either one selects a named Cloud database.
 
 **Archive-retirement date:** the same record says **2026-10-08 (≈2 weeks after cutover): delete the
-africa-south1 `(default)` database** after one last parity spot-check. That date has now passed; until
-that deletion happens, `(default)` remains the free rollback insurance.
+africa-south1 `(default)` database** after one last parity spot-check. That date has now passed. **P3
+correction (2026-10-14):** `(default)` is no longer reachable by configuration, so it is not "rollback
+insurance" an operator can fall back on — treat its deletion as an **open owner decision**.
 
 ---
 
@@ -326,32 +338,38 @@ its own branch until the merge below):
 4. **The wizard's success screen still says "school"** for a college / BOTH tenant.
 5. **The college sidebar still shows school items** — the mode-aware nav is not complete for a COLLEGE
    tenant.
-6. **`docs/PHASE1-DECISION-WORKSHEET.md` and `docs/SMOKE-FAILURES.md` are untracked and outdated** —
-   both are still untracked in this tree (and are deliberately not staged); do not cite them as
-   current.
+6. ~~**`docs/PHASE1-DECISION-WORKSHEET.md` and `docs/SMOKE-FAILURES.md` are untracked and outdated**~~ —
+   **CORRECTED 2026-10-14: both files ARE TRACKED** (they entered git in `dfa41aa`, 2026-10-13). They
+   are still *snapshots* of an older state, so read them as history, not as current truth.
 7. **`firestore.indexes.json` `schoold` typo** — fixed in the file, but the index is queried by name
    and both live databases still carry the misdeclared index; the code-side rename is its own session.
-8. **Firestore backup not yet confirmed** — the old `(default)` database stays the rollback insurance.
+8. **Firestore backup not yet confirmed** — the old `(default)` database is the last copy of the pre-cutover data. **P3 correction (2026-10-14):** it is NOT reachable by an unset variable any more, so it is not the rollback path — the rollback is the hosting console's Rollback button, and archiving or deleting it is an owner decision.
 9. **Local `main` has 2 superseded commits** (`25547a0`, `70d0176`) — equivalent changes already exist
    on this branch; do **not** re-apply them (`docs/INTEGRATION-LOG.md`).
 10. **Archive date 2026-10-08 has passed** — do **not** delete the old `(default)` database yet; it is
-    the rollback target.
+    the last copy of the pre-cutover data, and after P3 there is no configuration path back to it (a
+    restore would be a code change).
 11. **Go-live: role probe on a production build** — **DONE 2026-10-13 (7f)** against a **local** production build (`npm run build` + `npx next start -p 3111`, `scripts/verify-role-probe.mjs` **24/24**, build `bTZhoZ8u8HFwxegmI4rKq`). Only a **hosted/deployed** run remains undone.
-12. **Go-live: production line decision** — `origin/main` vs `deploy/app-hosting` is still undecided
-    (**NOT PROVEN**).
+12. ~~**Go-live: production line decision**~~ — **DECIDED (owner console screenshot, 2026-10-11): the
+    production line is `main`.** The App Hosting backend `smart-school-erp-1` serves branch `main` with
+    automatic rollouts enabled and **no environment-variable overrides in the console**, so
+    `origin/main` (`f4ed2a5`) is what is live; `deploy/app-hosting` (`96f4762`) is **NOT** the live
+    branch.
 13. **Go-live: check whether the in-process read cache can serve stale data across multiple App
     Hosting instances (maxInstances 10)** — the per-instance memo (`src/lib/db.ts`, ~30 s TTL + 120 s
     stale-while-revalidate grace) can answer a read with data another instance has already replaced.
 
 ---
 
-## 🔁 Session — 2026-10-13 (college Phase 7 COMPLETE: 7d remainder, 7e, 7f — uncommitted)
+## 🔁 Session — 2026-10-13 (college Phase 7 COMPLETE: 7d remainder, 7e, 7f — committed 2026-10-14)
 
 **Where this started.** Branch `integration/main-into-college`, HEAD `e5ee07d` (verified current before
 any edit). The task was the rest of College Phase 7: 7d's print pages and its four open UX items, 7e's
 isolation + Q3 mode-mixing proof, the D-7-18 production-build role probe, and the 7f record.
-**`git log -1` is still `e5ee07d`: everything below is the working tree — nothing was staged, committed,
-pushed or deployed, and no production secret, environment variable or deployment setting was touched.**
+**`git log -1` was `e5ee07d` while this work ran: everything below was the working tree at the time —
+nothing was staged, committed, pushed or deployed then, and no production secret, environment variable or
+deployment setting was touched.** *(Committed afterwards: `f542405` code + verifiers, `efb97c0` docs, the
+evidence records in `946e4e3`.)*
 
 ### What was built
 
@@ -375,7 +393,7 @@ pushed or deployed, and no production secret, environment variable or deployment
    `verify-fees-totals.mjs` grows by **9 college checks** (24 total) with its **15 school checks
    untouched**.
 4. **The D-7-18 production-build role probe is RUN** — `scripts/verify-role-probe.mjs` (**24**), a real verifier file in this
-   change set (untracked until the change is committed, like every other Phase 7 file) covering the
+   change set (untracked while the phase was under review; **committed 2026-10-14**) covering the
    college fee screen and both print pages (it reports which build answered by
    matching the served page against `.next/BUILD_ID`). Two builds, both green: `J8dv3wQUnWhHl5Yxf2rz_`
    (the phase's first run) and `bTZhoZ8u8HFwxegmI4rKq` (an independent re-run this session).
@@ -413,7 +431,33 @@ each fails its verifier and each file was restored byte-identically (`sha1sum -c
 
 ### The one thing to do next
 
-**Review and commit the Phase 7 working tree.** Then Phase 8 (`8-pre` first — the course↔teacher link)
-and 9a/9b/9c (college dashboard / reports / import), and the go-live items: a **hosted** role-probe run,
-the production-line decision (`origin/main` vs `deploy/app-hosting`), and the multi-instance read-cache
-question.
+~~**Review and commit the Phase 7 working tree.**~~ **DONE 2026-10-14** — see the close-out block below.
+Then Phase 8 (`8-pre` first — the course↔teacher link) and 9a/9b/9c (college dashboard / reports /
+import), plus the two remaining go-live items: a **hosted** role-probe run and the multi-instance
+read-cache question (the production-line decision is made — `main`).
+
+---
+
+## 🔁 Session — 2026-10-14 (Phase 7 committed; the documentation drift swept)
+
+**Docs and records only — nothing under `src/` or `scripts/` was touched in this session.**
+
+1. **Phase 7 was committed and pushed** to `integration/main-into-college`: `f542405` (code + verifiers)
+then `efb97c0` (docs). `origin/main` is untouched at `f4ed2a5`; nothing was deployed.
+2. **The Phase 7 evidence records were committed** (`946e4e3`): `proof/7e/` and `proof/7f/` (the reports and
+their text transcripts) and the six `proof/7d/mutate-*.txt` transcripts — so the links the docs make into
+`proof/` resolve in a fresh clone. Binary media (PNG/WEBM) is deliberately no longer committed; the rule
+is written in `proof/README.md` and in `.gitignore`.
+3. **The rollback text was corrected (pilot P3, `e5ee07d`).** Every statement that said "unset
+`FIRESTORE_DATABASE_ID` to roll back" is now marked superseded: a live environment REFUSES an unnamed or
+`"(default)"` database, and the rollback is the App Hosting console's **Rollback** button.
+4. **The production line is recorded as decided:** the **`main`** branch — backend `smart-school-erp-1`,
+live branch `main`, automatic rollouts on, **no console variable overrides** (owner console,
+2026-10-11). `origin/main` = `f4ed2a5`; `deploy/app-hosting` = `96f4762` and is **not** the live branch.
+5. **The "untracked docs" claim was corrected:** `docs/PHASE1-DECISION-WORKSHEET.md` and
+`docs/SMOKE-FAILURES.md` **are tracked** (they entered git in `dfa41aa`); the sentences calling them
+untracked are fixed here, in `docs/COLLEGE-STATUS.md` and in `docs/ENVIRONMENTS-AND-SECRETS.md`, and the
+"Phase 7 is uncommitted" reading is corrected in `docs/COLLEGE-STATUS.md` too.
+
+**One known-red class remains untouched:** the four known-failing browser checks, `verify-read-cache` (1)
+and `verify-routine-config` (2/3) are unchanged and are still red; nothing about them is claimed green.

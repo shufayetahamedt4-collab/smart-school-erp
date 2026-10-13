@@ -167,8 +167,10 @@ A search for `client_email` / `iam.gserviceaccount.com` / `AIza…` API keys fou
 emails (`firebase-adminsdk-xxxxx@smart-school-erp.iam.gserviceaccount.com`,
 `…@your-project.iam.gserviceaccount.com`) in `README.md`, `scripts/setup.mjs`.
 
-The three untracked docs (`AGENTS.md`, `docs/PHASE1-DECISION-WORKSHEET.md`,
-`docs/SMOKE-FAILURES.md`) contain **no** secret-looking value.
+The three docs that were untracked when this was written (`AGENTS.md`,
+`docs/PHASE1-DECISION-WORKSHEET.md`, `docs/SMOKE-FAILURES.md`) contain **no** secret-looking value.
+**Correction (2026-10-14): all three are TRACKED now** (the two parked docs entered git in `dfa41aa`),
+so the paragraph below is a statement about the working tree, not about what the repository holds.
 
 **Report:** no real-looking secret value was found in any tracked or untracked file. A git-ignored
 `.env` (holding live values) and possibly a git-ignored `service-account.json` exist on the local

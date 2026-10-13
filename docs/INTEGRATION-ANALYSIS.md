@@ -7,13 +7,24 @@
 Everything below is read from this repository's own object database. Line/file claims are backed by
 `git` commands; judgement calls and anything I could not confirm are marked **unverified**.
 
+> **Correction added 2026-10-14 (read-only note; the body below is left as written on 2026-10-06).** Two
+> facts this analysis had to assume are now settled, and each one supersedes a statement below:
+> (1) **the live branch is `main`, not `deploy/app-hosting`** — the owner's App Hosting backend
+> `smart-school-erp-1` serves branch `main` with automatic rollouts enabled and **no console variable
+> overrides** (owner console, 2026-10-11), so `origin/main` (`f4ed2a5`) is production and
+> `deploy/app-hosting` (`96f4762`) is **not** live; and
+> (2) **pilot P3 (`e5ee07d`) removed the `(default)` fallback** — in a live environment an unset,
+> blank or literal `"(default)"` `FIRESTORE_DATABASE_ID` now THROWS, so every sentence below that treats
+> "unset" as a route back to the old database is superseded: the rollback is the App Hosting console's
+> **Rollback** button.
+
 ---
 
 ## 0. The three lines
 
 | Line | Tip | Meaning |
 |---|---|---|
-| Production | `origin/deploy/app-hosting` = **`96f4762`** | what is deployed; contains the Firestore cutover |
+| Production (**superseded 2026-10-14**) | `origin/deploy/app-hosting` = **`96f4762`** | the line this analysis *assumed* was deployed. **It is NOT the live branch:** the owner's App Hosting backend `smart-school-erp-1` serves branch **`main`** (`origin/main` = `f4ed2a5`), automatic rollouts on, no console variable overrides (owner console, 2026-10-11). This table describes the 2026-10-06 state |
 | Mobile work | `mobile-redesign` = **`79e06b0`** | teacher + guardian mobile redesign; `college-support` was cut from here |
 | College work | `college-support` = **`2fda7a4`** | `79e06b0` + docs `1f480dc` + phase 0 `2fda7a4` |
 
@@ -228,7 +239,10 @@ on both sides.
    the Phase 0 report become stale. A merge of `integrate/prod-mobile` into `college-support` keeps the
    original SHAs; pick one deliberately.
 2. **Production deploy is not performed by this.** The integrated branch must be deployed through App
-   Hosting with `FIRESTORE_DATABASE_ID=smart-school-db` still set; losing that variable reverts the DB.
+   Hosting with `FIRESTORE_DATABASE_ID=smart-school-db` still set. ~~losing that variable reverts the DB.~~
+   **Superseded by pilot P3 (`e5ee07d`):** losing or unsetting the variable is no longer a rollback — a
+   live start with an unnamed or `"(default)"` database is REFUSED by name (`src/lib/database-id.ts` →
+   `assertNamedDatabaseId`), and the rollback is the hosting console's **Rollback** button.
    **Unverified:** that the App Hosting secret/variable lives on the branch or on the backend config —
    `apphosting.yaml` on production carries `- variable: FIRESTORE_DATABASE_ID`, but its value is
    supplied by the console, so I cannot confirm it from the repo.
@@ -245,8 +259,10 @@ on both sides.
 - `git merge-tree` in-memory (already done) — predicts conflicts with zero writes.
 - `tsc --noEmit` + `next build` on the integrated tree (this repo's standard gate; both pass today on
   `college-support`).
-- Run the app **locally with `FIRESTORE_DATABASE_ID` unset** → resolves to `(default)`, which is the
-  retired database (**unverified** how stale it is, but it is not the live one). Better: see §6.
+- ~~Run the app **locally with `FIRESTORE_DATABASE_ID` unset** → resolves to `(default)`, which is the
+  retired database.~~ **No longer possible (pilot P3, `e5ee07d`):** a live start with an unset or
+  `"(default)"` database throws. Use the emulator (`FIRESTORE_EMULATOR_HOST`), which is unchanged and
+  where `"(default)"` is the local database. Better: see §6.
 - Deploy to a **non-production App Hosting rollout** (a separate backend/revision) and probe
   `GET /api/health`; do not point any script at the production URL.
 - Never start a local server with `FIRESTORE_DATABASE_ID=smart-school-db` — that is the documented
@@ -381,9 +397,10 @@ the app follows it too — one variable aligns both write paths.
 ### 6.5 Recommendation for the test target
 
 - **Short term (no new infra, no Java):** Option 6a with a guard, but only if creating a second database
-  is approved. Until then, the only strictly-safe local configuration is a server whose
-  `FIRESTORE_DATABASE_ID` is unset/blank (→ `(default)`) **and** scripts restricted to read-only
-  (`verify-deployed-rules.mjs` is the sole read-only verify script) — i.e. do not run the mutating ones.
+  is approved. ~~a server whose `FIRESTORE_DATABASE_ID` is unset/blank (→ `(default)`)~~ **Pilot P3
+  (`e5ee07d`) closed that route:** an unset, blank or `"(default)"` database is refused outright in a
+  live environment, so the strictly-safe local target is the **emulator** — plus scripts restricted to
+  read-only (`verify-deployed-rules.mjs` is the sole read-only verify script).
 - **Best target overall:** the **emulator** (6b), once Java is installed — it is the only option where
   a single environment variable makes *every* write path, HTTP and direct SDK, land somewhere disposable.
 - **Never:** production URL `smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app`, or
@@ -405,6 +422,8 @@ commits). Reasons, in order:
    under Phases M/1/3/7c (§5).
 4. Production already runs the mobile work's *sibling* code path (production is `45c7401` + the 3
    commits), so the integration is a merge of two branches that agree on 110 of 114 files.
+   *(2026-10-14: the live branch is `main` = `f4ed2a5`, not `deploy/app-hosting` = `96f4762`; this
+   sentence describes the 2026-10-06 assumption.)*
 
 **Order of steps**
 
@@ -434,9 +453,14 @@ commits). Reasons, in order:
 
 ## Unverified items
 
-- The **live** value of `FIRESTORE_DATABASE_ID` on the serving revision — read from
-  `_perf-remediation` reports, not from the console/deployment.
-- Whether App Hosting carries the variable **on the backend config** or the branch (§4 risk 2).
+- ~~The **live** value of `FIRESTORE_DATABASE_ID` on the serving revision.~~ **RESOLVED (owner console,
+  2026-10-11):** the backend `smart-school-erp-1` has **no console variable overrides**, so the value
+  comes from `apphosting.yaml` in the repo (`FIRESTORE_DATABASE_ID: smart-school-db`) on the live branch
+  `main` (`f4ed2a5`). It must still never be unset (pilot P3).
+- ~~Whether App Hosting carries the variable **on the backend config** or the branch (§4 risk 2).~~
+  **RESOLVED (owner console, 2026-10-11): the branch** — the console carries no overrides, so
+  `apphosting.yaml` on `main` is the source. Unsetting it there is still not a rollback (pilot P3,
+  `e5ee07d`).
 - Whether `getFirestore(app, databaseId)` + `FIRESTORE_EMULATOR_HOST` coexist cleanly (§6.4).
 - Whether `.firebase` ever held emulator data (it holds deploy cache only now).
 - Which of `MIGRATION-PHASE3-CUTOVER-REPORT.md` and `.blocked.md` is final (both dated 2026-10-05).
