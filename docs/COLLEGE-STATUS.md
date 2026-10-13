@@ -114,7 +114,8 @@ the 3-check staff matrix + 6 ledger-reader checks + 7e-pre's 17 payment-idempote
 before 7c's eight routes). The 7c-follow-up full-suite run (the same 36-step list as the 7b run, with
 `verify-college-fees-api` last) reproduced **every** count in this section, the known reds included:
 `verify-read-cache` **0 pass / 1 fail**, `verify-routine-config` **32 pass / 3 fail** when its calendar-gated section 7 runs, **30 pass / 2 fail / 1 skip** when it does not (both forms are valid — see the note below), `qa-certificates`
-**39 / 1** (the credential-gated orphan sweep), `tsc` 0 errors, and `next build` **185/185** pages
+**40 / 1** (the credential-gated orphan sweep — corrected at the P2 close-out, see the note below),
+`tsc` 0 errors, and `next build` **185/185** pages
 (177 at 6f + 7c's eight college fee routes).
 
 **`verify-routine-config` is calendar-gated, and BOTH of its forms are valid.** Its section 7 (the
@@ -175,7 +176,7 @@ every run; section 7's own checks are what the gate adds or withholds.
 | `verify-bulk-import` | 118 | 0 |
 | `verify-phase7-e2e` (school audit) | 160 | 0 |
 | `scripts/qa-phase23.mjs` | 36 | 0 |
-| `scripts/qa-certificates.mjs` | 39 | 1 (credential-gated orphan sweep only) |
+| `scripts/qa-certificates.mjs` | 40 | 1 (credential-gated orphan sweep only) |
 
 Build and types:
 
@@ -203,8 +204,14 @@ and two `/teacher/marks` checks) are also known-failing, analysed in
 each red suite run alone: `verify-read-cache` **0 pass / 1 fail** (51 routes "still pay full latency on a
 repeat read" — the same single assertion), `verify-routine-config` **32 pass / 3 fail** on the day of
 that run and **30 pass / 2 fail / 1 skip** on a closed-gate day (the same class-wide read failures,
-byte-identical to the 7b run), `qa-certificates` **39 pass / 1 fail** (the
+byte-identical to the 7b run), `qa-certificates` **40 pass / 1 fail** (the
 credential-gated orphan sweep). Nothing here is caused by the fee phases, and no count moved anywhere else.
+
+**Correction recorded at the P2 close-out (2026-10-13):** `qa-certificates` prints **40 pass / 1 fail**
+since P1c added its QR-slip check; the 39/1 recorded above and in the earlier documents predates that
+check. `verify-routine-config` stays in **both** calendar forms (see its note above). The P2 record — the
+keyed school-fee payment fix, its full-suite run and the five verifier counts corrected against what the
+scripts print — is [docs/PILOT-FIX-2.md](docs/PILOT-FIX-2.md).
 
 ---
 

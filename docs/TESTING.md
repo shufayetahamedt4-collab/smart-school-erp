@@ -182,6 +182,16 @@ it resets the tenant through firebase-admin, which cannot invalidate the app's i
   ledger row per payment that landed, the stored paid amount never exceeds what was billed, and a
   same-key retry carrying a different amount or method is refused).
 
+Pilot P2 adds one more **guarded, HTTP** verifier:
+
+- `scripts/verify-school-fee-idempotency.mjs` — **guarded** (`requireEmulator()`), and it needs the app
+  running: 32 offline pins (the deterministic ids, the guarded fee write, the route's key handling)
+  plus 37 live concurrency checks (two different keys together, one key simultaneous, one key
+  sequential, a retry after the fee settled, 600+600 against 1000, the full amount, keyless), **69/69**.
+  It is inserted after `verify-fees-totals` in the suite order, and its record — with the full-suite
+  run and the five verifier counts corrected against what the scripts print — is
+  [docs/PILOT-FIX-2.md](docs/PILOT-FIX-2.md).
+
 **One ordering rule the college fee verifiers share with the demo-school ones.** A verifier that reads a row an
 earlier verifier created *through the app* is safe (the app's own writes clear its memo), but one that reads a row
 created **and deleted** by an earlier verifier can still see the deleted row in the memo for up to 150 s. That is

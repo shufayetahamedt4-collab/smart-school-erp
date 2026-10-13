@@ -211,6 +211,31 @@ The doc's earlier `185/185` predates **7d** (`77a1b18` added a college page), so
 `principal@sunrise.edu`/`guardian1@demo.com` nor `School@123` appears anywhere
 in `.next/static` (items 4 and 5, checked as text).
 
+#### Corrections recorded at the P2 close-out (2026-10-13)
+
+Five of the counts in the table above were the **runner's** line count (it counted each script's
+summary line) rather than what the script prints. They are corrected here against two clean runs each
+(the P1c clean runs and the P2 suite run of 2026-10-13), with the script's own output as the number:
+
+| verifier | printed (two clean runs) | this table had | why |
+|---|---|---|---|
+| `verify-college-fees-page` | **255 checks** | 256 | the runner counted the "PASSED — 255 checks" summary line |
+| `verify-college-routes` | **3** (three numbered rule sections) | 4 | the runner counted the final "✅ COLLEGE ROUTE GUARD OK" line |
+| `verify-enroll-paths` | **17** `PASS` lines | 18 | the extra line was its "✅ PASS — …" summary |
+| `verify-admission-intake` | **52** `PASS` lines (clean state, kit stocked) | 53 | the extra line was its "✅ PASS — …" summary |
+| `verify-enrollment-fees` | **19** `PASS` lines | 20 | the extra line was its "✅ ENROLMENT FEES OK" summary |
+
+Two other numbers in this table are the verifier's state at P1, not today:
+
+- `qa-certificates` prints **40/1** since P1c added its QR-slip check (the one failure is still the
+  credential-gated orphan sweep); the 39/1 recorded in this stage's and the earlier documents predates
+  that check.
+- `verify-pilot-hardening` is **183 offline / 260 live** today (P1b: 172/231/177; P1c added 11 offline
+  and 29 live checks). The 70/99/75 row above is the verifier's first version.
+
+The full P2 record — the keyed school-fee payment fix, the whole-suite run and these attributions — is
+[docs/PILOT-FIX-2.md](docs/PILOT-FIX-2.md).
+
 ### The two deltas, explained
 
 - **`verify-exams-invalidation` (0/0 → 9/0).** The last record's log is a crash
