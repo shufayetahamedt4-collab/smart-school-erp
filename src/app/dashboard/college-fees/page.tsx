@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Award, BadgeCheck, Layers, Plus, Receipt, Trash2, Wallet } from "lucide-react";
 import { api, qs } from "@/lib/client";
 import { useMe } from "@/components/Shell";
@@ -41,6 +42,8 @@ import {
   channelLine,
   channelsOf,
   chargeTotals,
+  collegeFeeReceiptHref,
+  collegeFeeStatementHref,
   collegeFeesPageState,
   commitButtonLabel,
   configBlocked,
@@ -656,7 +659,7 @@ function StructureTab({ controls }: { controls: ReturnType<typeof writeControlsF
       <Card>
         <CardHeader
           title="Programme and term"
-          subtitle="The structure is one row per programme × term × head. The programme's own term shape bounds the term number."
+          subtitle="One row per programme, per term and per head. The programme's own term shape bounds the term number."
         />
         <div className="grid grid-cols-1 items-end gap-3 p-5 sm:grid-cols-3">
           <Field label="Programme">
@@ -723,7 +726,7 @@ function StructureTab({ controls }: { controls: ReturnType<typeof writeControlsF
                 ))}
               </Select>
             </Field>
-            <Field label="Basis" hint="Per-credit pricing is not in v1 and is refused by name">
+            <Field label="Basis" hint="Per-credit pricing is not in v1 — it is refused by name.">
               <Select value={basis} onChange={(e) => setBasis(e.target.value)}>
                 {STRUCTURE_BASIS_OPTIONS.map((b) => (
                   <option key={b} value={b}>
@@ -837,6 +840,12 @@ function DuesTab({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  /**
+   * 7d (D-7-17) — the receipt of the payment just recorded, so the office can
+   * print the paper it has to hand over without hunting for the row again. Cleared
+   * when another student is picked: it belongs to the payment it names.
+   */
+  const [receipt, setReceipt] = useState<{ chargeId: string; receiptNo: string } | null>(null);
 
   const [programId, setProgramId] = useState("");
   const [termNumber, setTermNumber] = useState("1");
@@ -948,6 +957,10 @@ function DuesTab({
     void loadStudent(pickedStudent);
   }, [pickedStudent, loadStudent]);
 
+  useEffect(() => {
+    setReceipt(null);
+  }, [pickedStudent]);
+
   const runGeneration = async (dryRun: boolean) => {
     if (generateBlocked({ programId, termNumber, busy })) return;
     setBusy(true);
@@ -998,6 +1011,10 @@ function DuesTab({
       setPayAmount("");
       setRefNo("");
       setNotice(paymentDoneText(result, currency));
+      // The receipt for the payment just recorded (D-7-17) — the API answers with
+      // the receipt number the ledger entry was written under, so the link below
+      // opens that exact payment's paper.
+      setReceipt({ chargeId, receiptNo: String(result?.receiptNo ?? "") });
       await loadStudent(pickedStudent);
       await loadScope();
     } catch (e: any) {
@@ -1065,7 +1082,20 @@ function DuesTab({
 
   return (
     <div className="space-y-4">
-      {notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">{notice}</div>}
+      {notice && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+          <span>{notice}</span>
+          {receipt?.receiptNo && (
+            <Link
+              href={collegeFeeReceiptHref(receipt.chargeId, receipt.receiptNo)}
+              target="_blank"
+              className="rounded-lg bg-white px-2.5 py-1 text-xs font-black text-emerald-700 underline ring-1 ring-emerald-200"
+            >
+              Print receipt
+            </Link>
+          )}
+        </div>
+      )}
       {error && <ErrorNote message={error} />}
 
       <Card>
@@ -1167,6 +1197,7 @@ function DuesTab({
                   <th className="th text-right">Paid</th>
                   <th className="th text-right">Due</th>
                   <th className="th text-center">Status</th>
+                  <th className="th text-right">Statement</th>
                 </tr>
               </thead>
               <tbody>
@@ -1187,6 +1218,17 @@ function DuesTab({
                     <td className="td text-right text-sm font-bold text-slate-800">{formatMoney(s.due, currency)}</td>
                     <td className="td text-center">
                       <Badge tone={s.status === "PAID" ? "green" : s.status === "PARTIAL" ? "amber" : "red"}>{dueStatusText(s.status)}</Badge>
+                    </td>
+                    <td className="td text-right">
+                      {/* D-7-17 — the statement, for the scope this tab is filtered to */}
+                      <Link
+                        href={collegeFeeStatementHref(s.studentId, termNumber)}
+                        target="_blank"
+                        className="text-xs font-bold text-indigo-600 underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Statement
+                      </Link>
                     </td>
                   </tr>
                 ))}
@@ -1209,9 +1251,19 @@ function DuesTab({
                 : "Loading the student's charges…"
             }
             action={
-              <button className="btn btn-secondary btn-sm" onClick={() => setPickedStudent("")}>
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                {/* D-7-17 — this student's statement, whole programme by default */}
+                <Link
+                  href={collegeFeeStatementHref(student?.student?.id || pickedStudent)}
+                  target="_blank"
+                  className="btn btn-secondary btn-sm"
+                >
+                  Statement
+                </Link>
+                <button className="btn btn-secondary btn-sm" onClick={() => setPickedStudent("")}>
+                  Close
+                </button>
+              </div>
             }
           />
           {(student?.rows || []).length ? (

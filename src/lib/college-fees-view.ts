@@ -965,3 +965,182 @@ export function majorFromTyped(text: unknown): number | null {
   const read = readMoneyField(text);
   return read.ok ? roundMoney(fromMinor(read.minor)) : null;
 }
+
+/* -------------------------------------------- the print pages (D-7-17, 7d) */
+
+/**
+ * The two print routes of D-7-17, in the ONE place their hrefs are built.
+ *
+ * Both are built here rather than in the page that links them (the
+ * `COLLEGE_FEES_HREF` convention of this module): a URL that appears in a link on
+ * the college fees screen and in the page's own header cannot drift.
+ */
+export const COLLEGE_FEE_STATEMENT_HREF = "/print/college-fee-statement";
+export const COLLEGE_FEE_RECEIPT_HREF = "/print/college-fee-receipt";
+
+/** One student's fee statement, optionally narrowed to one term. Empty id ⇒ "". */
+export function collegeFeeStatementHref(studentId: unknown, termNumber?: unknown): string {
+  const id = String(studentId ?? "").trim();
+  if (!id) return "";
+  const term = statementTermValue(termNumber);
+  return `${COLLEGE_FEE_STATEMENT_HREF}/${encodeURIComponent(id)}${term ? `?term=${term}` : ""}`;
+}
+
+/**
+ * The receipt for ONE confirmed payment on one charge.
+ *
+ * `receiptNo` selects which payment when a charge has been paid more than once
+ * (a family paying in instalments holds several receipts for one charge); without
+ * it the page prints the charge's newest confirmed payment.
+ */
+export function collegeFeeReceiptHref(chargeId: unknown, receiptNo?: unknown): string {
+  const id = String(chargeId ?? "").trim();
+  if (!id) return "";
+  const receipt = String(receiptNo ?? "").trim();
+  return `${COLLEGE_FEE_RECEIPT_HREF}/${encodeURIComponent(id)}${receipt ? `?receipt=${encodeURIComponent(receipt)}` : ""}`;
+}
+
+/**
+ * The statement's `?term=` value: a whole number from 1, or `null` for the whole
+ * programme. Junk (`""`, `"abc"`, `"0"`, `"1.5"`, `"-2"`) is the SAME as absent —
+ * a printed statement is never an error page because of a hand-typed query.
+ */
+export function statementTermValue(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+export interface StatementTermGroup<T> {
+  termNumber: number;
+  rows: T[];
+  totals: ChargeTotals;
+}
+
+/**
+ * A statement's charge rows, grouped by term in term order (1, 2, 3…) with each
+ * term's own totals — the shape the statement page prints.
+ *
+ * A row whose term cannot be read as a whole number is grouped under term 1, the
+ * same default the store itself uses (`serveCharge`), so a statement can never
+ * lose a charge to a junk term number.
+ */
+export function statementTerms<T extends ChargeLike & { termNumber?: unknown }>(
+  rows: readonly T[] | null | undefined
+): StatementTermGroup<T>[] {
+  const byTerm = new Map<number, T[]>();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const n = Number(row?.termNumber);
+    const term = Number.isInteger(n) && n >= 1 ? n : 1;
+    const list = byTerm.get(term);
+    if (list) list.push(row);
+    else byTerm.set(term, [row]);
+  }
+  return [...byTerm.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([termNumber, list]) => ({ termNumber, rows: list, totals: chargeTotals(list) }));
+}
+
+/**
+ * A statement's scope line: `Term 1 — 3 charges`, or the whole programme with its
+ * term count. Always says which rows the paper below is about.
+ */
+export function statementScopeText(
+  groups: readonly StatementTermGroup<ChargeLike>[] | null | undefined,
+  termNumber: number | null,
+  currency: unknown = "BDT"
+): string {
+  const list = Array.isArray(groups) ? groups : [];
+  const charges = list.reduce((n, g) => n + g.rows.length, 0);
+  const money = list.reduce(
+    (acc, g) => ({
+      billedMinor: acc.billedMinor + g.totals.billedMinor,
+      paidMinor: acc.paidMinor + g.totals.paidMinor,
+      dueMinor: acc.dueMinor + g.totals.dueMinor,
+    }),
+    { billedMinor: 0, paidMinor: 0, dueMinor: 0 }
+  );
+  const scope = termNumber ? `Term ${termNumber}` : `Whole programme · ${countText(list.length, "term")}`;
+  return `${scope} · ${countText(charges, "charge")} · ${formatMinor(money.billedMinor, currency)} billed · ${formatMinor(
+    money.paidMinor,
+    currency
+  )} paid · ${formatMinor(money.dueMinor, currency)} due`;
+}
+
+/** Is this ledger entry the COLLEGE payment recorded against THIS charge? */
+export function isCollegePaymentEntryFor(
+  entry: { kind?: unknown; feeId?: unknown; meta?: unknown } | null | undefined,
+  chargeId: unknown
+): boolean {
+  if (!isCollegeLedgerEntry(entry)) return false;
+  if (entry?.kind !== "PAYMENT") return false;
+  const id = String(chargeId ?? "").trim();
+  if (!id) return false;
+  const meta = (entry?.meta && typeof entry.meta === "object" ? entry.meta : {}) as Record<string, unknown>;
+  return String(meta.collegeFeeId ?? "") === id;
+}
+
+/** A college payment's receipt number, as the ledger entry carries it. */
+export function paymentReceiptNo(entry: { meta?: unknown } | null | undefined): string {
+  const meta = (entry?.meta && typeof entry.meta === "object" ? entry.meta : {}) as Record<string, unknown>;
+  return String(meta.receiptNo ?? "").trim();
+}
+
+/**
+ * The ONE entry a receipt page prints.
+ *
+ * With a receipt number, that entry — and `matched` says whether it was really
+ * found, so a page can refuse to print a DIFFERENT payment under the number a
+ * family is holding. Without one, the newest confirmed payment on the charge.
+ * `createdAt` is compared as a string (ISO), which is what both the API and the
+ * store serve; an unreadable date sorts last rather than throwing.
+ */
+export function pickReceiptEntry<T extends { meta?: unknown; createdAt?: unknown; id?: unknown }>(
+  entries: readonly T[] | null | undefined,
+  receiptNo?: unknown
+): { entry: T; matched: boolean } | null {
+  const list = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e === "object");
+  if (!list.length) return null;
+  const wanted = String(receiptNo ?? "").trim();
+  if (wanted) {
+    const hit = list.find((e) => paymentReceiptNo(e) === wanted);
+    return hit ? { entry: hit, matched: true } : null;
+  }
+  const newest = [...list].sort((a, b) => {
+    const byDate = String(b?.createdAt ?? "").localeCompare(String(a?.createdAt ?? ""));
+    return byDate !== 0 ? byDate : String(b?.id ?? "").localeCompare(String(a?.id ?? ""));
+  })[0];
+  return newest ? { entry: newest, matched: false } : null;
+}
+
+/**
+ * Which structure priced this charge, as the rate line both print pages carry.
+ *
+ * D-7-17 requires a reprint to be honest about WHAT billed it, so the paper names
+ * the row's own pricing (`৳1,500.00 per student · flat`) instead of implying a
+ * figure nobody can check. The module stays date-format-free: the page prints the
+ * effective date itself through the app's own `fmtDate`.
+ */
+export function structureRateText(row: StructureRowLike | null | undefined, currency: unknown = "BDT"): string {
+  if (!row) return "";
+  return `${formatMoney(row.amount, currency)} ${pricingText(row.unit, row.basis)}`;
+}
+
+/** The instant a structure row took effect, as stored (a string key, or null). */
+export function structureEffectiveAt(row: StructureRowLike | null | undefined): string | null {
+  const raw = (row as any)?.updatedAt || (row as any)?.createdAt || null;
+  const text = String(raw ?? "").trim();
+  return text || null;
+}
+
+/**
+ * What a charge's own row says about its settlement — printed beside the receipt
+ * so one payment is never mistaken for the whole charge.
+ */
+export function chargeSettlementText(charge: ChargeLike | null | undefined, currency: unknown = "BDT"): string {
+  const due = dueMinorOf(charge);
+  if (!charge) return "";
+  if (due === 0 && (minorUnits(charge.amount) ?? 0) > 0) return "Paid in full";
+  if (due === 0) return "Nothing billed";
+  return `${formatMinor(due, currency)} still due`;
+}

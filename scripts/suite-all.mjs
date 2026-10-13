@@ -90,6 +90,11 @@ const SERVER = [
   "verify-onboarding-monitor",
   "verify-tenant-isolation",
   "verify-branch-isolation",
+  // 7e — the BOTH tenant's two halves never mix in a read. It WRITES (one college
+  // head/structure/charge, which is what makes "identical with and without college
+  // charges present" a measurement), so it runs with the isolation group and
+  // before verify-college-fees-api, which resets its own tenant LAST.
+  "verify-mode-mixing",
   "verify-college-enrollment",
   "verify-course-registrations",
   "verify-enroll-paths",

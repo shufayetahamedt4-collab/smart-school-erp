@@ -58,13 +58,15 @@
  *      `COLLEGE_MODEL_RE` includes all four — and 7c's `collegeDiscount`
  *      (a strengthening: no allowlist, no relaxed check) — and `college-routes.ts`
  *      stays dependency-free.
- *   10. THE LEDGER'S READERS ARE THE AUDITED SET (7c-follow-up). The code-level
- *      readers of the shared ledger are exactly `src/lib/ledger.ts` (the two
- *      query helpers), `src/app/api/ledger/route.ts` and
- *      `src/app/api/export/route.ts` (?type=ledger). A new reader fails until it
- *      is added here — its inclusion of college money is a decision, not a
- *      discovery. (The `students/[id]` DELETE cascade is string-keyed and only
- *      nulls a foreign key; it serves no report.)
+ *   10. THE LEDGER'S READERS ARE THE AUDITED SET (7c-follow-up, extended by 7d).
+ *      The code-level readers of the shared ledger are exactly `src/lib/ledger.ts`
+ *      (the two query helpers), `src/app/api/ledger/route.ts`,
+ *      `src/app/api/export/route.ts` (?type=ledger), the fee-book audit in
+ *      `src/app/api/fees/reconciliation/route.ts` (keyed by the caller's own fee
+ *      ids, so college money is unreachable) and 7d's two print pages. A new
+ *      reader fails until it is added here — its inclusion of college money is a
+ *      decision, not a discovery. (The `students/[id]` DELETE cascade is
+ *      string-keyed and only nulls a foreign key; it serves no report.)
  *   11. THE COLLEGE ENTRY IS TAGGED (7c-follow-up). `confirmCollegePayment` writes
  *      `feeId: null` plus `meta.collegeFeeId`, appends no school `payment` row, and
  *      uses the college's own `CRCP-` receipt sequence — so the only reads that
@@ -702,6 +704,19 @@ console.log("\n10. the ledger readers are the AUDITED set, and the college money
     // It can therefore never return, sum or display college money — the read is
     // a fee-book audit of the caller's tenant, not a tenant-wide ledger view.
     "app/api/fees/reconciliation/route.ts",
+    // 7d — the two D-7-17 PRINT pages, REVIEWED, and the answer to this phase's
+    // question is YES, deliberately: a college fee statement and a college fee
+    // receipt are college-money documents, so showing the student's own college
+    // payments is the entire point of the page. Both reads are keyed by the id
+    // the page has ALREADY authorized — `where: { schoolId: student.schoolId,
+    // studentId }` / `{ schoolId: charge.schoolId, studentId }`, i.e. the tenant
+    // read off the loaded student/charge, never a caller-supplied school — and
+    // both pages sit behind session → tenant → college gate → the v1 college fee
+    // READ allow-list → branch. Neither can show another tenant's or another
+    // branch's payment, and each filters to its own tag (`isCollegeLedgerEntry`
+    // / `isCollegePaymentEntryFor`) so no school row can appear either.
+    "app/print/college-fee-statement/[studentId]/page.tsx",
+    "app/print/college-fee-receipt/[chargeId]/page.tsx",
   ];
   const LEDGER_READ_RE = /\bprisma\.ledgerEntry\.(?:findMany|findFirst|findUnique)\b|\bledgerForSchool\b|\bledgerForStudent\b/g;
 
@@ -732,7 +747,7 @@ console.log("\n10. the ledger readers are the AUDITED set, and the college money
     bad("ledger-readers", "the ledger route no longer resolves a guardian/student to their own child — the student reader would be unscoped");
   else
     ok(
-      `the ledger's readers are exactly the ${expected.length} audited files (ledgerForSchool/ledgerForStudent in src/lib/ledger.ts, the /api/ledger route, and the ?type=ledger CSV export), and the route still scopes a guardian/student to their own child; the DELETE cascade that nulls the FK is string-keyed and serves no report`
+      `the ledger's readers are exactly the ${expected.length} audited files (ledgerForSchool/ledgerForStudent in src/lib/ledger.ts, the /api/ledger route, the ?type=ledger CSV export, and 7d's two tenant-keyed college print pages), and the route still scopes a guardian/student to their own child; the DELETE cascade that nulls the FK is string-keyed and serves no report`
     );
 }
 

@@ -470,6 +470,111 @@ async function create() {
   });
   mark("users", bothAdminUserId);
 
+  // ---- Phase 7e: the BOTH tenant's OWN money, in BOTH of its halves --------
+  // Q3/D-7-12 states ONE binding condition — on a BOTH tenant the two modes'
+  // money must never mix in a read — and it cannot be tested on a tenant whose
+  // school half is EMPTY: an empty list is "unaffected by college money" for the
+  // wrong reason. So the BOTH tenant that already exists for the 4d/7c probes
+  // gets a deterministic spine in BOTH halves, and the amounts are chosen to be
+  // unmistakable and non-overlapping — the school's own 12,000/5,000 against the
+  // college's 45,000 — so a verifier can assert WHICH half's money came back,
+  // not merely that some finite number did.
+  //
+  // Written RAW, like every other row in this fixture: it never calls the app's
+  // audit()/notifyUsers(), so creating it leaves no audit or notification rows.
+  const bothFeeSetting = bothSchoolId; // a `feeSetting` is keyed by its tenant
+  await db.collection("feeSettings").doc(bothFeeSetting).set({
+    id: bothFeeSetting, schoolId: bothSchoolId, monthlyFee: 1500, admissionFee: 5000,
+    lateFee: 0, currency: "BDT", updatedAt: now,
+  });
+  mark("feeSettings", bothFeeSetting);
+  const bothFeeA = `${P}both-fee-a`;
+  await db.collection("fees").doc(bothFeeA).set({
+    id: bothFeeA, schoolId: bothSchoolId, branchId: null, studentId: bothStu,
+    title: "ZZ Iso Both School Tuition", amount: 12000, paidAmount: 3000, status: "PARTIAL",
+    feeType: "MONTHLY", dueDate: now, note: null, createdAt: now,
+  });
+  mark("fees", bothFeeA);
+  const bothFeeB = `${P}both-fee-b`;
+  await db.collection("fees").doc(bothFeeB).set({
+    id: bothFeeB, schoolId: bothSchoolId, branchId: null, studentId: bothStu,
+    title: "ZZ Iso Both School Admission", amount: 5000, paidAmount: 5000, status: "PAID",
+    feeType: "ADMISSION", dueDate: now, note: null, createdAt: now,
+  });
+  mark("fees", bothFeeB);
+  const bothPayment = `${P}both-payment-1`;
+  await db.collection("payments").doc(bothPayment).set({
+    id: bothPayment, schoolId: bothSchoolId, studentId: bothStu, feeId: bothFeeA,
+    amount: 3000, method: "CASH", refNo: "ZZRCP-900001", receiptNo: "ZZRCP-900001",
+    date: now, createdAt: now,
+  });
+  mark("payments", bothPayment);
+  const bothLedgerSchool = `${P}both-ledger-school`;
+  await db.collection("ledger").doc(bothLedgerSchool).set({
+    id: bothLedgerSchool, schoolId: bothSchoolId, kind: "PAYMENT", amount: 3000, method: "CASH",
+    refNo: "ZZRCP-900001", status: "CONFIRMED", studentId: bothStu, feeId: bothFeeA,
+    actorId: null, description: "Payment for ZZ Iso Both School Tuition",
+    meta: { receiptNo: "ZZRCP-900001" }, createdAt: now,
+  });
+  mark("ledger", bothLedgerSchool);
+
+  const bothHead = `${P}both-head-tuition`;
+  await db.collection("collegeFeeHeads").doc(bothHead).set({
+    id: bothHead, schoolId: bothSchoolId, branchId: null, name: "ZZ Iso Both College Tuition",
+    bucket: "TUITION", frequency: "TERM", optional: false, active: true, dueDay: null,
+    note: null, createdAt: now,
+  });
+  mark("collegeFeeHeads", bothHead);
+  const bothStructure = `${P}both-str-1`;
+  await db.collection("collegeFeeStructures").doc(bothStructure).set({
+    id: bothStructure, schoolId: bothSchoolId, branchId: null, programId: bothProg,
+    termNumber: 1, headId: bothHead, amount: 45000, required: true, unit: "STUDENT",
+    basis: "FLAT", note: null, createdAt: now,
+  });
+  mark("collegeFeeStructures", bothStructure);
+  const bothConfig = `cfc_${bothSchoolId}`;
+  await db.collection("collegeFeeConfigs").doc(bothConfig).set({
+    id: bothConfig, schoolId: bothSchoolId, currency: "BDT", channels: [], paymentNote: null,
+    updatedAt: now,
+  });
+  mark("collegeFeeConfigs", bothConfig);
+  const bothCharge = `${P}both-charge-1`;
+  await db.collection("collegeFees").doc(bothCharge).set({
+    id: bothCharge, schoolId: bothSchoolId, branchId: null, studentId: bothStu,
+    programId: bothProg, termNumber: 1, headId: bothHead, headName: "ZZ Iso Both College Tuition",
+    bucket: "TUITION", title: "ZZ Iso Both College Tuition — Term 1", amount: 45000,
+    grossAmount: 45000, discount: 0, paidAmount: 15000, status: "PARTIAL", sequence: 1,
+    unit: "STUDENT", dueDay: null, dueDate: now, billedAt: now, actorId: null, createdAt: now,
+  });
+  mark("collegeFees", bothCharge);
+  const bothLedgerCollege = `${P}both-ledger-college`;
+  await db.collection("ledger").doc(bothLedgerCollege).set({
+    id: bothLedgerCollege, schoolId: bothSchoolId, kind: "PAYMENT", amount: 15000, method: "CASH",
+    refNo: "CRCP-900001", status: "CONFIRMED", studentId: bothStu, feeId: null, actorId: null,
+    description: "College payment — ZZ Iso Both College Tuition",
+    meta: { receiptNo: "CRCP-900001", collegeFeeId: bothCharge, programId: bothProg, termNumber: 1 },
+    createdAt: now,
+  });
+  mark("ledger", bothLedgerCollege);
+
+  // The three roles D-7-18 REFUSES, inside a college-capable tenant — so a probe
+  // can show the refusal is the ROLE rule and not the tenant gate. A SCHOOL
+  // tenant answers NO_COLLEGE first, which would mask whichever rule is broken.
+  for (const [role, emailCred, name] of [
+    ["TEACHER", "bothTeacher", "ZZ Iso Both Teacher"],
+    ["GUARDIAN", "bothGuardian", "ZZ Iso Both Guardian"],
+    ["STUDENT", "bothStudent", "ZZ Iso Both Student User"],
+  ]) {
+    track.creds[emailCred] = newPw();
+    const uid = `${P}user-both-${role.toLowerCase()}`;
+    await db.collection("users").doc(uid).set({
+      email: `zz-iso-both-${role.toLowerCase()}@test.local`, name,
+      role, schoolId: bothSchoolId, active: true,
+      passwordHash: hash(track.creds[emailCred]),
+    });
+    mark("users", uid);
+  }
+
   // ---- BOTH tenant with NO college data (its downgrade must be ALLOWED) -----
   const bothEmptySchoolId = `${P}both-empty`;
   await db.collection("schools").doc(bothEmptySchoolId).set({

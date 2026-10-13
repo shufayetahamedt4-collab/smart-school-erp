@@ -17,6 +17,19 @@
  *   4. the guardian's own fee view totals the same way for their child
  *   5. the ledger's own money math stays finite
  *
+ * Phase 7e ADDS the college half of the same rule, on the ONLY tenant that owns
+ * both halves at once (the fixture's BOTH tenant, seeded by
+ * `scripts/isolation-fixture.mjs` with 17,000 of school money and 45,000 of
+ * college money): college dues are finite, they are the COLLEGE's own figures,
+ * and neither half's money appears in the other's read. The five school checks
+ * above are untouched — every 7e assertion is an addition, so the recorded
+ * school baseline (`15` checks, the count the 7b/7c record cites) is still the
+ * count this script prints for the demo tenant.
+ *
+ * The college half SKIPS, loudly and without a pass, when the fixture is absent
+ * — a hosted run (`SMOKE_ORIGIN=…`) has no fixture tenant to read, and reporting
+ * an unrun check as green is exactly what this file must not do.
+ *
  * Read-only: it never writes a fee, a payment or a ledger entry.
  *
  * Usage:
@@ -24,6 +37,7 @@
  *   SMOKE_ORIGIN=https://smart-school-erp-1--amar-e-school.asia-southeast1.hosted.app \
  *     node scripts/verify-fees-totals.mjs
  */
+import { readFileSync } from "node:fs";
 import { loadEnv } from "./load-env.mjs";
 import { requireEmulator } from "./lib/guard.mjs";
 
@@ -147,6 +161,100 @@ check("ledger amounts are finite", ledgerBad.length === 0, ledgerBad.length ? `$
 // 6. the page that shows it all is actually served
 const page = await fetch(`${ORIGIN}/dashboard/fees`, { headers: { ...host(HOSTS.school), cookie: admin } });
 check("GET /dashboard/fees", page.status === 200, `HTTP ${page.status}`);
+
+/* --------------------------------------------------- 7. the college half (7e) */
+// The SAME money rule, in the other mode. The BOTH tenant is the only one that
+// holds both halves at once, so it is the only tenant where "the school's money
+// is not the college's" is a READABLE claim: the fixture gives it 17,000 of
+// school money (12,000 + 5,000) and 45,000 of college money, and the two share
+// no value.
+let fixture = null;
+try {
+  fixture = JSON.parse(readFileSync(new URL(".qa-fixtures.json", import.meta.url), "utf8"));
+} catch {
+  fixture = null;
+}
+const bothAdmin = fixture?.creds?.bothAdmin
+  ? await login(host(HOSTS.school), { id: "zz-iso-both-admin@test.local", pw: fixture.creds.bothAdmin })
+  : null;
+const COLLEGE_HALF_WHY =
+  "the college half of the money rule (9 checks, on a BOTH tenant with both halves populated) needs scripts/.qa-fixtures.json — run: node scripts/isolation-fixture.mjs create";
+if (!bothAdmin) {
+  // A LOCAL run must have the fixture. Printing a SKIP and then ALL GREEN would report
+  // 9 checks that never ran as if they had passed — the one thing this file refuses to do.
+  // A hosted run (SMOKE_ORIGIN) has no fixture tenant by construction, so it keeps the
+  // loud skip and its exit code is unchanged.
+  if (LOCAL) {
+    check(COLLEGE_HALF_WHY, false, "a local run must create the fixture first");
+  } else {
+    console.log(`  SKIP  ${COLLEGE_HALF_WHY} (a hosted run has no fixture tenant — nothing to skip locally)`);
+  }
+} else {
+  const SCHOOL = { billed: 17000, paid: 8000, due: 9000 };
+  const COLLEGE = { billed: 45000, paid: 15000, due: 30000 };
+  const minor = (v) => Math.round(Number(v || 0) * 100);
+
+  const bothFees = await req(host(HOSTS.school), "/api/fees", { cookie: bothAdmin });
+  const bothRows = bothFees.data?.fees || [];
+  check("GET /api/fees as a BOTH tenant's admin", bothFees.status === 200 && bothRows.length > 0, `HTTP ${bothFees.status} ${bothRows.length} rows`);
+  const bothBilled = round(bothRows.reduce((a, f) => a + Number(f.amount || 0), 0));
+  const bothPaid = round(bothRows.reduce((a, f) => a + Number(f.paidAmount || 0), 0));
+  check(
+    "the BOTH tenant's school half totals its OWN money (17,000 billed / 8,000 paid / 9,000 due)",
+    minor(bothBilled) === minor(SCHOOL.billed) && minor(bothPaid) === minor(SCHOOL.paid) && minor(bothBilled - bothPaid) === minor(SCHOOL.due),
+    `${bothBilled} / ${bothPaid} / ${round(bothBilled - bothPaid)}`
+  );
+  const bothJson = JSON.stringify(bothFees.data);
+  check(
+    "…and NO college row, id or amount is in it (a college charge must never move a school total)",
+    !/\bcf_/.test(bothJson) && !bothJson.includes("collegeFee") && !bothJson.includes(String(COLLEGE.billed)) && !bothJson.includes(String(COLLEGE.due)),
+    `payload=${bothJson.length}B`
+  );
+
+  const bothStats = await req(host(HOSTS.school), "/api/stats", { cookie: bothAdmin });
+  const bothStatsFees = bothStats.data?.fees || {};
+  check(
+    "…and /api/stats' fee payload is that same school-only money",
+    bothStats.status === 200 && isMoney(bothStatsFees.totalFees) && isMoney(bothStatsFees.paidFees) &&
+      minor(bothStatsFees.totalFees) === minor(SCHOOL.billed) && minor(bothStatsFees.paidFees) === minor(SCHOOL.paid),
+    `HTTP ${bothStats.status} ${JSON.stringify(bothStatsFees)}`
+  );
+
+  const dues = await req(host(HOSTS.school), "/api/college-fees/dues", { cookie: bothAdmin });
+  const totals = dues.data?.totals || {};
+  check("GET /api/college-fees/dues as the same BOTH tenant's admin", dues.status === 200 && !!dues.data, `HTTP ${dues.status} ${dues.error || ""}`);
+  check(
+    "college money is finite too (billed / paid / due, never NaN or null)",
+    isMoney(totals.billed) && isMoney(totals.paid) && isMoney(totals.due) && isMoney(totals.gross),
+    JSON.stringify(totals)
+  );
+  // The fixture's seeded charge is the ANCHOR (45,000 / 15,000 / 30,000): it must
+  // be on the read, and the read's totals must be exactly its own rows — so this
+  // stays exact about WHICH money it is looking at without pinning a total that a
+  // college write elsewhere in the same database may legitimately have raised.
+  const seededCharge = (totals.rows || []).find((r) => r.id === "zziso-both-charge-1");
+  check(
+    "college dues contain the fixture's own charge (45,000 / 15,000 / 30,000 due) — the college half is non-empty",
+    !!seededCharge && minor(seededCharge.amount) === minor(COLLEGE.billed) && minor(seededCharge.paid) === minor(COLLEGE.paid) && minor(seededCharge.due) === minor(COLLEGE.due),
+    JSON.stringify(seededCharge || null)
+  );
+  check(
+    "…and the totals are exactly those rows (paid + due === billed, no school money folded in)",
+    minor((totals.rows || []).reduce((a, r) => a + Number(r.amount || 0), 0)) === minor(totals.billed) &&
+      minor(totals.paid + totals.due) === minor(totals.billed) &&
+      (totals.rows || []).every((r) => !String(r.id).startsWith("zziso-both-fee-")),
+    `billed=${totals.billed} paid+due=${round(totals.paid + totals.due)}`
+  );
+  // The whole payload, not just the money: a leaked SCHOOL fee row shows up as its
+  // id or its own title, and neither can be confused with a college figure.
+  const duesJson = JSON.stringify(dues.data);
+  check(
+    "…and NO school fee row, id or title is in the college read (the other direction of the same rule)",
+    !duesJson.includes("zziso-both-fee-") && !duesJson.includes("ZZ Iso Both School") &&
+      !duesJson.includes(String(SCHOOL.billed)) && !duesJson.includes(String(SCHOOL.due)),
+    `payload=${duesJson.length}B`
+  );
+}
 
 console.log(failures === 0 ? "\nALL GREEN\n" : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

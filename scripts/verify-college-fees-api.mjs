@@ -1000,6 +1000,16 @@ console.log("\n### no college fee row appears in a school fee read (Q3, the 7c h
 //   • `DELETE /api/students/[id]`     → a WRITE: the cascade nulls `studentId`/
 //                                       `feeId` on the pupil's history rows.
 //   • `lib/ledger` write-path guards  → `refAlreadyProcessed`, `applyLateFees`.
+//   • `print/college-fee-statement`   → 7d's two D-7-17 print pages, ADDED to the
+//     and `print/college-fee-receipt`    audit after review: they read the
+//                                       ledger by the tag (`isCollegeLedgerEntry`
+//                                       / `isCollegePaymentEntryFor`) with the
+//                                       schoolId taken from the student/charge
+//                                       they have already authorized, so each
+//                                       shows ONE student's own college money and
+//                                       nothing else. `verify-college-fees-data`
+//                                       pins this list, so an un-audited reader
+//                                       fails there.
 //   • No day book, cash book, receivable or outstanding report exists in this app
 //     (grepped: the only "outstanding" today is the fee list's own due total, read
 //     from `fees`, not from the ledger).

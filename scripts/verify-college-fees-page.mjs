@@ -72,6 +72,8 @@ const PAYMENTS_ROUTE_URL = new URL("../src/app/api/college-fees/payments/route.t
 const GENERATE_ROUTE_URL = new URL("../src/app/api/college-fees/generate/route.ts", import.meta.url);
 const ACCESS_URL = new URL("../src/lib/college-fees-access.ts", import.meta.url);
 const FEES_LIB_URL = new URL("../src/lib/college-fees.ts", import.meta.url);
+const STATEMENT_PAGE_URL = new URL("../src/app/print/college-fee-statement/[studentId]/page.tsx", import.meta.url);
+const RECEIPT_PAGE_URL = new URL("../src/app/print/college-fee-receipt/[chargeId]/page.tsx", import.meta.url);
 
 const viewSource = readFileSync(VIEW_URL, "utf8");
 const pageSource = readFileSync(PAGE_URL, "utf8");
@@ -83,6 +85,10 @@ const paymentsRouteSource = readFileSync(PAYMENTS_ROUTE_URL, "utf8");
 const generateRouteSource = readFileSync(GENERATE_ROUTE_URL, "utf8");
 const accessSource = readFileSync(ACCESS_URL, "utf8");
 const feesLibSource = readFileSync(FEES_LIB_URL, "utf8");
+// The two D-7-17 print pages. Guarded by existsSync where they are asserted, so a
+// missing route reports as a failed CHECK rather than crashing this verifier.
+const statementSource = existsSync(STATEMENT_PAGE_URL) ? readFileSync(STATEMENT_PAGE_URL, "utf8") : "";
+const receiptSource = existsSync(RECEIPT_PAGE_URL) ? readFileSync(RECEIPT_PAGE_URL, "utf8") : "";
 
 const view = await import(VIEW_URL.href);
 const access = await import(ACCESS_URL.href);
@@ -107,9 +113,20 @@ const {
   bucketLabel,
   channelKindLabel,
   channelLine,
+  collegeFeeReceiptHref,
+  collegeFeeStatementHref,
   collegeFeesPageState,
   collegeLedgerAmountText,
   collegeLedgerNote,
+  chargeSettlementText,
+  isCollegePaymentEntryFor,
+  paymentReceiptNo,
+  pickReceiptEntry,
+  statementScopeText,
+  statementTermValue,
+  statementTerms,
+  structureEffectiveAt,
+  structureRateText,
   configBlocked,
   countText,
   currencyOf,
@@ -247,6 +264,11 @@ const pageCode = stripComments(pageSource);
 const ledgerCode = stripComments(ledgerSource);
 const pageNoComments = stripComments(pageSource);
 const onboardingNoComments = stripComments(onboardingSource);
+// The print pages are JSX too, so they get the same COMMENTS-only mask (their
+// prose contains apostrophes; only tokens that appear in no string literal are
+// asserted negatively).
+const statementCode = stripComments(statementSource);
+const receiptCode = stripComments(receiptSource);
 
 let failures = 0;
 let checks = 0;
@@ -776,6 +798,207 @@ console.log("\n13. the Admin step does not prefill the platform SUPER_ADMIN's ow
   check("the wizard page asks the rule", /wizardPrefillsAdmin\(me\.user\.role, false\)/.test(onboardingNoComments));
   check("the wizard page no longer prefills the admin unconditionally", !/\} else if \(me\?\.user\) \{\s*setAdmin\(/.test(onboardingNoComments));
   check("the rule lives with the wizard's other decisions", /export function wizardPrefillsAdmin\(/.test(readFileSync(new URL("../src/lib/onboarding-seed.ts", import.meta.url), "utf8")));
+}
+
+/* ------------------- 14. the two print pages, D-7-17 (phase 7d remainder) */
+
+console.log("\n14. the college fee STATEMENT and RECEIPT print pages (D-7-17)");
+{
+  // The routes D-7-17 names, at the paths it names.
+  check("the statement print route exists", existsSync(STATEMENT_PAGE_URL));
+  check("the receipt print route exists", existsSync(RECEIPT_PAGE_URL));
+
+  // ---- the guard chain, the same order the 7c API applies ----
+  for (const [name, src, ownTenant, branchOf] of [
+    ["statement", statementCode, "student.schoolId !== session.schoolId", "student.branchId"],
+    ["receipt", receiptCode, "charge.schoolId !== session.schoolId", "charge.branchId"],
+  ]) {
+    check(`${name}: requires a session`, /await getSession\(\)/.test(src));
+    check(`${name}: a foreign tenant is NOT FOUND, never a 403 oracle`, src.includes(ownTenant));
+    check(`${name}: the college gate is the pure decision (a page cannot use requireCollege)`, /collegeGateDecision\(/.test(src));
+    check(`${name}: applies the v1 READ allow-list, the SAME rule as the API`, /canReadCollegeFees\(session\.role\)/.test(src));
+    // The call must be the one that RETURNS the refusal — a bare mention proves
+    // nothing (removing the `if` is exactly the mutation this catches).
+    check(
+      `${name}: confines the read to the caller's branch`,
+      new RegExp(`if \\(!canAccessBranch\\(session, ${branchOf.replace(".", "\\.")}\\)\\) return NOT_FOUND;`).test(src)
+    );
+    check(`${name}: never imports the NextResponse-shaped gate`, !/requireCollege\b/.test(src));
+    check(`${name}: writes nothing (no write gate, no guarded write, no create)`, !/requireCollegeFeesWrite|\$guardedUpdate|prisma\.[A-Za-z]+\.create\(/.test(src));
+    check(`${name}: never reaches a school fee surface`, !/feeCategory|feeSetting|\/api\/fees/.test(src));
+    check(`${name}: prints the tenant's own name`, /school\?\.name/.test(src));
+    check(`${name}: reads through the 7c loaders, not a new query`, /loadCollegeFeeConfig\(/.test(src));
+  }
+
+  // ---- the hrefs: ONE definition, both call sites, no re-inlining ----
+  eq("the statement href", collegeFeeStatementHref("st_1"), "/print/college-fee-statement/st_1");
+  eq("…narrowed to one term", collegeFeeStatementHref("st_1", 2), "/print/college-fee-statement/st_1?term=2");
+  eq("…and junk in the term means the whole programme", collegeFeeStatementHref("st_1", "abc"), "/print/college-fee-statement/st_1");
+  eq("no student ⇒ no href (never a broken link)", collegeFeeStatementHref(""), "");
+  eq("a weird id is encoded", collegeFeeStatementHref("a/b c"), "/print/college-fee-statement/a%2Fb%20c");
+  eq("the receipt href", collegeFeeReceiptHref("cf_1"), "/print/college-fee-receipt/cf_1");
+  eq("…selecting ONE payment", collegeFeeReceiptHref("cf_1", "CRCP-1"), "/print/college-fee-receipt/cf_1?receipt=CRCP-1");
+  eq("…and a blank receipt number selects none", collegeFeeReceiptHref("cf_1", "  "), "/print/college-fee-receipt/cf_1");
+  eq("no charge ⇒ no href", collegeFeeReceiptHref(null), "");
+  // The paths themselves ARE string literals in the view module, so this reads the
+  // raw source: `viewCode` masks string literals away by design.
+  check(
+    "both print paths are defined once, in the view module",
+    /export const COLLEGE_FEE_STATEMENT_HREF = "\/print\/college-fee-statement"/.test(viewSource) &&
+      /export const COLLEGE_FEE_RECEIPT_HREF = "\/print\/college-fee-receipt"/.test(viewSource)
+  );
+  check("the Dues tab links the statement through the helper", /collegeFeeStatementHref\(/.test(pageCode));
+  check("the Dues tab links the receipt through the helper", /collegeFeeReceiptHref\(/.test(pageCode));
+  check("the receipt link appears only for a real receipt number", /receipt\?\.receiptNo &&/.test(pageCode));
+  check("the receipt state is cleared when another student is picked", /setReceipt\(null\)/.test(pageCode));
+  check("neither print page re-inlines its own path", !/\/print\/college-fee-/.test(statementCode) && !/\/print\/college-fee-/.test(receiptCode));
+
+  // ---- the ?term= reader: junk is the whole programme, never an error page ----
+  eq("no term ⇒ the whole programme", statementTermValue(undefined), null);
+  eq("an empty term ⇒ the whole programme", statementTermValue(""), null);
+  eq("an unreadable term ⇒ the whole programme", statementTermValue("abc"), null);
+  eq("term 0 is refused", statementTermValue("0"), null);
+  eq("a fractional term is refused", statementTermValue("1.5"), null);
+  eq("a negative term is refused", statementTermValue("-2"), null);
+  eq("a real term is read", statementTermValue("2"), 2);
+  eq("…from a number too", statementTermValue(3), 3);
+
+  // ---- grouping: term order, per-term totals, and no row lost to a junk term ----
+  const rows = [
+    { id: "c2", termNumber: 2, amount: 100, paidAmount: 0, discount: 0 },
+    { id: "c1", termNumber: 1, amount: 200, paidAmount: 50, discount: 25 },
+  ];
+  const groups = statementTerms(rows);
+  eq("the statement groups by term, in term order", groups.map((g) => g.termNumber).join(","), "1,2");
+  eq("a term keeps its own rows", groups[0].rows.map((r) => r.id).join(","), "c1");
+  eq("…and its own billed total", groups[0].totals.billedMinor, 20000);
+  eq("…its own due total", groups[0].totals.dueMinor, 15000);
+  eq("…and its own waiver total", groups[0].totals.discountMinor, 2500);
+  eq("the second term totals independently", groups[1].totals.dueMinor, 10000);
+  const junkTerm = statementTerms([{ id: "a", amount: 10 }, { id: "b", termNumber: "x", amount: 20 }]);
+  eq("an unreadable term is term 1, so no charge is ever lost", junkTerm.length, 1);
+  eq("…and both rows are on it", junkTerm[0].rows.length, 2);
+  eq("an empty statement has no groups", statementTerms([]).length, 0);
+  eq("junk input has no groups", statementTerms(null).length, 0);
+
+  // ---- the scope line ----
+  // A single-term statement is what the PAGE passes when it is narrowed to a term
+  // (`?term=`), so that is the case asserted here: the term's own rows only.
+  const termGroups = groups.filter((g) => g.termNumber === 1);
+  const termScope = statementScopeText(termGroups, 1);
+  check("the scope line names the term", /^Term 1/.test(termScope), termScope);
+  check("…the charge count", /1 charge\b/.test(termScope), termScope);
+  check("…and all three money figures", /billed/.test(termScope) && /paid/.test(termScope) && /due/.test(termScope), termScope);
+  check("…printing the rows' own money", termScope.includes(formatMinor(20000)) && termScope.includes(formatMinor(15000)), termScope);
+  check("…and NOT the other term's", !termScope.includes(formatMinor(10000)), termScope);
+  const wholeScope = statementScopeText(groups, null);
+  check("the whole-programme scope says so, with its term count", /^Whole programme · 2 terms/.test(wholeScope), wholeScope);
+  check("…and adds both terms' money", wholeScope.includes(formatMinor(25000)), wholeScope);
+  check("an empty statement reads as zeros, never NaN", /0 charges · ৳0\.00 billed/.test(statementScopeText(statementTerms([]), null)), statementScopeText(statementTerms([]), null));
+
+  // ---- the pages print WHICH rate billed them (D-7-17) ----
+  check("the statement names its rates", /structureRateText\(/.test(statementCode));
+  // …and the instant is both READ and PRINTED — a read whose value is dropped is
+  // exactly the mutation this catches.
+  check(
+    "…and the instant each took effect, read AND printed",
+    /const when = structureEffectiveAt\(/.test(statementCode) && /fmtDate\(when\)/.test(statementCode)
+  );
+  check("the receipt names its rate too", /structureRateText\(/.test(receiptCode));
+  check("both read the structure through the 7c loader", /loadStructure\(/.test(statementCode) && /loadStructure\(/.test(receiptCode));
+  check("the statement totals come from the one charge helper", /chargeTotals\(/.test(statementCode));
+}
+
+/* ------------- 15. the receipt is ONE payment, and never a different one */
+
+console.log("\n15. the receipt prints one payment — and refuses to print another under its number");
+{
+  // ---- the COLLEGE tag, per charge ----
+  const tagged = { id: "l1", kind: "PAYMENT", feeId: null, meta: { collegeFeeId: "cf_1", receiptNo: "CRCP-1" } };
+  check("a tagged payment for THIS charge matches", isCollegePaymentEntryFor(tagged, "cf_1"));
+  check("a payment on ANOTHER charge does not", !isCollegePaymentEntryFor(tagged, "cf_2"));
+  check("a school payment does not (it has its own feeId)", !isCollegePaymentEntryFor({ kind: "PAYMENT", feeId: "fee_1", meta: {} }, "cf_1"));
+  check("a college WAIVER is not a payment", !isCollegePaymentEntryFor({ kind: "DISCOUNT", feeId: null, meta: { collegeDiscountId: "d1" } }, "cf_1"));
+  check("a school FEE creation does not", !isCollegePaymentEntryFor({ kind: "FEE", feeId: "fee_1", meta: null }, "cf_1"));
+  check("an untagged entry never matches", !isCollegePaymentEntryFor({ kind: "PAYMENT", feeId: null, meta: null }, "cf_1"));
+  check("an empty charge id matches nothing", !isCollegePaymentEntryFor(tagged, ""));
+  eq("its receipt number is read from the tag", paymentReceiptNo(tagged), "CRCP-1");
+  eq("a missing tag has no receipt number", paymentReceiptNo({ meta: null }), "");
+
+  // ---- pickReceiptEntry: the ASKED-FOR payment, or the newest ----
+  const entries = [
+    { id: "l1", createdAt: "2026-10-01T00:00:00.000Z", meta: { receiptNo: "CRCP-1" } },
+    { id: "l2", createdAt: "2026-10-03T00:00:00.000Z", meta: { receiptNo: "CRCP-2" } },
+    { id: "l3", createdAt: "2026-10-02T00:00:00.000Z", meta: { receiptNo: "CRCP-3" } },
+  ];
+  eq("asking for a receipt returns THAT payment", pickReceiptEntry(entries, "CRCP-1")?.entry.id, "l1");
+  eq("…and says it was matched", pickReceiptEntry(entries, "CRCP-1")?.matched, true);
+  eq("asking for a receipt this charge does not hold returns NOTHING", pickReceiptEntry(entries, "CRCP-9"), null);
+  eq("without a number it prints the newest payment", pickReceiptEntry(entries)?.entry.id, "l2");
+  eq("…and flags it as unmatched (the default selection)", pickReceiptEntry(entries)?.matched, false);
+  eq("a charge with no payments has no receipt", pickReceiptEntry([], "CRCP-1"), null);
+  eq("junk input has no receipt", pickReceiptEntry(null), null);
+  eq("free-text junk never matches", pickReceiptEntry(entries, "whatever"), null);
+  const tied = [
+    { id: "la", createdAt: "2026-10-01T00:00:00.000Z", meta: { receiptNo: "A" } },
+    { id: "lb", createdAt: "2026-10-01T00:00:00.000Z", meta: { receiptNo: "B" } },
+  ];
+  eq("an equal timestamp breaks the tie deterministically", pickReceiptEntry(tied)?.entry.id, "lb");
+  check(
+    "the receipt page uses the one picker, ON the number it was asked for",
+    /pickReceiptEntry\(\s*payments,\s*receiptParam\s*\)/.test(receiptCode)
+  );
+  check("…and prints nothing when it finds none", /if \(!picked\)/.test(receiptCode) && /No confirmed college payment/.test(receiptCode));
+  check("…saying WHICH number it could not find", /carries the receipt number/.test(receiptCode));
+  check("…and reads the student's payments through the per-charge tag", /isCollegePaymentEntryFor\(/.test(receiptCode));
+
+  // ---- one payment is not a settled charge ----
+  eq("a settled charge reads as paid in full", chargeSettlementText({ amount: 100, paidAmount: 100 }), "Paid in full");
+  eq("a part-paid charge states the remainder", chargeSettlementText({ amount: 100, paidAmount: 40 }), `${formatMinor(6000)} still due`);
+  eq("an unpaid charge states the whole amount", chargeSettlementText({ amount: 100, paidAmount: 0 }), `${formatMinor(10000)} still due`);
+  eq("nothing billed says so", chargeSettlementText({}), "Nothing billed");
+  eq("no charge says nothing", chargeSettlementText(null), "");
+  check("the receipt prints what the charge still owes", /chargeSettlementText\(/.test(receiptCode));
+  check("…beside what THIS receipt collected", /collegeLedgerAmountText\(/.test(receiptCode));
+  check("…and names the payment as one instalment", /ONE confirmed college payment/.test(receiptCode));
+
+  // ---- the rate line and its effective instant ----
+  eq("the rate line carries the amount and the shape", structureRateText({ amount: 1500, unit: "STUDENT", basis: "FLAT" }), `${formatMoney(1500)} per student · flat`);
+  eq("a course-priced row says so", structureRateText({ amount: 1500, unit: "COURSE", basis: "FLAT" }), `${formatMoney(1500)} per approved course · flat`);
+  eq("no structure row ⇒ no line", structureRateText(null), "");
+  eq("the effective instant prefers the last edit", structureEffectiveAt({ updatedAt: "2026-02-01T00:00:00.000Z", createdAt: "2026-01-01T00:00:00.000Z" }), "2026-02-01T00:00:00.000Z");
+  eq("…falling back to its creation", structureEffectiveAt({ createdAt: "2026-01-01T00:00:00.000Z" }), "2026-01-01T00:00:00.000Z");
+  eq("an undated row has no instant", structureEffectiveAt({}), null);
+  eq("no row has no instant", structureEffectiveAt(null), null);
+}
+
+/* ------- 16. the 7d copy fixes, pinned as text (a client render cannot be read) ------- */
+
+console.log("\n16. the 7d copy fixes are complete sentences, and the preview names itself");
+{
+  // The college fee page is a CLIENT component: its server HTML is a loading shell, so
+  // the sentences a human reads cannot be fetched over HTTP (a browser pass is a
+  // separate step). These pins are the substitute this repo already uses for exactly
+  // that situation — section 12 pins the phantom total the same way. `pageCode` drops
+  // comments but KEEPS string literals, so a re-truncated sentence or a moved label
+  // fails here. Item 3's defect was clipped text, so the old fragment must be gone
+  // too: asserting only the new string would let both live on the page at once.
+  const STRUCTURE_INTRO =
+    "One row per programme, per term and per head. The programme's own term shape bounds the term number.";
+  const BASIS_HINT = "Per-credit pricing is not in v1 — it is refused by name.";
+  const PREVIEW_LABEL = "Preview (nothing written)";
+
+  check("the Fee-structure intro is the complete sentence (7d item 3 — it read as clipped)", pageCode.includes(STRUCTURE_INTRO), STRUCTURE_INTRO);
+  check("…and the OLD, clipped phrasing is gone", !/is one row per programme/.test(pageCode));
+  check("the Basis help line is the complete sentence", pageCode.includes(BASIS_HINT), BASIS_HINT);
+  check("…and the OLD mid-sentence version is gone", !/not in v1 and is refused/.test(pageCode));
+  check("the preview panel names itself (7d item 4 — zeros beside committed money read as a wrong total)", pageCode.includes(PREVIEW_LABEL), PREVIEW_LABEL);
+  // …and it is BOUND to the dry-run flag: the committed branch still says "Committed",
+  // so the label cannot be shown for a real write, nor dropped from a preview.
+  check(
+    "…and only the dry-run branch says it",
+    /preview\.dryRun \? "Preview \(nothing written\)" : "Committed"/.test(pageCode)
+  );
 }
 
 /* ---------------------------------------------------------------------- end */
