@@ -106,6 +106,11 @@ const SERVER = [
   // everything it created, so it runs with the college group and before
   // verify-college-fees-api, which resets its own tenant LAST.
   "verify-course-teachers",
+  // ca-3 — the college attendance register's API. It WRITES (one register row per
+  // slot, plus the notification its own new-absence rule sends) and deletes every
+  // row and notification it created, so it runs with the college group and before
+  // verify-college-fees-api, which resets its own tenant LAST.
+  "verify-course-attendance",
   "verify-college-enrollment",
   "verify-course-registrations",
   "verify-enroll-paths",

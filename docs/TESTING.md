@@ -242,7 +242,9 @@ Phase 8 ca-0 (the college attendance allow-list, docs/COLLEGE-DECISIONS.md §26)
   truth table (raw junk refused), the measured proof that the rule is narrower than the school's
   `attendanceMarks` module (`can()` admits TEACHER `entry`, GUARDIAN `view` and STUDENT `viewOwn`; the
   rule refuses all three), the REGISTRAR read-only, and both refusal sentences. It then pins ca-0's
-  boundary as text: no file under `src/` consumes the module yet (ca-3/ca-4 own the consumers), the
+  boundary as text: the module's consumers are EXACTLY the ca-3 server wrapper
+  (`src/lib/college-attendance-server.ts`) — ca-3 named them, ca-2 removed the `db.ts` pin it owned and
+  ca-4's register screen must be added to that list deliberately (§28, §29) — and the
   school's `/api/attendance` route is untouched and never reaches the college model or the rule. **17
   checks** — the `db.ts` pin it used to carry was ca-2's to remove with the collection it owns (§28).
   It is wired into `suite-all.mjs`'s pure list
@@ -261,9 +263,42 @@ Phase 8 ca-1 (the pure attendance logic, docs/COLLEGE-DECISIONS.md §27) adds on
   reader's full table, the four statuses (strict; UNMARKED is never storable), the APPROVED-registration
   roster (duplicates collapsed, blanks dropped, order kept) pinned against `college-fees.ts`'s
   `isApprovedRegistration` on one probe table, the notify transition table (a re-saved absence and a
-  corrected register both stay quiet), and ca-1's scope — no route, page or component consumes it yet
-  (ca-3/ca-4 own the consumers) and the school's `/api/attendance` never reaches for it. **31 checks.**
+  corrected register both stay quiet), and ca-1's scope — its consumers are EXACTLY the two ca-3 route
+  files and their shared wrapper (`src/app/api/course-attendance/route.ts`, its `history/route.ts` and
+  `src/lib/college-attendance-server.ts`; a new consumer, ca-4's screen among them, is added to that
+  list deliberately — §29) and the school's `/api/attendance` never reaches for it. **31 checks.**
   It is wired into `suite-all.mjs`'s pure list beside the ca-0 verifier.
+
+Phase 8 ca-3 (the college attendance API, docs/COLLEGE-DECISIONS.md §29) adds one more verifier — its
+first with a LIVE half:
+
+- `scripts/verify-course-attendance.mjs` — **guarded** (`requireEmulator()`), and it needs the app
+  running and the college fixture tenant created (`node scripts/isolation-fixture.mjs create`). Its
+  OFFLINE half imports both ca-0/ca-1 modules and reads the tree as text: the guard order in BOTH
+  handlers (session → target tenant → `requireCollege` → ca-0's READ rule on GET, WRITE rule on POST),
+  the save's write gate (the allow-list and `writeGuard` before the roster), the derived id +
+  `upsert({ where: { id } })` + ONE `$transaction` with the validation loop before it, the `UNMARKED`
+  skip, the 404 confinement (a foreign or another branch's course/student, never a 403), the notify
+  wiring (the pure rule, the school's own guardian path, fire-and-forget, no push), the audit + cache
+  invalidation, the segment/directory pair (and the fees proof's re-scoped `laterSegments` pin), the
+  model's missing `idFor` entry, and that NO composite index is declared — every query is scalar
+  equality and the session filter is in memory. Its LIVE half runs against the fixture tenant and
+  writes its OWN `zzcta-…` students and registrations raw, so the fixture's rows are never mutated: the
+  roster read (APPROVED only), a course with no APPROVED registrations, the save and its idempotence
+  (bracketed counts), the slot in the key (a second session is a second row and its own notify), the
+  whole-request atomicity (one bad row → nothing written, including the valid rows beside it), an
+  unapproved student refused, every role × read/write (ACCOUNTANT / TEACHER / GUARDIAN / STUDENT refused;
+  the REGISTRAR reads and cannot mark; a SCHOOL tenant's admin refused by the college gate; no session →
+  401; and the platform SUPER_ADMIN reaching a named tenant with `?schoolId=`, read and mark — its
+  credentials are read from `src/lib/demo-accounts.ts`, the module the sign-in screen uses, so no
+  password is written into the verifier), tenant + branch 404s, the per-student history, and the “only a NEW absence notifies” rule read
+  off REAL notification rows (a re-saved absence and a correction write none) — every row and
+  notification it created deleted on the way out, with the collection count bracketed before and after.
+  **46 checks.** It is wired into `suite-all.mjs`'s server-backed list after `verify-course-teachers`,
+  and it runs once per app start (like `verify-college-fees-api`): its fixture rows are raw writes, and
+  the app's pull memo (`src/lib/db.ts`) can only be invalidated by the app's own writes — the suite
+  wipes + reseeds + restarts the app per verifier, which the offline half does not need but the live half
+  assumes.
 
 - `scripts/suite-all.mjs` — the suite runner, now IN the repository. The earlier runs were driven by a
   wrapper in a temp directory, which is exactly why `BASE`/`BASE_URL` never reached

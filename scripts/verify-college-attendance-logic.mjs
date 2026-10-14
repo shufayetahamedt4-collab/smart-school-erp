@@ -32,9 +32,11 @@
  *      machine decides who may be marked and who may be billed").
  *   7. THE NOTIFY DECISION (D-CA-3) — the full transition table, including a
  *      re-saved absence and a corrected register.
- *   8. SCOPE — no route, page or component consumes it yet (ca-3/ca-4 own the
- *      consumers; add them HERE deliberately), and the school's own attendance
- *      path never reaches for it.
+ *   8. SCOPE — the consumers, named. ca-3 (2026-10-14) built the register's API,
+ *      so the "no consumer yet" pin became the exact set: the register route, the
+ *      history route and their server wrapper, and nothing else — a new consumer
+ *      (ca-4's screen among them) must be added HERE deliberately. The school's
+ *      own attendance path still never reaches for the module or the collection.
  *
  *   node scripts/verify-college-attendance-logic.mjs
  */
@@ -132,7 +134,38 @@ function maskCommentsAndStrings(text) {
 
 const code = maskCommentsAndStrings(moduleSource);
 
-/** Every file under the given dirs whose text imports the LOGIC module. */
+/**
+ * Blank out COMMENTS only — string literals are KEPT, because an import
+ * specifier lives in one and a file that merely NAMES the module in a comment
+ * (db.ts's ca-2 note does) is not a consumer.
+ */
+function stripComments(text) {
+  const out = text.split("");
+  const blank = (i) => {
+    if (out[i] !== "\n") out[i] = " ";
+  };
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === "/" && next === "/") {
+      while (i < text.length && text[i] !== "\n") blank(i++);
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      blank(i++);
+      blank(i++);
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) blank(i++);
+      blank(i++);
+      blank(i++);
+      continue;
+    }
+    i += 1;
+  }
+  return out.join("");
+}
+
+/** Every file under the given dirs whose CODE imports the LOGIC module. */
 function findConsumers(dirs) {
   const hits = [];
   const walk = (dir) => {
@@ -146,10 +179,13 @@ function findConsumers(dirs) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (/\.(ts|tsx)$/.test(entry.name)) {
-        const text = readFileSync(full, "utf8");
+        const rel = full.slice(ROOT.length + 1).replace(/\\/g, "/");
+        // The module is never its own consumer.
+        if (rel === "src/lib/college-attendance.ts") continue;
+        const text = stripComments(readFileSync(full, "utf8"));
         // `college-attendance-access` is a DIFFERENT module (ca-0) — never match it.
         if (/college-attendance(?!-access)/.test(text)) {
-          hits.push(full.slice(ROOT.length + 1).replace(/\\/g, "/"));
+          hits.push(rel);
         }
       }
     }
@@ -478,13 +514,28 @@ console.log("\n7. the notify decision (D-CA-3) — only a NEW absence today");
 
 /* -------------------------------------------------------------------- 8. scope */
 
-console.log("\n8. scope — no route/page/component consumer yet, and no school path");
+console.log("\n8. scope — the consumers are exactly the ca-3 surface, and no school path");
 {
-  const consumers = findConsumers(["src/app", "src/components"]);
+  // ca-3 (2026-10-14) built the register's API, so ca-1's "no consumer yet" pin
+  // became the exact consumer set: the two route files and the ONE server
+  // wrapper they share (which also records the row through the derived id). A
+  // new consumer — the ca-4 screen among them — must be added HERE deliberately.
+  const consumers = findConsumers(["src/app", "src/components", "src/lib"]).sort();
+  const WANT_CONSUMERS = [
+    "src/app/api/course-attendance/history/route.ts",
+    "src/app/api/course-attendance/route.ts",
+    "src/lib/college-attendance-server.ts",
+  ];
+  const missingConsumer = WANT_CONSUMERS.filter((f) => !consumers.includes(f));
+  const extraConsumer = consumers.filter((f) => !WANT_CONSUMERS.includes(f));
   check(
-    "no route, page or component consumes the logic yet (ca-3/ca-4 own the consumers; add them HERE deliberately)",
-    consumers.length === 0,
-    consumers.join(", ") || "the module exists alone, exactly as ca-1 requires"
+    "the consumers are exactly the ca-3 surface — the register route, the history route and their server wrapper (ca-4 adds the screen HERE deliberately)",
+    missingConsumer.length === 0 && extraConsumer.length === 0,
+    extraConsumer.length
+      ? `unexpected consumer(s): ${extraConsumer.join(", ")}`
+      : missingConsumer.length
+        ? `missing consumer(s): ${missingConsumer.join(", ")}`
+        : consumers.join(", ")
   );
 
   const schoolRoute = readFileSync(resolve(ROOT, "src/app/api/attendance/route.ts"), "utf8");

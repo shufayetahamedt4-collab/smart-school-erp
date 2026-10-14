@@ -50,10 +50,13 @@
  *   7. THE MODEL IS REACHABLE ONLY FROM A LISTED COLLEGE SEGMENT. 7b builds no
  *      route, so no route may reach the models yet; when 7c adds the API it must
  *      live inside a LISTED college segment (check 3 keeps it there).
- *   8. THE SEGMENT LANDS WITH ITS DIRECTORY (7c). `COLLEGE_API_SEGMENTS` holds
- *      the six pre-7b segments plus `college-fees`, and `src/app/api/college-fees`
- *      exists — both added in the one change that created the directory (§8 D-A).
- *      A listed segment with no directory (or the reverse) still fails here.
+ *   8. EVERY LATER SEGMENT LANDS WITH ITS DIRECTORY (7c; re-scoped by ca-3).
+ *      `COLLEGE_API_SEGMENTS` holds the six pre-7b segments plus the segments a
+ *      later phase added — `college-fees` (7c) and `course-attendance` (ca-3) —
+ *      and BOTH directories exist: each entry landed in the one change that
+ *      created its routes (§8 D-A). A listed segment with no directory (or the
+ *      reverse) still fails here. ca-2 deliberately deferred its entry to ca-3
+ *      rather than list a segment the tree did not have yet.
  *   9. THE GUARD COVERS THE NEW MODELS. `verify-college-routes.mjs`'s
  *      `COLLEGE_MODEL_RE` includes all four — and 7c's `collegeDiscount`
  *      (a strengthening: no allowlist, no relaxed check) — and `college-routes.ts`
@@ -633,11 +636,14 @@ console.log("\n7. the models are reachable only from a listed college segment �
 
 /* ------------------------------------------------------------------------ 8 */
 
-console.log("\n8. the segment lands WITH its directory — 7c adds both in one change (§8 D-A)");
+console.log("\n8. every later segment lands WITH its directory — 7c added one, ca-3 re-scoped this check when it added the second (§8 D-A)");
 {
   const listed = [...segments.COLLEGE_API_SEGMENTS];
-  const dirExists = existsSync(fileURLToPath(new URL("../src/app/api/college-fees", import.meta.url)));
-  const expected = [...PRE_7B_SEGMENTS, "college-fees"];
+  const laterSegments = ["college-fees", "course-attendance"];
+  const missingDir = laterSegments.filter(
+    (seg) => !existsSync(fileURLToPath(new URL(`../src/app/api/${seg}`, import.meta.url)))
+  );
+  const expected = [...PRE_7B_SEGMENTS, ...laterSegments];
   const keptPre = PRE_7B_SEGMENTS.every((s) => listed.includes(s));
   const guardPinsStale = /staleSegments/.test(guardText);
   if (!guardPinsStale)
@@ -647,13 +653,16 @@ console.log("\n8. the segment lands WITH its directory — 7c adds both in one c
   else if (listed.length !== expected.length || !expected.every((s) => listed.includes(s)))
     bad(
       "segment",
-      `COLLEGE_API_SEGMENTS is ${JSON.stringify(listed)}, expected the six pre-7b segments plus "college-fees" ${JSON.stringify(expected)}`
+      `COLLEGE_API_SEGMENTS is ${JSON.stringify(listed)}, expected the six pre-7b segments plus the later phases' ${JSON.stringify(laterSegments)} ${JSON.stringify(expected)}`
     );
-  else if (!dirExists)
-    bad("segment", "src/app/api/college-fees is listed but the directory does not exist — check 1 would fail it as a stale segment");
+  else if (missingDir.length)
+    bad(
+      "segment",
+      `${missingDir.join(", ")} is listed but its directory does not exist under src/app/api — check 1 would fail it as a stale segment`
+    );
   else
     ok(
-      `COLLEGE_API_SEGMENTS holds the six pre-7b segments plus "college-fees" (${listed.length}), and src/app/api/college-fees exists — the directory and its entry landed in one change (§8 D-A)`
+      `COLLEGE_API_SEGMENTS holds the six pre-7b segments plus ${JSON.stringify(laterSegments)} (${listed.length}), and every later segment's directory exists — each entry landed in the change that created its routes (§8 D-A; ca-2 deferred the entry to ca-3 for exactly this reason)`
     );
 }
 
@@ -799,7 +808,7 @@ console.log(
   `✅ COLLEGE FEES DATA LAYER OK — ${checks} check(s): the four college fee collections are registered in ` +
     `COLS/RELS/prisma as a purely additive change (the four recorded pre-7b baselines, RELS bodies included, still ` +
     `reproduce), the school fee spine is untouched and reachable from no college fee read, no derived-id entry makes a ` +
-    `duplicate silent, no non-college route reaches the models, the college-fees segment and its directory landed together, the ` +
+    `duplicate silent, no non-college route reaches the models, every later college segment (college-fees, course-attendance) landed together with its directory, the ` +
     `route guard covers every college fee model (7b's four plus 7c's collegeDiscount), the ledger's readers are exactly the ` +
     `audited ones, and the college entry in that shared ledger is tagged with feeId null + meta.collegeFeeId and writes no ` +
     `school payment row.`

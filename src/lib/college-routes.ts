@@ -48,6 +48,13 @@
 // separate segment from the school's `/api/fees*` because the two modes' money
 // must never mix in a read (D-7-12, Q3) and because check 3 forbids a school fee
 // file from reaching a college fee model at all (7b's `verify-college-fees-data`).
+// Phase 8 ca-3 (§29) adds `course-attendance` the same way, in the change that
+// creates `src/app/api/course-attendance` — the per-course register (roster read,
+// session save, per-student history; D-CA-1…D-CA-3). ca-2 deliberately DEFERRED
+// this entry to ca-3, because the list and the tree move together: a listed
+// segment with no directory fails this guard, so the entry lands with the
+// directory that owns it, exactly as `course-results` did in 6c and
+// `college-fees` did in 7c.
 export const COLLEGE_API_SEGMENTS = [
   "departments",
   "programs",
@@ -56,6 +63,7 @@ export const COLLEGE_API_SEGMENTS = [
   "college-promotion",
   "course-results",
   "college-fees",
+  "course-attendance",
 ] as const;
 
 export type CollegeApiSegment = (typeof COLLEGE_API_SEGMENTS)[number];

@@ -20,12 +20,12 @@
  *   4. WHY IT EXISTS — the school's module WOULD admit TEACHER/GUARDIAN/STUDENT;
  *      this rule refuses all three (proved against `permissions.ts`).
  *   5. THE REFUSALS — the two sentences a caller renders.
- *   6. SCOPE — no consumer yet and no school path touched. ca-0 pinned that
- *      db.ts carried no `courseAttendance` collection; ca-2 (2026-10-14) added
- *      it, so that pin is REMOVED here with the change that owns it (§28), and
- *      what stays is the boundary that matters: this rule still has no consumer
- *      and the school's own attendance path still never reaches the college
- *      register (ca-3/ca-4 own the consumers).
+ *   6. SCOPE — the consumers, named. ca-0 pinned that db.ts carried no
+ *      `courseAttendance` collection; ca-2 (2026-10-14) added it, so that pin was
+ *      REMOVED with the change that owns it (§28). ca-3 (2026-10-14) built the
+ *      register's API, so the "no consumer yet" pin is replaced by the exact
+ *      consumer set — the ca-3 server wrapper, and nothing else (§29) — and the
+ *      school's own attendance path still never reaches the college register.
  *
  *   node scripts/verify-college-attendance-access.mjs
  *
@@ -287,11 +287,24 @@ console.log("\n5. the refusals name who may act");
 
 console.log("\n6. scope — no consumer, and no school path touched (ca-2 removed ca-0's db pin)");
 {
+  // ca-3 (2026-10-14) built the register's API, so the rule has exactly ONE
+  // consumer: the server wrapper both route files go through (the
+  // college-results-server / college-fees-server pattern this module's header
+  // names). A SECOND consumer — a route that imported the rule directly, a page,
+  // a print page — must be added HERE deliberately, so the boundary stays a
+  // decision instead of an accident.
   const consumers = findConsumers();
+  const WANT_CONSUMERS = ["src/lib/college-attendance-server.ts"];
+  const missingConsumer = WANT_CONSUMERS.filter((f) => !consumers.includes(f));
+  const extraConsumer = consumers.filter((f) => !WANT_CONSUMERS.includes(f));
   check(
-    "no route, page or lib file consumes the rule yet (ca-3/ca-4 own the consumers; add them HERE deliberately)",
-    consumers.length === 0,
-    consumers.join(", ") || "the rule exists alone, exactly as ca-0 requires"
+    "the rule's ONE consumer is the ca-3 server wrapper — no route, page or lib reaches it another way (add a consumer HERE deliberately)",
+    missingConsumer.length === 0 && extraConsumer.length === 0,
+    extraConsumer.length
+      ? `unexpected consumer(s): ${extraConsumer.join(", ")}`
+      : missingConsumer.length
+        ? `the wrapper no longer consumes the rule: ${missingConsumer.join(", ")}`
+        : consumers.join(", ")
   );
 
   const schoolRoute = readFileSync(resolve(ROOT, "src/app/api/attendance/route.ts"), "utf8");

@@ -2511,3 +2511,129 @@ consumer** — the register itself is ca-3…ca-6.
 - **What ca-2 is not.** No `COLLEGE_API_SEGMENTS` entry (ca-3), no roster/session/history route
   (ca-3), no register screen or nav entry (ca-4), no notification, no fixture row, no consumer of
   `college-attendance.ts` anywhere under `src/`. The register itself is still unbuilt.
+---
+
+## 29. Phase 8 ca-3 — the college attendance API (BUILT 2026-10-14)
+
+**Stage: ca-3 of D-CA-7's six attendance steps** (owner's answers Q7/Q8), on the branch
+`phase8/college-attendance`. ca-0 stated who may act (§26), ca-1 stated the rules (§27), ca-2 put the
+model in the store (§28); ca-3 turns those three into the register's HTTP surface — and only that.
+No screen, no nav entry, no family-facing read (those are ca-4…ca-6).
+
+**What ca-3 adds.** Three operations over ONE listed segment, `src/app/api/course-attendance`:
+
+- `GET /api/course-attendance?courseId=&date=&slot=` — the **roster read**. The course's APPROVED
+  registrations are resolved SERVER-SIDE (D-CA-2: a client-sent student list cannot widen them) and
+  each student is served with their stored status for that session, or `UNMARKED` when no row exists
+  yet; the slot defaults to 1 (Q7 — a second session of the same course on the same day is a
+  different register). The response also carries the course, the `dateKey`, the slot and counts.
+- `POST /api/course-attendance` — the **session save**. `{ courseId, date, slot, rows: [{ studentId,
+  status, remark }] }`. Every row is addressed by the derived id
+  `ca_<courseId>_<dateKey>_<slot>_<studentId>` (D-CA-1), so a re-saved or corrected register UPSERTS
+  one row per student instead of appending; `UNMARKED` is skipped, never stored (the placeholder is
+  read-only, exactly as the school's own register filters it).
+- `GET /api/course-attendance/history?courseId=&studentId=` — one student's **per-session history**
+  in one course, in (date, slot) order, read-only.
+
+**The guard order, per route.** session → 401 · target tenant (`targetSchoolId`) → 400 ·
+`requireCollege(schoolId)` → 403 (the FIRST authorization check, on the TARGET tenant) · the ca-0
+allow-list → 403 · parameters → 400 · `writeGuard(schoolId)` on the SAVE only → 402 · the course
+(and, on history, the student) IN THIS TENANT and in a branch the caller may reach → else **404** ·
+validate every row → one `$transaction` → audit, cache invalidation and the new-absence notify.
+`verify-college-routes.mjs` sweeps every college route file and now counts **25 route files / 53
+gated handlers** (23/50 at ca-2; this stage's two files and three handlers).
+
+- **A foreign or another branch's id is NOT FOUND — never a 403 that would confirm it exists.** The
+  same applies to the history route's student, and the API assertion is the live proof: a ghost
+  course, the BOTH tenant's course, a ghost student and the BOTH tenant's student all answer 404,
+  while a BRANCH_ADMIN reaches its own branch's course and is 404 on the other branch's.
+
+**The save's two promises, and how the proof measures them.**
+
+- **The whole request is validated BEFORE any write.** An off-roster student (no APPROVED
+  registration), an unknown status and a student named twice are each refused by name, and a request
+  carrying one bad row writes NOTHING — including the valid rows beside it. The live proof sends the
+  mixed request and then re-reads the stored row and the collection count: the register's row is
+  still the previous status and the count is unchanged.
+- **One session is one row per student.** The id is the identity (`upsert({ where: { id } })`, inside
+  ONE `prisma.$transaction`), so a re-save cannot double-write. Proven live by re-saving and
+  bracketing the collection's document count around both saves.
+
+**D-CA-3 — only a NEW absence notifies, through the existing path.** The save compares each row
+against the row it replaces (`shouldNotifyAbsence`, ca-1's rule) and, for the students whose absence
+is new, calls the SCHOOL's own `notifyGuardianOfStudent` (the parent-notification path) —
+fire-and-forget, no external push (`push` is never set: a device token is a later decision, and no
+real message may be sent from a test). The copy is D-CA-3's one legitimate difference from the
+school's register: it names the COURSE and the SLOT instead of a class. It carries **no link**,
+because no family-facing page exists yet — the register screen is ca-4 and is staff-facing. The proof
+reads the notification ROWS: a first absence writes exactly one; re-saving the same absence writes
+none; correcting ABSENT to LATE writes none (and stores the correction); a second slot's new absence
+writes its own. It deletes those rows on the way out; nothing was sent.
+
+**The segment lands now, in the change that creates its directory — ca-2's deferral discharged.**
+`COLLEGE_API_SEGMENTS` in `src/lib/college-routes.ts` gains `course-attendance`, and
+`src/app/api/course-attendance` exists in the same change (the rule `verify-college-routes` check 1
+enforces and ca-2 recorded in §28). `verify-college-fees-data` check 8 was re-scoped from "the list
+plus `college-fees`" to a `laterSegments` list (`college-fees`, `course-attendance`) whose every
+member must have its directory: **no other check was weakened** (the list's exact contents, the six
+pre-7b segments, the pre-7b baselines and the guard's own segment set are still pinned), and the
+re-scope is exactly the "add it HERE deliberately" move ca-2's note anticipated.
+
+**NO composite index is needed — stated because the opposite would be a silent production failure.**
+Every query the register makes is SCALAR EQUALITY on one or two fields
+(`courseAttendance`: `schoolId` + `courseId`, and `schoolId` + `courseId` + `studentId` for history;
+`courseRegistration`: `schoolId` + `courseId`; the students by id set) — exactly the shape Firestore
+serves from single-field indexes. The session filter (dateKey + slot) is applied IN MEMORY on the
+course's own rows, which is what keeps the day/slot pair out of the index surface entirely.
+`firestore.indexes.json` is untouched and the verifier pins that no `courseAttendance` field appears
+in it; the module and the route file both say so, so a later consolidation into a server-side query
+must add the index in the same change that needs it.
+
+**The scope pins ca-0 and ca-1 wrote are replaced with the exact consumer set, with the reason
+recorded.** ca-0 pinned "no file under `src/` consumes the allow-list"; ca-1 pinned "no route, page or
+component consumes the logic". Both were true only until the API existed, so both now name the
+consumers and FAIL on anything else: the allow-list's ONE consumer is
+`src/lib/college-attendance-server.ts` (the wrapper both routes go through), and the logic's
+consumers are exactly the two route files plus that wrapper. A new consumer — ca-4's register screen
+among them — must be added to those lists DELIBERATELY. Nothing else in either proof moved: the
+allow-lists, the refusal sentences, the id/slot/status rules, the roster machine, the notify
+transition table and the school-path boundary are all still pinned (17 and 31 checks, unchanged).
+
+**The proof, and the numbers.** `scripts/verify-course-attendance.mjs` (**46 checks**, new) is an
+offline+live verifier, wired into `suite-all.mjs` with the college group. Its offline half imports
+the two pure modules and reads the tree as text (guard order per handler, the write gate before the
+roster, the derived id + `upsert` + ONE `$transaction` with the validation loop before it, the
+`UNMARKED` skip, the 404 confinement, the notify wiring, the audit + cache invalidation, the
+segment/directory pair, the `idFor` absence, the index statement). Its live half runs from a CLEAN
+state — emulator wiped, `setup`, `seed`, `seed-kit-demo`, `isolation-fixture create`, the app
+restarted after the wipe — against the college fixture tenant: every role × read/write (the platform
+SUPER_ADMIN's `?schoolId=` read and mark included; LIBRARIAN and FRONT_DESK hold no fixture account,
+so their refusal is the ca-0 truth table's — every role × direction, offline — rather than a live
+login, and the live half is what proves the ROUTE applies that rule), the roster,
+the save and its idempotence, the slot-in-the-key, the whole-request atomicity, the empty-roster
+course, tenant + branch 404s, the history, and the new-absence-only notify, all bracketed by document
+counts, with the run's own students/registrations/rows/notifications deleted on the way out (the
+fixture's rows are never mutated: the run writes its own `zzcta-…` documents raw and deletes exactly
+those). Result: **46/46, exit 0**.
+
+Recorded counts after ca-3: `verify-course-attendance` **45** (new), `verify-course-teachers` **54**
+unchanged, `verify-college-attendance-access` **17** unchanged, `verify-college-attendance-logic`
+**31** unchanged, `verify-college-fees-data` **11** (check 8 re-scoped, no other check weakened),
+`verify-college-results-data` **8** unchanged, `verify-college-routes` **25 route files / 53 gated
+handlers** (23/50 at ca-2), `verify-nav-scope` exit 0 (snapshot byte-identical — no nav entry),
+`verify-college-permissions` **8** unchanged, `tsc --noEmit` **0 errors**. `suite-all.mjs` was NOT
+run (the stage's rule); the eight verifiers above were run individually, and the two server-backed
+ones each got their own wipe + seed + fixture + app restart.
+
+**One limitation, recorded rather than glossed.** The live half writes its students and registrations
+directly into the emulator, and the app serves Firestore reads from an in-process pull memo
+(`src/lib/db.ts`, 30 s + 120 s of stale-while-revalidate) that only the APP's own writes can
+invalidate. So the verifier is **run once per app start**, exactly like `verify-college-fees-api`:
+re-running it against the SAME app process can read the previous run's deleted rows out of that memo
+(this was observed and is why the final proof restarts the app). `suite-all.mjs` already
+wipes + reseeds + restarts the app per server-backed verifier, so the suite order is unaffected.
+
+**What ca-3 is not.** No register screen, no nav entry, no guardian/student read of their own child's
+register (§24.8 keeps v1 staff-only per Q8), no bulk import of a register, no real push notification,
+and no change to the school's own `/api/attendance`, `attendanceMarks` or any school fee read. The
+register's screens and the family-facing read remain ca-4…ca-6.

@@ -5,7 +5,7 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** GitHub — `github.com/shufayetahamedt4-collab/smart-school-erp` (any clone works — see "Working from a different PC/device" below)
-**Last updated:** 2026-10-14 — **college Phase 7 is FINISHED AND COMMITTED** (fee basis: logic 7a, data 7b, API 7c, screens + print pages 7d, isolation/Q3 7e, finished record + production-build role probe 7f) on `integration/main-into-college` (`f542405` code + verifiers, `efb97c0` docs, the evidence records in `946e4e3`), where the school and college lines are merged; production still runs on `smart-school-db` (asia-southeast1), and its **live branch is `main`** (`f4ed2a5`). Nothing is left uncommitted but ignored artifacts. **Phase 8 has started on `phase8/college-attendance`**: `8-pre` (the course↔teacher link), **ca-0** (the college attendance allow-list) and **ca-1** (the pure attendance logic) are built and verified there; the data layer (ca-2…ca-6) is next. The newest session record is the **2026-10-14 ca-1** block at the bottom of this file.
+**Last updated:** 2026-10-14 — **college Phase 7 is FINISHED AND COMMITTED** (fee basis: logic 7a, data 7b, API 7c, screens + print pages 7d, isolation/Q3 7e, finished record + production-build role probe 7f) on `integration/main-into-college` (`f542405` code + verifiers, `efb97c0` docs, the evidence records in `946e4e3`), where the school and college lines are merged; production still runs on `smart-school-db` (asia-southeast1), and its **live branch is `main`** (`f4ed2a5`). Nothing is left uncommitted but ignored artifacts. **Phase 8 has started on `phase8/college-attendance`**: `8-pre` (the course↔teacher link), **ca-0** (the college attendance allow-list), **ca-1** (the pure attendance logic), **ca-2** (the `courseAttendance` data layer) and **ca-3** (the register's API: roster read, session save, per-student history) are built and verified there; the register's screens and its family-facing read (ca-4…ca-6) are next. The newest session record is the **2026-10-14 ca-3** block at the bottom of this file.
 
 ---
 
@@ -600,3 +600,52 @@ No route, page, nav entry, fixture row or consumer — those are ca-3/ca-4.
    **8**, `verify-nav-scope` exit 0 (snapshot byte-identical), `verify-college-routes` **23/50** (no
    route added), `npx tsc --noEmit` 0 errors. `suite-all.mjs`, the emulator and the server were NOT run:
    ca-2 has no HTTP surface.
+---
+
+## 🔁 Session — 2026-10-14 (Phase 8 ca-3: the college attendance API)
+
+**Code + verifier + records.** ca-3 is D-CA-7's API step for the college register: the roster read, the
+session save and the per-student history, plus the segment entry ca-2 deferred. No screen, no nav entry,
+no family-facing read (ca-4…ca-6).
+
+1. **The three operations** — `src/lib/college-attendance-server.ts` (the shared wrapper: `targetSchoolId`,
+   `requireCollegeAttendanceRead/Write` over ca-0's rule, the session-date reader, the roster machine over
+   ca-1's `approvedRosterStudentIds`, the stored-session map and the summary) and two route files:
+   `GET/POST /api/course-attendance` (the register and its save) and
+   `GET /api/course-attendance/history` (one student's sessions in one course). Every handler runs the
+   college guard order — session → target tenant → `requireCollege` → the ca-0 allow-list → parameters →
+   `writeGuard` (save only) → the course/student in-tenant and in-branch (else **404**, never a 403) —
+   and `verify-college-routes` now counts **25 route files / 53 gated handlers** (was 23/50).
+2. **The save's promises are measured, not asserted** — the derived id
+   `ca_<courseId>_<dateKey>_<slot>_<studentId>` is the identity (`upsert({ where: { id } })` inside ONE
+   `prisma.$transaction`), every row is validated BEFORE any write (off-roster student, unknown status,
+   duplicate student → 400 by name, and a mixed request writes NOTHING), `UNMARKED` is skipped, and the
+   slot is IN the key (a second session the same day is a second register). D-CA-3: only a NEW absence
+   notifies, through the school's own `notifyGuardianOfStudent`, fire-and-forget, with the copy naming
+   the course and the slot and **no link** (no family page exists yet); no real message is ever sent —
+   the proof reads the notification rows.
+3. **The segment landed with its directory** — `COLLEGE_API_SEGMENTS` gains `course-attendance` in the
+   change that creates `src/app/api/course-attendance` (ca-2's recorded deferral, §28 → §29), and
+   `verify-college-fees-data` check 8 was re-scoped to a `laterSegments` list (`college-fees`,
+   `course-attendance`) with every other check intact — **11** checks, exit 0. ca-0's and ca-1's
+   "no consumer yet" scope pins are replaced by the exact consumer set (the wrapper; the two routes plus
+   the wrapper) with the reason recorded, and nothing else in those proofs moved (**17** / **31** checks).
+4. **No composite index** — every query is scalar equality on one or two fields; the session filter is
+   in memory, `firestore.indexes.json` is untouched, and the verifier pins that no `courseAttendance`
+   field appears there.
+5. **The proof** — `scripts/verify-course-attendance.mjs` (**46 checks**, new, wired into `suite-all.mjs`):
+   offline tree pins plus a live HTTP proof from a wiped emulator, `setup` + `seed` + `seed-kit-demo` +
+   `isolation-fixture create`, the app restarted after the wipe: every role × read/write (the platform
+   SUPER_ADMIN's `?schoolId=` read and mark included — its credentials come from `demo-accounts.ts`, no
+   password is written into the verifier), the roster, the
+   save and its idempotence, the slot, the whole-request atomicity, the empty-roster course, tenant +
+   branch 404s, the history and the new-absence-only notify — all bracketed by document counts, with the
+   run's own `zzcta-…` students/registrations/rows/notifications deleted on the way out and the fixture's
+   rows untouched. **46/46, exit 0.** It runs once per app start (like `verify-college-fees-api`): its
+   fixture rows are written raw, and the app's pull memo can only be invalidated by the app's own writes;
+   `suite-all.mjs` wipes + restarts per verifier, so the suite order is unaffected.
+6. **Unchanged beside it (2026-10-14):** `verify-course-teachers` **54**, `verify-college-attendance-access`
+   **17**, `verify-college-attendance-logic` **31**, `verify-college-results-data` **8**,
+   `verify-nav-scope` exit 0 (snapshot byte-identical), `verify-college-permissions` **8**,
+   `npx tsc --noEmit` 0 errors. `suite-all.mjs` was NOT run (the stage's rule); the eight verifiers were
+   run individually, the two server-backed ones each after their own wipe + seed + fixture + app restart.
