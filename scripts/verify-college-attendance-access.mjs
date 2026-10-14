@@ -23,9 +23,12 @@
  *   6. SCOPE — the consumers, named. ca-0 pinned that db.ts carried no
  *      `courseAttendance` collection; ca-2 (2026-10-14) added it, so that pin was
  *      REMOVED with the change that owns it (§28). ca-3 (2026-10-14) built the
- *      register's API, so the "no consumer yet" pin is replaced by the exact
- *      consumer set — the ca-3 server wrapper, and nothing else (§29) — and the
- *      school's own attendance path still never reaches the college register.
+ *      register's API, so the "no consumer yet" pin became the exact consumer set
+ *      — the ca-3 server wrapper, and nothing else (§29). ca-4 (2026-10-14) added
+ *      the register SCREEN, which this module's own design was waiting for (a pure
+ *      rule a CLIENT component may share), so the set is now the wrapper AND that
+ *      page — and the school's own attendance path still never reaches the college
+ *      register.
  *
  *   node scripts/verify-college-attendance-access.mjs
  *
@@ -287,18 +290,23 @@ console.log("\n5. the refusals name who may act");
 
 console.log("\n6. scope — no consumer, and no school path touched (ca-2 removed ca-0's db pin)");
 {
-  // ca-3 (2026-10-14) built the register's API, so the rule has exactly ONE
+  // ca-3 (2026-10-14) built the register's API, so the rule gained its first
   // consumer: the server wrapper both route files go through (the
   // college-results-server / college-fees-server pattern this module's header
-  // names). A SECOND consumer — a route that imported the rule directly, a page,
-  // a print page — must be added HERE deliberately, so the boundary stays a
-  // decision instead of an accident.
+  // names). ca-4 (2026-10-14) added the register SCREEN, which is the second and
+  // (for v1) last one — the page narrows its own view with the SAME rule the API
+  // wraps, exactly as the results page does. A THIRD consumer — a route that
+  // imported the rule directly, a print page — must be added HERE deliberately, so
+  // the boundary stays a decision instead of an accident.
   const consumers = findConsumers();
-  const WANT_CONSUMERS = ["src/lib/college-attendance-server.ts"];
+  const WANT_CONSUMERS = [
+    "src/lib/college-attendance-server.ts",
+    "src/app/dashboard/course-attendance/page.tsx",
+  ];
   const missingConsumer = WANT_CONSUMERS.filter((f) => !consumers.includes(f));
   const extraConsumer = consumers.filter((f) => !WANT_CONSUMERS.includes(f));
   check(
-    "the rule's ONE consumer is the ca-3 server wrapper — no route, page or lib reaches it another way (add a consumer HERE deliberately)",
+    "the rule's consumers are exactly the ca-3 server wrapper and the ca-4 register screen — no route, page or lib reaches it another way (add a consumer HERE deliberately)",
     missingConsumer.length === 0 && extraConsumer.length === 0,
     extraConsumer.length
       ? `unexpected consumer(s): ${extraConsumer.join(", ")}`

@@ -47,14 +47,28 @@
  *      by a stale `ss_mode` cookie.
  *   2. The college href list gained 7d's ONE new entry (`/dashboard/college-fees`,
  *      D-7-16) for a FOURTH role — the ACCOUNTANT, who holds the D-7-18 write
- *      allow-list and had to be able to reach the screens — so the marker product
- *      is 7 hrefs × 4 roles = 28. Check 9 is new: it asserts that the fee entry is
- *      carried by exactly the D-7-18 read allow-list roles that have a dashboard
- *      nav, and that a college-capable tenant in COLLEGE mode lists the college
- *      list and NOTHING else.
+ *      allow-list and had to be able to reach the screens. Check 9 is new: it
+ *      asserts that the fee entry is carried by exactly the D-7-18 read allow-list
+ *      roles that have a dashboard nav, and that a college-capable tenant in
+ *      COLLEGE mode lists the college list and NOTHING else.
  *   3. That one href is grouped in `finance` (it is money), so check 6 now asserts
  *      the EXACT group of every college href instead of "all of them are
  *      `academics`" — stricter, not looser.
+ *
+ * RECORDED BY PHASE 8 ca-4 (D-CA-7's ca-4 line, D-CA-4, §29/§30): the register's
+ * ONE new entry (`/dashboard/course-attendance`) re-states three things, never
+ * relaxes one: the college href list is now EIGHT; the marker product is
+ * 8 + 8 + 8 + 1 = 25 (the three college roles carry the full list, the ACCOUNTANT
+ * keeps the ONE money screen it holds a permission for — ca-0 refuses the accounts
+ * office the register, so the sidebar must not offer it); and its group is
+ * `academics` (attendance is academic work), asserted exactly like every other
+ * href. Check 10 is new and asserts the register is carried by exactly the ca-0
+ * READ roles that own a dashboard nav. **The FROZEN pre-Phase-1 snapshot is NOT
+ * re-recorded**: it holds the SCHOOL registry, the college items are stripped
+ * before every comparison against it (checks 3, 4 and 6) and check 3's school-only
+ * proof is what keeps a SCHOOL tenant's sidebar byte-identical — so a new COLLEGE
+ * item must leave it exactly as it is, which is what §25's D-8P-5 clause said and
+ * what the stage's "re-record the snapshot" wording would have broken.
  */
 
 import { readFileSync } from "node:fs";
@@ -102,6 +116,13 @@ const { COLLEGE_RESULTS_READ_ROLES } = await import("../src/lib/college-results-
 // API would refuse either way — the read rule and the write rule.
 const { COLLEGE_FEES_READ_ROLES, COLLEGE_FEES_WRITE_ROLES } = await import("../src/lib/college-fees-access.ts");
 
+// Phase 8 ca-4: the attendance register's OWN allow-list (ca-0). Check 10 asserts
+// the sidebar cannot offer the register to a role the API would refuse, and that
+// every role the API admits — and that owns a dashboard nav — can reach it.
+const { COLLEGE_ATTENDANCE_READ_ROLES, COLLEGE_ATTENDANCE_WRITE_ROLES } = await import(
+  "../src/lib/college-attendance-access.ts"
+);
+
 const SNAPSHOT = JSON.parse(
   readFileSync(new URL("./nav-scope-snapshot.json", import.meta.url), "utf8")
 );
@@ -119,26 +140,29 @@ const FROZEN_MOBILE_TABS = { TEACHER: 4 };
  *
  * Phase 6d appended `"/dashboard/college-results"`; Phase 7d appended
  * `"/dashboard/college-fees"` and the fourth role (`ACCOUNTANT` — a D-7-18
- * writer who must reach the screens), so the product is 7 hrefs x 4 roles = 28
- * markers. Nothing here was relaxed: the school-output proof in checks 3 and 4
+ * writer who must reach the screens); Phase 8 ca-4 appended the attendance
+ * register. The marker product is computed from `COLLEGE_MARKS` below, asserted
+ * exactly. Nothing here was relaxed: the school-output proof in checks 3 and 4
  * compares against the FROZEN pre-Phase-1 snapshot, which contains none of these
  * hrefs, so a SCHOOL tenant's navigation is still asserted byte-identical for
  * every role and mode.
  */
-const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses", "/dashboard/registration", "/dashboard/college-promotion", "/dashboard/college-results", "/dashboard/college-fees"];
+const COLLEGE_HREFS = ["/dashboard/departments", "/dashboard/programs", "/dashboard/courses", "/dashboard/registration", "/dashboard/college-promotion", "/dashboard/college-results", "/dashboard/course-attendance", "/dashboard/college-fees"];
 
 /**
  * WHICH college hrefs each role carries — the marker map, and the definition of
  * "a college item" for checks 3, 4 and 6.
  *
- * The three college-facing roles carry all seven (they are the catalogue,
- * registration, promotion, results and fee screens' own users). The ACCOUNTANT
- * carries the ONE money screen: D-7-18 makes the accounts office a college fee
- * WRITER, while it holds no `programs`/`courses`/`registration`/`attendanceMarks`
- * permission at all — so the other six screens are refused by the API and must
- * not be offered. `COLLEGE_ROLES` is therefore the four roles that carry at least
- * one college item, and the product below is 7 + 7 + 7 + 1 = 22 markers, asserted
- * exactly (a stray marker, or a missing one, fails loudly).
+ * The three college-facing roles carry all eight (they are the catalogue,
+ * registration, promotion, results, attendance and fee screens' own users). The
+ * ACCOUNTANT carries the ONE money screen: D-7-18 makes the accounts office a
+ * college fee WRITER, while it holds no `programs`/`courses`/`registration`/
+ * `attendanceMarks` permission at all — so the other screens are refused by the
+ * API and must not be offered (ca-0 refuses the accounts office the attendance
+ * register in BOTH directions, so the register entry is not offered either).
+ * `COLLEGE_ROLES` is therefore the four roles that carry at least one college
+ * item, and the product below is 8 + 8 + 8 + 1 = 25 markers, asserted exactly (a
+ * stray marker, or a missing one, fails loudly).
  */
 const COLLEGE_MARKS = {
   SCHOOL_ADMIN: COLLEGE_HREFS,
@@ -662,6 +686,63 @@ console.log("\n9. the college FEE entry is offered ONLY to the roles v1 lets rea
       `${HREF} is carried by exactly ${carriers.join(", ")} — every one of them on the v1 read allow-list ` +
         `(${COLLEGE_FEES_READ_ROLES.join(", ")}), no TEACHER, GUARDIAN or STUDENT lists it in any mode, and a ` +
         `college-capable tenant in COLLEGE mode shows it with no school item beside it`
+    );
+}
+
+/* ----------------------------------------------------------------------- 10 */
+
+console.log("\n10. the college ATTENDANCE entry is offered ONLY to the roles ca-0 lets read it (ca-4)");
+{
+  // The read allow-list is the API's own (`src/lib/college-attendance-access.ts`),
+  // so this check fails the moment the sidebar and the API disagree. SUPER_ADMIN is
+  // on the API list but has no /dashboard nav at all (its registry entry is the
+  // platform console), so it is expected to carry no college item.
+  const allowed = new Set(COLLEGE_ATTENDANCE_READ_ROLES);
+  const HREF = "/dashboard/course-attendance";
+  const carriers = SNAPSHOT.roles.filter((role) => (NAVS[role] || []).some((i) => i.href === HREF));
+  const deniedRoles = ["TEACHER", "GUARDIAN", "STUDENT", "ACCOUNTANT", "LIBRARIAN", "FRONT_DESK"];
+  let problem = null;
+
+  // Every carrier must be a role the API lets READ the register…
+  const offenders = carriers.filter((role) => !allowed.has(role));
+  if (offenders.length) problem = `the sidebar offers ${HREF} to ${offenders.join(", ")}, which ca-0 denies`;
+  // …a REGISTRAR must keep it (read-only v1 access — never a save: the entry is the
+  // READ face, and ca-0 keeps the WRITE list to the admin-level roles)…
+  if (!problem && !carriers.includes("REGISTRAR")) problem = `REGISTRAR lost ${HREF}`;
+  if (!problem && carriers.includes("REGISTRAR") && COLLEGE_ATTENDANCE_WRITE_ROLES.includes("REGISTRAR"))
+    problem = "ca-0's WRITE list admits the REGISTRAR — the register's read-only ruling (D-CA-4) is broken";
+  // …every role that may WRITE the register and has a dashboard nav must be able to
+  // reach it, or a marker who cannot find the screen is a defect…
+  if (!problem) {
+    const unreachable = collegeReadersOf(COLLEGE_ATTENDANCE_WRITE_ROLES).filter((role) => !carriers.includes(role));
+    if (unreachable.length) problem = `${unreachable.join(", ")} may mark a register but cannot reach ${HREF}`;
+  }
+  // …and no denied role may carry it, in any mode (a TEACHER is linked to the course
+  // by 8-pre and STILL refused in v1 — D-CA-4/D-8P-5, ca-0's own ruling).
+  for (const role of deniedRoles) {
+    if (problem) break;
+    if (carriers.includes(role)) problem = `${role} carries ${HREF}`;
+    else {
+      for (const [type, mode] of [
+        ["COLLEGE", "COLLEGE"],
+        ["BOTH", "COLLEGE"],
+      ]) {
+        if (navForRole(role, type, mode).some((i) => i.href === HREF)) {
+          problem = `${role} ${type}/${mode} lists ${HREF}`;
+          break;
+        }
+      }
+    }
+  }
+  // A SUPER_ADMIN has no dashboard nav, so it must NOT carry it.
+  if (!problem && carriers.includes("SUPER_ADMIN")) problem = "SUPER_ADMIN carries a dashboard college item";
+
+  if (problem) bad("attendance entry", problem);
+  else
+    ok(
+      `${HREF} is carried by exactly ${carriers.join(", ")} — every one of them on ca-0's read allow-list ` +
+        `(${COLLEGE_ATTENDANCE_READ_ROLES.join(", ")}); the ACCOUNTANT, TEACHER, GUARDIAN, STUDENT, LIBRARIAN ` +
+        `and FRONT_DESK list it in no mode, and the REGISTRAR keeps it read-only`
     );
 }
 

@@ -34,9 +34,13 @@
  *      re-saved absence and a corrected register.
  *   8. SCOPE — the consumers, named. ca-3 (2026-10-14) built the register's API,
  *      so the "no consumer yet" pin became the exact set: the register route, the
- *      history route and their server wrapper, and nothing else — a new consumer
- *      (ca-4's screen among them) must be added HERE deliberately. The school's
- *      own attendance path still never reaches for the module or the collection.
+ *      history route and their server wrapper. ca-4 (2026-10-14) added the
+ *      register SCREEN, which reads this module's vocabulary through
+ *      `src/lib/college-attendance-view.ts` (the pure view module, whose ONE
+ *      import is this module) — so the set is now the two routes, the wrapper and
+ *      that view module, and a further consumer must be added HERE deliberately.
+ *      The school's own attendance path still never reaches for the module or the
+ *      collection.
  *
  *   node scripts/verify-college-attendance-logic.mjs
  */
@@ -183,8 +187,12 @@ function findConsumers(dirs) {
         // The module is never its own consumer.
         if (rel === "src/lib/college-attendance.ts") continue;
         const text = stripComments(readFileSync(full, "utf8"));
-        // `college-attendance-access` is a DIFFERENT module (ca-0) — never match it.
-        if (/college-attendance(?!-access)/.test(text)) {
+        // Two neighbours share the name and are NOT this module: `college-attendance-access`
+        // (ca-0's rule) and `college-attendance-view` (ca-4's screen decisions, which
+        // imports THIS module and is listed in WANT_CONSUMERS by name). A file importing
+        // either is not reaching the logic directly — the view module is where ca-4's
+        // screen consumes the vocabulary, and that is the entry recorded below.
+        if (/college-attendance(?!-access|-view)/.test(text)) {
           hits.push(rel);
         }
       }
@@ -518,18 +526,22 @@ console.log("\n8. scope — the consumers are exactly the ca-3 surface, and no s
 {
   // ca-3 (2026-10-14) built the register's API, so ca-1's "no consumer yet" pin
   // became the exact consumer set: the two route files and the ONE server
-  // wrapper they share (which also records the row through the derived id). A
-  // new consumer — the ca-4 screen among them — must be added HERE deliberately.
+  // wrapper they share (which also records the row through the derived id).
+  // ca-4 (2026-10-14) added the register screen, and the screen reaches this
+  // module the way ca-1's header intended — through the pure view module, so the
+  // status words, the save payload and the slot parser are decided once. A further
+  // consumer must be added HERE deliberately.
   const consumers = findConsumers(["src/app", "src/components", "src/lib"]).sort();
   const WANT_CONSUMERS = [
     "src/app/api/course-attendance/history/route.ts",
     "src/app/api/course-attendance/route.ts",
     "src/lib/college-attendance-server.ts",
+    "src/lib/college-attendance-view.ts",
   ];
   const missingConsumer = WANT_CONSUMERS.filter((f) => !consumers.includes(f));
   const extraConsumer = consumers.filter((f) => !WANT_CONSUMERS.includes(f));
   check(
-    "the consumers are exactly the ca-3 surface — the register route, the history route and their server wrapper (ca-4 adds the screen HERE deliberately)",
+    "the consumers are exactly the ca-3 surface plus ca-4's view module — the register route, the history route, their server wrapper, and the screen's pure view module through which the screen reads the vocabulary (a further DIRECT consumer is added HERE deliberately)",
     missingConsumer.length === 0 && extraConsumer.length === 0,
     extraConsumer.length
       ? `unexpected consumer(s): ${extraConsumer.join(", ")}`

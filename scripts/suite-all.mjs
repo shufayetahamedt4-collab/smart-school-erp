@@ -82,6 +82,11 @@ const PURE = [
   // ca-1 — the pure attendance logic: the id, the slot, the statuses, the
   // roster and the notify rule, all offline.
   "verify-college-attendance-logic",
+  // ca-4 — the register SCREEN's decisions: the mark vocabulary, the save payload,
+  // the slot reader, the save truth table and the page's use of ONE rule/endpoint.
+  // Offline by design (no DOM, no server): the register's HTTP half is
+  // verify-course-attendance, below.
+  "verify-college-attendance-page",
 ];
 
 /**

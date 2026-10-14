@@ -300,6 +300,31 @@ first with a LIVE half:
   wipes + reseeds + restarts the app per verifier, which the offline half does not need but the live half
   assumes.
 
+Phase 8 ca-4 (the register screen + its ONE college nav entry, docs/COLLEGE-DECISIONS.md §30) adds one
+more **unguarded, offline** verifier:
+
+- `scripts/verify-college-attendance-page.mjs` — deliberately unguarded and offline, in the shape of
+  `verify-college-results-page.mjs`. It IMPORTS `src/lib/college-attendance-view.ts` (the screen's pure
+  decisions), ca-0's rule, ca-1's logic and the nav registry, and pins: the view module's ONE import
+  (`./college-attendance`) and its purity; the mark vocabulary as exactly ca-1's four stored statuses
+  (`UNMARKED` is never offered as a choice and never sendable, `isStorableStatus` refuses it and junk);
+  each status's own non-empty word and fill; `slotFromInput` agreeing with ca-1's
+  `readCourseAttendanceSlot` on a 13-value probe table; `rowsToSave`'s subset rule (only rows the API
+  handed over, in order, three fields, `UNMARKED`/junk skipped and counted, a blank remark → `null`, and
+  an all-unmarked register sending nothing); the save message's truth table (`Nothing to save.`,
+  singular/plural marks, the left-unmarked and D-CA-3 notification clauses, junk read as nothing); the
+  roster/marked lines; the five-cell summary strip; the course label; the refusal wording per HTTP status
+  (the API's own sentence kept verbatim, only a sentence-less 401/403/404/400 mapped); and — statically —
+  that the page is a client component that gates on the module AND ca-0's rule, marks only under ca-0's
+  write list, calls exactly one endpoint (`/api/course-attendance`, never `/history` or the teacher
+  routes), posts through `rowsToSave`, derives no id, guesses no slot, invents no student, carries NO
+  status literal and NO role list of its own, and returns before any read until the gate resolves. It
+  also cross-pins ca-3's contract (the route serves `rows`/`summary`/`course`/`dateKey`/`slot`) and the
+  nav entry's carrier set. **36 checks.** It states in its own header that it does NOT prove the page
+  renders — no DOM, no React, no browser — and no browser pass of the screen has been recorded yet (the
+  register's HTTP half is `verify-course-attendance`). It is wired into `suite-all.mjs`'s pure list
+  beside the ca-1 verifier.
+
 - `scripts/suite-all.mjs` — the suite runner, now IN the repository. The earlier runs were driven by a
   wrapper in a temp directory, which is exactly why `BASE`/`BASE_URL` never reached
   `verify-exams-invalidation`, `qa-phase23` and `qa-certificates`: each dialled its own dead port instead

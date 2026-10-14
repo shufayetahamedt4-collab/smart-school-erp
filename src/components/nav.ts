@@ -129,6 +129,11 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
     { href: "/dashboard/college-promotion", label: "College Promotion", icon: TrendingUp, requires: "COLLEGE" },
     { href: "/dashboard/college-results", label: "College Results", icon: BarChart3, requires: "COLLEGE" },
+    // ca-4 (D-CA-7's ca-4 line, D-CA-4): the ONE nav entry of the college attendance
+    // register — the same READ face as the rest of the register's API (ca-0's rule:
+    // the admin-level roles, plus the registrar read-only). It is offered to the
+    // three of those roles that own a dashboard nav.
+    { href: "/dashboard/course-attendance", label: "Course Attendance", icon: CalendarCheck, requires: "COLLEGE" },
     // 7d (D-7-16): the ONE nav entry of the college fee screens — the same four-role
     // face as the rest of the college money surface (the D-7-18 writers, plus the
     // registrar read-only one). It is what makes "the college list" above real.
@@ -179,6 +184,11 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
     { href: "/dashboard/college-promotion", label: "College Promotion", icon: TrendingUp, requires: "COLLEGE" },
     { href: "/dashboard/college-results", label: "College Results", icon: BarChart3, requires: "COLLEGE" },
+    // ca-4 (D-CA-7's ca-4 line, D-CA-4): the ONE nav entry of the college attendance
+    // register — the same READ face as the rest of the register's API (ca-0's rule:
+    // the admin-level roles, plus the registrar read-only). It is offered to the
+    // three of those roles that own a dashboard nav.
+    { href: "/dashboard/course-attendance", label: "Course Attendance", icon: CalendarCheck, requires: "COLLEGE" },
     // 7d (D-7-16): the ONE nav entry of the college fee screens — the same four-role
     // face as the rest of the college money surface (the D-7-18 writers, plus the
     // registrar read-only one). It is what makes "the college list" above real.
@@ -222,6 +232,7 @@ export const NAVS: Record<string, NavItem[]> = {
     { href: "/dashboard/registration", label: "Registration", icon: ClipboardList, requires: "COLLEGE" },
     { href: "/dashboard/college-promotion", label: "College Promotion", icon: TrendingUp, requires: "COLLEGE" },
     { href: "/dashboard/college-results", label: "College Results", icon: BarChart3, requires: "COLLEGE" },
+    { href: "/dashboard/course-attendance", label: "Course Attendance", icon: CalendarCheck, requires: "COLLEGE" },
     { href: "/dashboard/college-fees", label: "College Fees", icon: Wallet, requires: "COLLEGE" },
     { href: "/dashboard/fees", label: "Fees", icon: Wallet },
     { href: "/dashboard/notices", label: "Notice Board", icon: Megaphone },
@@ -398,6 +409,8 @@ const SCHOOL_GROUP_OF: Record<string, string> = {
   "/dashboard/registration": "academics",
   "/dashboard/college-promotion": "academics",
   "/dashboard/college-results": "academics",
+  // ca-4: the attendance register is academic work, beside the results it sits after.
+  "/dashboard/course-attendance": "academics",
   // 7d: the college's MONEY lives beside the school's, in `finance` — the module
   // the fee screens already belong to. It is the one college href outside
   // `academics`, and `verify-nav-scope.mjs` now asserts the exact group per href

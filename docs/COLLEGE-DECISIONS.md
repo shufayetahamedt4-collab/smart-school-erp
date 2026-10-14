@@ -2637,3 +2637,112 @@ wipes + reseeds + restarts the app per server-backed verifier, so the suite orde
 register (§24.8 keeps v1 staff-only per Q8), no bulk import of a register, no real push notification,
 and no change to the school's own `/api/attendance`, `attendanceMarks` or any school fee read. The
 register's screens and the family-facing read remain ca-4…ca-6.
+---
+
+## 30. Phase 8 ca-4 — the college course register screen + nav (BUILT 2026-10-14)
+
+**Stage: ca-4 of D-CA-7's six attendance steps**, on `phase8/college-attendance`. ca-3 built the API
+(§29); ca-4 puts a screen on it — the register's course/date/slot picker, its roster grid and its save —
+and adds the ONE nav entry D-CA-7's ca-4 line names. It adds no teacher, guardian or student read.
+
+**A recorded conflict, and how it was resolved — read this before reading D-8P-5's ca-4 clause again.**
+Two sentences in this document pointed opposite ways: D-8P-5 (§25) says *"the teacher-facing read is the
+register's own step (D-CA-7's ca-4)"*, while D-CA-4 (§24.8, Q8), §24.6(e), §23.6, PROGRESS's 8-pre note,
+and ca-0 (§26) all keep v1 staff-only — ca-0 refuses `TEACHER` in BOTH directions and cites D-8P-5 for it
+("the link makes a teacher-facing surface POSSIBLE, it does not add one"), and ca-3's live proof pins
+`TEACHER` 403/403. **The stage was stopped before any edit and the question put to the owner, whose
+ruling is: ca-4 is staff-only, and D-8P-5's clause is read as PLACEMENT, not scheduling** — it says
+*where* a teacher-facing read would live when it is built (the register's own step, rather than 8-pre),
+not that ca-4 builds one. **v1 has no teacher-facing surface of any kind**, exactly as D-CA-4/Q8 ruled;
+the post-v1 per-course teacher read stays an owner decision, unbuilt, and D-8P-5's wording must never be
+read back as a v1 commitment. Nothing in ca-0's rule, ca-1's logic, ca-2's model or ca-3's API moved:
+their proofs still pass unchanged (17 / 31 / 11+8 / 46 checks).
+
+**What ca-4 adds, in three pieces.**
+
+- **The screen** — `src/app/dashboard/course-attendance/page.tsx` (a client component): pick a course
+  (the API's own list), a date, a session slot (default 1, ca-1's reader decides what is usable), load
+  the register, mark the four statuses per student, add an optional remark, save. Refusals are shown
+  before any read (a school-mode tenant and a refused role issue NO request), and the API stays the real
+  gate. A `REGISTRAR` sees the register with no save control and a note; the save button exists only
+  when ca-0's WRITE list admits the caller.
+- **The view module** — `src/lib/college-attendance-view.ts`, the house pattern
+  (`college-results-view.ts`): every NON-JSX decision, pure. It imports ca-1's module and nothing else, so
+  the screen carries no status literal of its own — the mark vocabulary IS ca-1's four stored values (the
+  `UNMARKED` placeholder is never offered as a choice), the save payload is built by `rowsToSave` (only
+  rows the API handed over, only ids it served, `UNMARKED`/junk skipped and counted, a blank remark
+  trimmed to `null`), `slotFromInput` IS `readCourseAttendanceSlot`, the save message states what
+  happened (written, left unmarked, and D-CA-3's notification count — the screen never decides who is
+  notified), and a refusal keeps the API's own sentence, mapping only a sentence-less 401/403/404/400.
+- **The nav entry** — `/dashboard/course-attendance`, `requires: "COLLEGE"`, label "Course Attendance",
+  offered to `SCHOOL_ADMIN`, `BRANCH_ADMIN` and `REGISTRAR` — the ca-0 READ roles that own a dashboard
+  nav. `SUPER_ADMIN` is on ca-0's list but its registry entry is the platform console (no dashboard nav
+  to offer), and the `ACCOUNTANT` is deliberately NOT offered it: ca-0 refuses the accounts office the
+  register in both directions, so the sidebar must not advertise a screen the API would refuse. Its
+  module group is `academics` (attendance is academic work), added to `SCHOOL_GROUP_OF` explicitly —
+  the group map's fallback is `operations`, where a register does not belong.
+
+**The pins that moved, and the one that deliberately did NOT.**
+
+- `verify-nav-scope.mjs`: the college href list is now EIGHT (the register appended), the marker product
+  is **8 + 8 + 8 + 1 = 25** (the three college roles carry the full list; the `ACCOUNTANT` keeps the ONE
+  money screen), check 1's exact-product assertion covers the new marker, check 6's exact-group
+  assertion covers `academics`, and **check 10 is new**: the register entry must be carried by exactly
+  ca-0's READ roles that own a dashboard nav, must never be listed by `TEACHER`/`GUARDIAN`/`STUDENT`/
+  `ACCOUNTANT`/`LIBRARIAN`/`FRONT_DESK` in any mode, must not be carried by `SUPER_ADMIN`, must not be
+  lost by `REGISTRAR`, and every ca-0 WRITE role with a dashboard nav must be able to reach it. No check
+  was relaxed; the school-output proof (checks 3/4) still compares the FROZEN pre-Phase-1 snapshot.
+- **`scripts/nav-scope-snapshot.json` is NOT re-recorded — and D-CA-7's "the nav snapshot unchanged" is
+  correct.** The snapshot is the frozen PRE-Phase-1 SCHOOL registry: the college items are stripped
+  before every comparison against it, so a new COLLEGE-marked entry cannot appear in it, and check 3's
+  school-only proof is exactly what would fail if it were edited. The stage's item text ("re-record the
+  snapshot for the one new entry") rested on the opposite premise; this record corrects it, and the
+  proof that the premise was wrong is the green run: `verify-nav-scope` passes with the file byte-identical,
+  as §25's D-8P-5 clause said it must.
+- **The consumer pins from ca-3 were extended, with the reason recorded.** ca-0's proof now names TWO
+  consumers — the ca-3 server wrapper and this screen (the page narrows its own view with the same rule
+  the API wraps, exactly as the results page does) — and ca-1's proof names the two routes, the wrapper,
+  and the new view module. ca-1's direct-consumer scan excludes the `-access` and `-view` neighbours by
+  name, because those two names share the prefix and a file importing either is not reaching the logic
+  directly; the screen's dependency is recorded at the module that owns it (the view module), and a new
+  DIRECT consumer still fails the check until it is added deliberately. Nothing else in either proof
+  moved (17 and 31 checks, unchanged).
+
+**The proof, and the numbers.** `scripts/verify-college-attendance-page.mjs` (**36 checks**, new,
+offline — no emulator, no server, wired into `suite-all.mjs`'s pure list) imports the view module, ca-0's
+rule, ca-1's logic and the nav registry, and pins: the view module's ONE import and its purity; the mark
+vocabulary and its words/tones (`UNMARKED` never an option, never storable); the slot reader agreeing
+with ca-1 on a probe table; the save payload's subset/order/three-field shape and its UNMARKED/junk
+skipping; the save message's truth table including the notification count; the count lines, the summary
+strip, the course label and the refusal wording per status; and — statically — that the page is a client
+component that goes through the module, calls ca-0's rule for both directions, reads exactly ca-3's ONE
+endpoint with `qs`, posts through `rowsToSave`, derives no id, guesses no slot, invents no student,
+carries no status literal and restates no role list, and returns before any read until the gate
+resolves. **It does NOT prove the page renders** — there is no DOM, no React and no browser in it, and it
+says so in its own header; the register's HTTP behaviour is ca-3's live proof, and a real browser pass
+remains a separate, recorded step (the screen has not been driven in a browser).
+
+Recorded counts after ca-4: `verify-college-attendance-page` **36** (new), `verify-course-attendance`
+**46** unchanged (the API was not touched — re-run from a clean state, exit 0), `verify-nav-scope` exit 0
+with the snapshot byte-identical, `verify-college-attendance-access` **17**, `verify-college-attendance-logic`
+**31**, `verify-college-fees-data` **11**, `verify-college-results-data` **8**, `verify-college-routes`
+**25 route files / 53 gated handlers** (no API route added or changed), `verify-college-permissions`
+**8**, `tsc --noEmit` **0 errors**. `suite-all.mjs` was NOT run (the stage's rule); the server-backed
+verifier was run after its own wipe + `setup` + `seed` + `seed-kit-demo` + `isolation-fixture create` +
+app restart.
+
+**The course↔teacher admin picker is NOT in ca-4 — deliberately, and this is where it stands.**
+D-8P-5 places the picker "with the course screens" but D-CA-7's ca-4 line schedules only the register
+and its nav entry, and the picker is a screen of its own (a course-scoped assign/unassign UI over the
+8-pre `/api/courses/[id]/teachers` routes, with its own empty/refused states and its own proof). The
+stage's condition ("ONLY if D-8P-5 puts it in ca-4 and it fits this stage without widening the
+`/api/courses` payload") is therefore not met by the record, so it was left for its own stage rather
+than half-built — `/api/courses` keeps its exact shape (D-8P-5's own boundary), and no file in this
+change calls the teacher routes.
+
+**What ca-4 is not.** No teacher/guardian/student read of any register (v1 staff-only; the post-v1
+per-course teacher read stays with the owner — see the recorded ruling above), no course-teacher picker
+(its own stage), no bulk import of a register, no editing of a past session beyond the ordinary re-save
+ca-3 already upserts, no print page, no family-facing notification link (unchanged from ca-3), and no
+browser run of the screen. ca-5 (isolation + regression, baselines first) and ca-6 (the finished record)
+remain.
