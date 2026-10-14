@@ -691,6 +691,10 @@ async function clean() {
     "attendance", "homeworks", "fees", "exams", "routines", "meetingSlots", "conversations", "schools",
     "branches", "departments", "programs", "courses", "programCourses", "courseRegistrations",
     "courseResults",
+    // Phase 8 ca-2: the per-course attendance row. A row a verifier creates
+    // THROUGH THE APP carries a derived `ca_…` id the prefix sweep above cannot
+    // reach, so the schoolId backstop below sweeps this collection too.
+    "courseAttendances",
     // Phase 7c: the college fee spine. The school's own `fees`/`feeSettings`/
     // `payments`/`ledger` rows are NEVER swept here (a college payment writes only
     // a ledger entry, and that row belongs to the verifier's activity, not the
@@ -703,14 +707,15 @@ async function clean() {
       deleted++;
     }
   }
-  // Phase 7c backstop: a college fee row created THROUGH THE APP carries a
-  // server-generated id (`cf_…` charge, `r_…` head/award, `cfc_…` config) that the
-  // `zziso-` prefix sweep above cannot reach, so a verifier that builds a fee spine
+  // Phase 7c backstop: a college row created THROUGH THE APP carries a
+  // server-generated or derived id (`cf_…` charge, `r_…` head/award, `cfc_…`
+  // config, and — Phase 8 ca-2 — a `ca_…` attendance row) that the `zziso-`
+  // prefix sweep above cannot reach, so a verifier that builds a college spine
   // over HTTP would leave it behind. Every fixture tenant's own schoolId starts
-  // with the same prefix, so sweep the five college fee collections by schoolId
-  // too — and ONLY where the schoolId is a fixture one, so a real tenant's fee rows
-  // can never be touched.
-  for (const col of ["collegeFeeHeads", "collegeFeeStructures", "collegeFees", "collegeFeeConfigs", "collegeDiscounts"]) {
+  // with the same prefix, so sweep these college collections by schoolId too —
+  // and ONLY where the schoolId is a fixture one, so a real tenant's rows can
+  // never be touched.
+  for (const col of ["collegeFeeHeads", "collegeFeeStructures", "collegeFees", "collegeFeeConfigs", "collegeDiscounts", "courseAttendances"]) {
     const snap = await db.collection(col).where("schoolId", ">=", P).where("schoolId", "<=", P + "\uf8ff").get();
     for (const d of snap.docs) {
       await d.ref.delete();

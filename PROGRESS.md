@@ -565,3 +565,38 @@ staff-only**.
 4. **Unchanged beside it (2026-10-14):** `verify-college-attendance-access` **18** (its pins still hold),
    `verify-nav-scope` exit 0 (snapshot byte-identical), `verify-college-routes` **23/50** (no route
    added), `npx tsc --noEmit` 0 errors.
+
+---
+
+## 🔁 Session — 2026-10-14 (Phase 8 ca-2: the courseAttendance data layer)
+
+**Code + verifier + records.** ca-2 is D-CA-7's data-layer step for the college register: the model in
+the store, the date-key decision ca-1 left open (D-CA-1), and the guard lists every later step reads.
+No route, page, nav entry, fixture row or consumer — those are ca-3/ca-4.
+
+1. **The model** — `src/lib/db.ts`: `COLS.courseAttendance = "courseAttendances"`, a NEW
+   `RELS.courseAttendance` key (`school`/`branch`/`course`/`student`; `branchId` inherited from the
+   COURSE, exactly as `courseTeacher` inherits it) and the shim accessor `prisma.courseAttendance`. NO
+   `idFor`/`idForCreate` entry — the id is the caller's derived
+   `ca_<courseId>_<dateKey>_<slot>_<studentId>`. No pre-existing `RELS` body was edited, and both
+   additive data proofs still hash them to their recorded baselines.
+2. **The date-key decision** — the mirror STAYS in `college-attendance.ts` (importing `db.ts` would break
+   its pinned no-imports purity and drag firebase-admin into the ca-4 register screen), and the
+   assertion is now real: `verify-college-attendance-logic` reads `db.ts`'s `dateKey` declaration, erases
+   its type annotations with Node's own `stripTypeScriptTypes`, executes it with `new Function` and
+   compares it with the mirror date by date on the same probe table. **31 checks** (30 + the execution
+   check).
+3. **The guards** — `courseAttendance` joins `COLLEGE_MODEL_RE` in `verify-college-routes.mjs` (a
+   strengthening) and `LATER_MODELS` in BOTH additive data proofs (fees-data now reports COLS 80 /
+   RELS 76 / prisma 80, results-data the same, every recorded baseline reproducing);
+   `isolation-fixture.mjs` sweeps `courseAttendances` in its owned list AND in its schoolId backstop (a
+   derived `ca_…` id dodges the `zziso-` prefix sweep); ca-0's "db.ts carries no `courseAttendance`"
+   pin is removed with the change that owns it — `verify-college-attendance-access` **17** (was 18).
+4. **The segment is ca-3's** — `COLLEGE_API_SEGMENTS` deliberately does NOT list `course-attendance`
+   yet: the route guard fails a listed segment with no directory and the fees data proof pins the list
+   to directory-existence, so the entry lands with ca-3's route directory, exactly as `course-results`
+   did in 6c and `college-fees` did in 7c. The approved deferral is recorded in §28.
+5. **Unchanged beside it (2026-10-14):** `verify-college-fees-data` **11**, `verify-college-results-data`
+   **8**, `verify-nav-scope` exit 0 (snapshot byte-identical), `verify-college-routes` **23/50** (no
+   route added), `npx tsc --noEmit` 0 errors. `suite-all.mjs`, the emulator and the server were NOT run:
+   ca-2 has no HTTP surface.

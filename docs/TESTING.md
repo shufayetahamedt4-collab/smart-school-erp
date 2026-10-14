@@ -243,22 +243,26 @@ Phase 8 ca-0 (the college attendance allow-list, docs/COLLEGE-DECISIONS.md §26)
   `attendanceMarks` module (`can()` admits TEACHER `entry`, GUARDIAN `view` and STUDENT `viewOwn`; the
   rule refuses all three), the REGISTRAR read-only, and both refusal sentences. It then pins ca-0's
   boundary as text: no file under `src/` consumes the module yet (ca-3/ca-4 own the consumers), the
-  school's `/api/attendance` route is untouched, and `src/lib/db.ts` carries no `courseAttendance` — a
-  pin ca-2 removes with the collection. **18 checks.** It is wired into `suite-all.mjs`'s pure list
+  school's `/api/attendance` route is untouched and never reaches the college model or the rule. **17
+  checks** — the `db.ts` pin it used to carry was ca-2's to remove with the collection it owns (§28).
+  It is wired into `suite-all.mjs`'s pure list
   beside `verify-college-permissions`.
 
 Phase 8 ca-1 (the pure attendance logic, docs/COLLEGE-DECISIONS.md §27) adds one more **unguarded, offline** verifier:
 
 - `scripts/verify-college-attendance-logic.mjs` — deliberately unguarded and offline, in the shape of
   `verify-college-grading-logic.mjs`. It IMPORTS `src/lib/college-attendance.ts` (`registerHooks`) and
-  exercises the rules for real: the date-key mirror against a probe table (plus the original `dateKey`
-  helper's shape in `db.ts` read as text), the derived id `ca_<courseId>_<dateKey>_<slot>_<studentId>`
+  exercises the rules for real: the date-key mirror against a probe table (plus the store's own
+  `dateKey` in `db.ts` — read out of the file, type annotations erased with Node's own
+  `stripTypeScriptTypes`, executed with `new Function` and compared with the mirror date by date, so
+  ca-2's resolution replaced the text-shape pin with a real execution; §28), the derived id
+  `ca_<courseId>_<dateKey>_<slot>_<studentId>`
   (trimming, idempotence, absent slot = 1, and a THROW for every empty part and invalid slot), the slot
   reader's full table, the four statuses (strict; UNMARKED is never storable), the APPROVED-registration
   roster (duplicates collapsed, blanks dropped, order kept) pinned against `college-fees.ts`'s
   `isApprovedRegistration` on one probe table, the notify transition table (a re-saved absence and a
   corrected register both stay quiet), and ca-1's scope — no route, page or component consumes it yet
-  (ca-3/ca-4 own the consumers) and the school's `/api/attendance` never reaches for it. **30 checks.**
+  (ca-3/ca-4 own the consumers) and the school's `/api/attendance` never reaches for it. **31 checks.**
   It is wired into `suite-all.mjs`'s pure list beside the ca-0 verifier.
 
 - `scripts/suite-all.mjs` — the suite runner, now IN the repository. The earlier runs were driven by a

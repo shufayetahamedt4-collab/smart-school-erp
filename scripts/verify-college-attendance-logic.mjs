@@ -16,8 +16,11 @@
  *
  *   1. PURITY — no `import`/`require`, and no store/HTTP name anywhere in its code.
  *   2. THE DATE-KEY MIRROR (D-CA-1) — the local `YYYY-MM-DD` key on a probe table,
- *      and the shape of the original module-local `dateKey` in `src/lib/db.ts`
- *      (which ca-2 must export or assert against).
+ *      and the store's own module-local `dateKey` in `src/lib/db.ts`, EXECUTED
+ *      from its source here and compared with the mirror date by date. ca-2's
+ *      resolution (§28): the mirror stays — importing db.ts would break this
+ *      module's pinned purity and drag firebase-admin into the ca-4 screen — so
+ *      the assertion is a real execution instead of a text-shape copy.
  *   3. THE ID (D-CA-1) — `ca_<courseId>_<dateKey>_<slot>_<studentId>`, trimmed
  *      parts, idempotent, and a THROW for every empty part and every invalid slot.
  *   4. THE SLOT (Q7) — absent/null/blank = 1, whole numbers 1..n, junk refused.
@@ -36,7 +39,7 @@
  *   node scripts/verify-college-attendance-logic.mjs
  */
 
-import { registerHooks } from "node:module";
+import { registerHooks, stripTypeScriptTypes } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -187,7 +190,7 @@ console.log("\n1. the module is pure");
 
 /* ------------------------------------------------------------ 2. the date key */
 
-console.log("\n2. the date-key mirror (D-CA-1) matches the store's own helper");
+console.log("\n2. the date-key mirror (D-CA-1) — executed against the store's own helper, not re-typed");
 {
   const PROBE = [
     [new Date(2026, 9, 14), "2026-10-14"],
@@ -205,16 +208,47 @@ console.log("\n2. the date-key mirror (D-CA-1) matches the store's own helper");
     wrong.join(" · ") || `${PROBE.length} dates`
   );
 
+  // The store's OWN helper, executed from its source. The verifier cannot
+  // `import` db.ts (plain-node type stripping rejects the file's TS parameter
+  // properties), so the declaration is read here, its type annotations erased
+  // with Node's own `stripTypeScriptTypes` (a first call prints Node's
+  // ExperimentalWarning on stderr — a Node notice, not a check failure), and the
+  // resulting function run against the SAME probe table as the mirror. A
+  // renamed, reformatted or edited original fails this check loudly instead of
+  // passing on a stale text copy (D-CA-1's own words: the mirror is asserted
+  // against the original).
   const dbSource = readFileSync(resolve(ROOT, "src/lib/db.ts"), "utf8");
-  const helper = dbSource.match(/function dateKey\([\s\S]{0,400}?\r?\n\}/)?.[0] || "";
+  const decl = dbSource.match(/function dateKey\([^)]*\)\s*:\s*string\s*\{[\s\S]*?\r?\n\}/);
+  let storeDateKey = null;
+  let execError = "";
+  if (!decl) execError = "the module-local helper was not found — re-read db.ts";
+  else if (typeof stripTypeScriptTypes !== "function")
+    execError = "module.stripTypeScriptTypes is unavailable on this Node — use ≥22.13";
+  else {
+    try {
+      const helperJs = stripTypeScriptTypes(decl[0], { mode: "strip" });
+      storeDateKey = new Function(`${helperJs}\nreturn dateKey;`)();
+    } catch (error) {
+      execError = String((error && error.message) || error);
+    }
+  }
   check(
-    "db.ts's module-local `dateKey` still has the shape the mirror copies",
-    /getFullYear/.test(helper) &&
-      /padStart\(2, "0"\)/.test(helper) &&
-      /getMonth\(\) \+ 1/.test(helper) &&
-      /getDate\(\)/.test(helper),
-    helper ? "the original is intact" : "the original was not found — re-read db.ts"
+    "db.ts's module-local `dateKey` was located and EXECUTED here — the original, not a copy",
+    typeof storeDateKey === "function",
+    typeof storeDateKey === "function"
+      ? "the store's own helper runs in this process"
+      : execError
   );
+  if (typeof storeDateKey === "function") {
+    const disagreements = PROBE.filter(([d]) => storeDateKey(d) !== courseAttendanceDateKey(d));
+    check(
+      "the mirror agrees with the original on every probe date (executed, not re-typed)",
+      disagreements.length === 0,
+      disagreements
+        .map(([d]) => `${String(d)}: store ${storeDateKey(d)}, mirror ${courseAttendanceDateKey(d)}`)
+        .join(" · ") || `${PROBE.length} dates`
+    );
+  }
 }
 
 /* --------------------------------------------------------------------- 3. id */

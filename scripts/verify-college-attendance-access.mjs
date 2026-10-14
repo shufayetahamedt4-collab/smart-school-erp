@@ -20,8 +20,12 @@
  *   4. WHY IT EXISTS — the school's module WOULD admit TEACHER/GUARDIAN/STUDENT;
  *      this rule refuses all three (proved against `permissions.ts`).
  *   5. THE REFUSALS — the two sentences a caller renders.
- *   6. SCOPE — ca-0 adds no consumer, no collection and touches no school path
- *      (the later steps own the rest; each such change updates this section).
+ *   6. SCOPE — no consumer yet and no school path touched. ca-0 pinned that
+ *      db.ts carried no `courseAttendance` collection; ca-2 (2026-10-14) added
+ *      it, so that pin is REMOVED here with the change that owns it (§28), and
+ *      what stays is the boundary that matters: this rule still has no consumer
+ *      and the school's own attendance path still never reaches the college
+ *      register (ca-3/ca-4 own the consumers).
  *
  *   node scripts/verify-college-attendance-access.mjs
  *
@@ -281,7 +285,7 @@ console.log("\n5. the refusals name who may act");
 
 /* ---------------------------------------------------------------- 6. the scope */
 
-console.log("\n6. scope — no consumer, no collection, no school path touched (ca-0's boundary)");
+console.log("\n6. scope — no consumer, and no school path touched (ca-2 removed ca-0's db pin)");
 {
   const consumers = findConsumers();
   check(
@@ -296,11 +300,11 @@ console.log("\n6. scope — no consumer, no collection, no school path touched (
     !/college-attendance-access|courseAttendance/.test(schoolRoute)
   );
 
-  const dbSource = readFileSync(resolve(ROOT, "src/lib/db.ts"), "utf8");
-  check(
-    "no courseAttendance collection exists yet (ca-2 owns COLS/RELS; remove this pin with that change)",
-    !/courseAttendance/.test(dbSource)
-  );
+  // ca-0's "db.ts carries no courseAttendance" pin was ca-2's to remove, and
+  // ca-2 removed it: db.ts now carries the model in COLS/RELS and through the
+  // shim — see §28. The collection's own shape is proved by the data proofs
+  // (verify-college-fees-data / verify-college-results-data, which drop it by
+  // name) and by the route guard's COLLEGE_MODEL_RE, not asserted again here.
 }
 
 /* ---------------------------------------------------------------------- end */

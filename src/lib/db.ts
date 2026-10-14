@@ -178,6 +178,20 @@ const COLS: Record<string, string> = {
   // model list), because it exists to answer "who teaches this course" for a
   // college's teacher-facing surfaces — which had no link at all before 8-pre.
   courseTeacher: "courseTeachers",
+  // ---- College support (Phase 8 ca-2) ----
+  // The per-course attendance row (docs/COLLEGE-DECISIONS.md §24.8, D-CA-1):
+  // ONE row per (course, day, slot, student), with a CALLER-SUPPLIED derived id
+  // (`ca_<courseId>_<dateKey>_<slot>_<studentId>`, `src/lib/college-attendance.ts`)
+  // — exactly like `courseTeacher`, and for the same reason: the id IS the
+  // uniqueness rule, so a re-saved register addresses the same row instead of
+  // appending a second one. There is therefore NO `idFor`/`idForCreate` entry:
+  // the ca-3 route derives the id and passes it in, and `create`'s `rand()`
+  // fallback is never reached. It is a college-only row (its name is in
+  // `COLLEGE_MODEL_RE`, so a school file cannot reach it unnoticed), and it is
+  // deliberately SEPARATE from the school's `attendance` collection: that key is
+  // one pupil × one day with no course in it and no slot, and D-3-6 is LOCKED —
+  // the two registers never share a row or a key.
+  courseAttendance: "courseAttendances",
   // ---- College support (Phase 6b) ----
   // The college RESULT row: ONE attempt (1-based `attempt`) at ONE `course` in
   // ONE `termNumber` of the student's programme (docs/COLLEGE-DECISIONS.md
@@ -913,6 +927,22 @@ const RELS: Record<string, Record<string, Rel>> = {
     branch: { to: "branch", fk: "branchId", kind: "one" },
     course: { to: "course", fk: "courseId", kind: "one" },
     teacher: { to: "teacher", fk: "teacherId", kind: "one" },
+  },
+  // ---- College support (Phase 8 ca-2) ----
+  // The per-course attendance row. `branchId` is STORED (inherited from the
+  // COURSE, exactly as `courseTeacher` inherits it) so `scopeWhere`/
+  // `canAccessBranch` filter the row directly — the store cannot join.
+  // `courseId` is the session's course and `studentId` the marked pupil;
+  // `programId`/`termNumber`/`slot` repeat the session's placement so a register
+  // reads without joining the registration that put the student on the roster.
+  // No pre-existing RELS body is touched by ca-2: `course` and `student` keep
+  // byte-identical bodies (the additive data proofs hash them), and the new row
+  // is reached through this model's own key.
+  courseAttendance: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    course: { to: "course", fk: "courseId", kind: "one" },
+    student: { to: "student", fk: "studentId", kind: "one" },
   },
   twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
@@ -2572,6 +2602,14 @@ export const prisma = {
   // `prisma.courseTeacher` fails the route guard instead of letting a school
   // surface answer a college roster question.
   courseTeacher: model("courseTeacher"),
+  // ---- College support (Phase 8 ca-2) ----
+  // The per-course attendance row (D-CA-1), addressed through the shim like
+  // every other model. Registered in the same change as its COLS/RELS entries,
+  // so `prisma.courseAttendance` is the ONE way to reach it — and
+  // `scripts/verify-college-routes.mjs`'s `COLLEGE_MODEL_RE` now lists it too,
+  // so a NON-college route or lib that reached for it fails the route guard
+  // instead of letting a school surface write a college register.
+  courseAttendance: model("courseAttendance"),
   // ---- College support (Phase 6-pre 2) ----
   // The ladder's lease row, addressed through the shim like every other model
   // (read/update/delete). `$claim` is the one write that must be atomic.

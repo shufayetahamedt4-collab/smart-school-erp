@@ -137,9 +137,12 @@ const NEW_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "coll
  * entry remain inside the hashed projections. 8-pre touched NO pre-existing RELS
  * body, so the `relBodies` baseline below still has to reproduce exactly: it is
  * the check that would catch a link added inside `course` or `teacher` instead
- * of as its own key.
+ * of as its own key. Phase 8 ca-2 adds ONE more — `courseAttendance`, the
+ * per-course attendance row (D-CA-1) — and it changed no pre-existing RELS body
+ * either: `course`/`student` keep byte-identical bodies, which the `relBodies`
+ * baseline still has to reproduce.
  */
-const LATER_MODELS = ["collegeDiscount", "courseTeacher"];
+const LATER_MODELS = ["collegeDiscount", "courseTeacher", "courseAttendance"];
 
 /** Any college fee model reached through the shim — check 6's needle. */
 const COLLEGE_REF_RE = /\bprisma\.college(?:Fee(?:Head|Structure|Config)?|Discount)\b/g;
@@ -420,7 +423,7 @@ console.log("\n2. additive only — dropping the four entries reproduces every p
   else
     ok(
       `COLS ${pairs.length} entries, RELS ${relKeys.length} models (${Object.keys(bodies).length} bodies), ` +
-        `prisma ${accessors.length} accessors — dropping the ${NEW_MODELS.length} 7b models and 7c's ${LATER_MODELS.length} reproduces all four recorded baselines, so no existing entry moved (bodies included), courseResult included`
+        `prisma ${accessors.length} accessors — dropping the ${NEW_MODELS.length} 7b models and the later phases' ${LATER_MODELS.length} reproduces all four recorded baselines, so no existing entry moved (bodies included), courseResult included`
     );
 }
 

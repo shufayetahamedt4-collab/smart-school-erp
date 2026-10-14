@@ -156,8 +156,14 @@ const AFTER_GATE_TOKENS = [
  * check 3 from the moment it exists. It has to be listed in its own right: `\b`
  * keeps `course` from matching `courseTeacher`, so without this entry a school
  * route, page or lib could reach a college's course↔teacher link unnoticed.
+ *
+ * Phase 8 ca-2 adds `courseAttendance` — the per-course attendance row (D-CA-1) —
+ * in the same change that registers the model in `db.ts`, so the college register
+ * is covered by check 3 from the moment it exists. It has to be listed in its own
+ * right, too: `\b` keeps `course` from matching `courseAttendance`, so without
+ * this entry a school file could reach a college attendance row unnoticed.
  */
-const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course|courseResult|courseTeacher|collegeFeeHead|collegeFeeStructure|collegeFeeConfig|collegeFee|collegeDiscount)\b/;
+const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course|courseResult|courseTeacher|courseAttendance|collegeFeeHead|collegeFeeStructure|collegeFeeConfig|collegeFee|collegeDiscount)\b/;
 
 let failures = 0;
 const ok = (msg) => console.log(`  ✅ ${msg}`);

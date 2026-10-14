@@ -92,8 +92,12 @@ const PRE_6B = {
  * Phase 8-pre adds ONE more — `courseTeacher`, the course↔teacher link (D-CA-4) —
  * so it joins them. That phase changed no pre-existing RELS body, which is what
  * the `relKeys`/`accessors`/`cols` baselines below still prove.
+ *
+ * Phase 8 ca-2 adds ONE more — `courseAttendance`, the per-course attendance row
+ * (D-CA-1) — so it joins them too. That phase changed no pre-existing RELS body
+ * either, which the same baselines below still prove.
  */
-const LATER_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "collegeFeeConfig", "collegeDiscount", "courseTeacher"];
+const LATER_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "collegeFeeConfig", "collegeDiscount", "courseTeacher", "courseAttendance"];
 
 /** Blank out comments and string literals, PRESERVING LENGTH, so a scan sees code only. */
 function maskCommentsAndStrings(text) {
