@@ -2272,7 +2272,10 @@ proofs are in §24.7's **7c-follow-up** note.
   are **check** counts (printed check lines, the summary line excluded — `verify-enroll-paths` is 17,
   `verify-admission-intake` 52), and **7-pre-2's college-side additions now exist** as
   `scripts/verify-enrollment-fees.mjs` (**19 checks**). 7-pre, 7a–7f and Phase 8's `8-pre`/ca-1..ca-6
-  still owe theirs in the same shape.
+  still owe theirs in the same shape. **Completed 2026-10-14 (ca-6):** they now exist — Phase 7's in
+  §24.7's per-phase notes, Phase 8's in §25–§31 and `proof/8/REPORT.md` §6, each recorded as the
+  check-line count its own script prints, and the isolation pair's baselines were taken **before**
+  ca-5's additions (§31).
 - Whether a BOTH tenant's **stats / dashboard payloads** need a mode dimension **for fee money** is
   **NOT PROVEN** here: the delta's §2 flags the stats cache as mode-sensitive and it is still
   un-dimensioned today. The v1 college fee screens of D-7-16 do not read `/api/stats`, so 7a–7f do not
@@ -2745,7 +2748,9 @@ per-course teacher read stays with the owner — see the recorded ruling above),
 (its own stage), no bulk import of a register, no editing of a past session beyond the ordinary re-save
 ca-3 already upserts, no print page, no family-facing notification link (unchanged from ca-3), and no
 browser run of the screen. ca-5 (isolation + regression, baselines first) and ca-6 (the finished record)
-remain.
+remain. **Recorded 2026-10-14:** ca-5 has since BUILT that browser pass (`proof/8/browser-proof.mjs`,
+**22/22** in real Chrome) and ca-6 finished the record (`proof/8/REPORT.md` §6) — read the two
+sentences above as statements of ca-4's own state at the time, superseded by §31 and the finished record.
 
 ## 31. Phase 8 ca-5 — isolation + regression + the browser proof (BUILT 2026-10-14)
 
@@ -2872,3 +2877,48 @@ changed).
 surface (v1 stays staff-only, D-CA-4/Q8), no change to the school's `/api/attendance`, and no patch to
 another phase's checker (the `verify-sweep-routes` vocabulary gap is recorded above, not fixed).
 ca-6 — the finished record for Phase 8 — remains.
+
+---
+
+## 32. Phase 8 ca-6 — the finished Phase 8 record (BUILT 2026-10-14)
+
+**Stage: ca-6, the last of D-CA-7's six attendance steps**, on `phase8/college-attendance` (`977130c` =
+ca-5). **It is docs-only by design** — no `src/` file, no `scripts/` file, no server started, the suite
+NOT run, nothing deployed, nothing pushed to `main`, and `integration/main-into-college` untouched
+(still `af65774`). What ca-6 adds is the closing record the build order asks for: "ca-6 the finished
+record."
+
+- **The finished record is `proof/8/REPORT.md` §6**, and it carries the whole phase in one place: a
+  stage-by-stage counts table (8-pre `verify-course-teachers` **54**; the register's own three —
+  `verify-college-attendance-access` **17** at ca-2, `verify-college-attendance-logic` **31** at ca-2,
+  `verify-college-attendance-page` **36** at ca-4, `verify-course-attendance` **46** at ca-3; the
+  route guard **25 route files / 53 gated handlers** from ca-3; the isolation pair **106 → 116** and
+  **72 → 79** at ca-5, baselines taken first; and the browser proof **22/22**), the `tsc --noEmit`
+  **0 errors** result, what could not be run again at ca-6 (the two **once-per-app-start** proofs and
+  the suite), and the five open items (a)–(e) — the course-teacher admin picker, the teacher-facing
+  read, `verify-sweep-routes`' `LEAVE` gap, the four unattributed count drifts, and the three
+  documented known reds.
+- **ca-6 also re-ran the offline surface without starting anything**, so this section records a fresh
+  pass rather than only older ones: `verify-college-attendance-access` exit 0 **17 checks**,
+  `verify-college-attendance-logic` exit 0 **31**, `verify-college-attendance-page` exit 0 **36**,
+  `verify-college-routes` exit 0 **25 / 53**, `verify-nav-scope` exit 0 **10 checks** (11 ✅ markers —
+  its own closing line is the extra) with the frozen snapshot byte-identical, and `npx tsc --noEmit`
+  exit **0** with **0 lines** of output. **Every count equals its baseline** — nothing drifted.
+- **The four documents now agree on the phase's status**, after a stale-text pass the stage asked for
+  and ca-6 made: `COLLEGE-STATUS` §0 said "ca-5 and ca-6 … have **not started**", §4 said
+  "**Per-course attendance** — **not built** … **NOT PROVEN** which model", the fees bullet named
+  attendance among "what 8/9 own", and §5's row 3 ended "ca-5/ca-6 … NOT built";
+  `COLLEGE-DECISIONS` §30 ended "ca-5 and ca-6 **remain**" and "no browser run of the screen", and
+  §24.10 said Phase 8's counts "**still owe theirs**"; `TESTING.md`'s ca-4 entry said "**no browser
+  pass of the screen has been recorded yet**". Each was corrected by **appending its dated
+  supersession — the house style — rather than rewriting history**: Phase 8 is complete (8-pre and
+  ca-0…ca-5 built and verified, ca-6 this record) and **9a/9b/9c is not started**.
+- **One record was left as authored and noted instead:** `proof/8pre/REPORT.md` names
+  `integration/main-into-college` (working tree from `af65774`) as where the link was built, while its
+  commit and every later Phase 8 commit sit on `phase8/college-attendance` — the leaf branch cut from
+  that HEAD precisely so `integration/main-into-college` could stay at `af65774` while Phase 8 landed.
+  The §6 record points a reader at it rather than editing a historical proof.
+- **What ca-6 is not.** No code change of any kind, no new verifier, no suite run, no emulator, no
+  deployment, and no claim that the store-behind-the-offline-checks behaviour was proven fresh — that
+  is ca-3's live proof (46) and ca-5's isolation and browser work, which this record's §6.4 says were
+  not re-run here and are re-verified by the next emulator-backed run.

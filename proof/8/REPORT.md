@@ -1,4 +1,10 @@
-# Phase 8 ca-5 — isolation, regression and the browser proof (BUILT 2026-10-14)
+# Phase 8 — the record (8-pre, ca-0…ca-6 finished at ca-6)
+
+This file is Phase 8's proof folder. **Part 1 (§0–§5) is ca-5's own proof**, as written at that stage;
+**Part 2 (§6) is ca-6's finished Phase 8 record** — the stage-by-stage counts table, what could not be
+run again, and the phase's open items.
+
+**The ca-5 stage of it:**
 
 **Branch:** `phase8/college-attendance`. **base:** `9bcbfb1` (ca-4) → this stage's commit.
 **Decisions:** [docs/COLLEGE-DECISIONS.md](../docs/COLLEGE-DECISIONS.md) §24.8 (D-CA-1…D-CA-7) and §31,
@@ -283,3 +289,131 @@ to that list, so the checker agrees with `db.ts`'s own type) is left as its own 
 - **No teacher, guardian or student surface exists to prove** (v1 is staff-only, D-CA-4/Q8); the
   browser proof's refused-role case is the ACCOUNTANT, a staff role.
 - **ca-6 has not run**: this is not the finished record.
+---
+
+## 6. The finished Phase 8 record (ca-6, BUILT 2026-10-14)
+
+ca-6 is docs-only by design — a final record with **no `src/` or `scripts/` edit, no server started**,
+no suite run, no deploy, no push to anything but the phase branch. §0–§5 above are ca-5's own proof;
+this part closes Phase 8 (8-pre → ca-6) over the whole branch `phase8/college-attendance` (8-pre
+`3e7be47` … ca-5 `977130c`).
+
+### 6.1 The counts, stage by stage
+
+Every count below is what the **script itself printed** (check lines, or the script's own summary line
+where it carries the number); the suite counts ✅ markers, which is one more for the verifiers whose
+closing ✅ is part of the same line — the convention each earlier phase used is shown alongside.
+
+| Stage | Verifier | Count | Note |
+|---|---|---|---|
+| **8-pre** (§25) | `verify-course-teachers` | **54** checks, exit 0 | the live matrix + offline pins; first verifier to import a pure module |
+| 8-pre | `verify-college-routes` | **23 route files / 50 gated handlers** | the `courses` segment gains three handlers |
+| 8-pre | `verify-college-fees-data` / `-results-data` | **11** / **8** | their pre-7b / pre-6b baselines still reproduce |
+| **ca-0** (§26) | `verify-college-attendance-access` | **18** checks, exit 0 | new, offline; the allow-list + ca-0's boundary |
+| **ca-1** (§27) | `verify-college-attendance-logic` | **30** checks, exit 0 | the id, slot, statuses, roster, notify rule |
+| **ca-2** (§28) | `verify-college-attendance-logic` | **31** | the store's own `dateKey` is now EXECUTED against the mirror |
+| ca-2 | `verify-college-attendance-access` | **17** | ca-0's `db.ts` pin removed with the collection it owned |
+| ca-2 | `verify-college-fees-data` / `-results-data` | **11** / **8** | `courseAttendance` joins `LATER_MODELS` both ways |
+| **ca-3** (§29) | `verify-course-attendance` | **46** checks, exit 0 | new, offline+live (its live half from a wiped, reseeded, app-restarted state) |
+| ca-3 | `verify-college-routes` | **25 route files / 53 gated handlers** | the `course-attendance` segment lands with its directory |
+| ca-3 | `verify-college-fees-data` | **11** | check 8 re-scoped to a `laterSegments` list; no other check weakened |
+| **ca-4** (§30) | `verify-college-attendance-page` | **36** checks, exit 0 | new, offline; the mark vocabulary, the payload rule, ONE endpoint/rule |
+| ca-4 | `verify-nav-scope` | exit 0, snapshot **byte-identical** | the college href list is EIGHT, the marker product **25** (8+8+8+1), and **check 10 is new** — the register's carrier set |
+| ca-4 | `verify-college-attendance-access` / `-logic` | **17** / **31** | their consumer pins extended by name |
+| **ca-5** (§31) | `verify-tenant-isolation` | **106 → 116** check lines | +10, baseline taken first |
+| ca-5 | `verify-branch-isolation` | **72 → 79** | +7, baseline taken first |
+| ca-5 | `proof/8/browser-proof.mjs` | **22 / 22, exit 0** | the register screen in a real Chrome (§3) |
+| ca-5 | `verify-course-attendance` | **46** | re-run inside the full suite from a wiped state (the API is untouched) |
+| ca-5 | full suite `suite-all.mjs` | **60 verifier(s), 56 exit 0** | once, from a clean state (§4) — ca-4's rule excepted, authorized that stage |
+
+**tsc:** `npx tsc --noEmit` — **0 errors** after every stage above (8-pre, ca-0…ca-5), and **0 errors
+with zero output line(s) at ca-6** (re-verified at ca-6 without a save-pipe so the exit code is the
+compiler's own).
+
+### 6.2 Re-run at ca-6 (offline only — no servers, no suite)
+
+| Check | Command | Result | vs baseline |
+|---|---|---|---|
+| `verify-college-attendance-access` | `node scripts/verify-college-attendance-access.mjs` | exit 0 — **17 checks** | = |
+| `verify-college-attendance-logic` | `node scripts/verify-college-attendance-logic.mjs` | exit 0 — **31 checks** | = |
+| `verify-college-attendance-page` | `node scripts/verify-college-attendance-page.mjs` | exit 0 — **36 check(s)** | = |
+| `verify-college-routes` | `node scripts/verify-college-routes.mjs` | exit 0 — **25 college route file(s), 53 gated handler(s)**, no unclassified API directory | = |
+| `verify-nav-scope` | `node scripts/verify-nav-scope.mjs` | exit 0 — **10 checks** (11 ✅ markers: its own closing line is one more), snapshot byte-identical | = |
+| `npx tsc --noEmit` | `npx tsc --noEmit` | exit **0**, 0 line(s) of output | = |
+
+### 6.3 The four documents agree, after ca-6's stale-text pass
+
+`docs/COLLEGE-DECISIONS.md` (§25–§31, plus the dated corrections this stage appended to §24.10 and
+§30), `docs/COLLEGE-STATUS.md`, `PROGRESS.md` and `docs/TESTING.md` now agree on one statement:
+**Phase 8 is complete — 8-pre and ca-0…ca-5 are built and verified, and ca-6 is this finished record —
+while the dashboard/reports/import trio is renumbered 9a/9b/9c and NOT started.** The stale sentences
+that would have read the other way were corrected here rather than argued with:
+`COLLEGE-STATUS`'s §0 "ca-5 and ca-6 have not started", its §4 "per-course attendance — **not built**"
+plus the fees bullet's "what 8/9 own", its §5 row 3's "ca-5/ca-6 … NOT built", `COLLEGE-DECISIONS`'s
+§30 "ca-5 and ca-6 remain" and §24.10's "Phase 8's 8-pre/ca-1..ca-6 still owe theirs",
+and `TESTING.md`'s ca-4 entry "no browser pass of the screen has been recorded yet" — each corrected
+by appending its dated supersession, not by rewriting history.
+
+*One record left as authored, recorded here rather than corrected:* `proof/8pre/REPORT.md` says the
+link was "built … on `integration/main-into-college`, working tree from `af65774`", while its commit
+`3e7be47` and every later Phase 8 commit sit on `phase8/college-attendance` (the leaf branch cut from
+that HEAD, to keep `integration/main-into-college` at `af65774` while Phase 8 landed). The work is
+verified either way; the branch label in that record is the one thing a reader should re-point.
+
+### 6.4 What cannot be claimed past a stage boundary
+
+- **The live halves of `verify-course-attendance` (46) and the browser proof (22/22) were not re-run at
+  ca-6**: ca-6 starts no server, and each is a **once-per-app-start** proof (the suite restarts the app
+  per server-backed verifier, which is what makes its order deterministic). Both are re-verified by the
+  next emulator-backed run, not by this one. `verify-course-attendance` was last run from a wiped state
+  by ca-5's suite; the browser proof was last run, and its rows cleaned, at ca-5.
+- **The full suite was not re-run at ca-6**, and `scripts/suite-all.mjs` was not started at all this
+  stage; ca-5's run (§4) is the suite evidence this record stands on.
+- **The counts of the ca-6 re-run prove the offline surface only** — the pure modules, the route
+  guard's static sweep, the nav registry and the typecheck. The store behaviour behind them is the
+  ca-3 live proof and ca-5's isolation sections.
+- Nothing was deployed, nothing was pushed to `main`, and `integration/main-into-college` was never
+  touched (still `af65774`).
+
+### 6.5 The open items — what Phase 8 deliberately did not build
+
+a. **The course-teacher admin picker is not built.** D-8P-5 places it "with the course screens", but
+   D-CA-7's ca-4 line schedules only the register and its nav entry, so the ca-4 stage's own condition
+   was not met and it was left for its own stage rather than half-built; `/api/courses` keeps its exact
+   shape and nothing in Phase 8's register work calls `/api/courses/[id]/teachers`. The link itself
+   (the `courseTeacher` row and its API) IS built — 8-pre, 54 checks — which is exactly the
+   prerequisite the record names.
+b. **No teacher-facing read exists.** v1 is staff-only (D-CA-4, owner Q8): the register's read list is
+   the admin-level roles plus a read-only REGISTRAR, `TEACHER` is refused both directions by ca-0's
+   rule even though the link now makes a teacher-facing surface possible, and the proofs pin it
+   (`verify-college-attendance-access`, `verify-course-attendance`'s live TEACHER 403/403). Any
+   teacher-facing surface — a markable register for a course's own teachers, or the post-v1 per-course
+   teacher view of results (§23.6) — is an **owner decision**, not a Phase 8 gap. The guardian /
+   student family-facing read is the same ruling, post-v1 by the same owner decision.
+c. **`verify-sweep-routes`' `attendance rows well-formed` check omits `LEAVE`.** The school's own
+   `AttendanceStatus` type (`src/lib/db.ts:68`) is `PRESENT | ABSENT | LATE | LEAVE` and
+   `scripts/seed.mjs` writes a `LEAVE` row with 5 % probability, so that school-side checker calls a
+   valid row ill-formed on some seeds: it failed in ca-5's full run (2 of its checks) and **passed when
+   re-run alone from a clean state (45 checks)**. It is a one-line correction — add `LEAVE` to that
+   list so the checker agrees with the product's own type — and it belongs to its own change: ca-6
+   makes no `scripts/` edit, so it stands as recorded in §4 and §31.
+d. **Four count drifts are recorded but unattributed**: `verify-onboarding-seed` 78 → **87/87**, 
+   `verify-onboarding-type` 38 → **44**, `verify-fee-reconciliation` 53 → **56** (printed), and
+   `verify-bulk-import` 118 → **117**. No `src/` file in ca-0…ca-5's diffs can be their cause; each is
+   recorded in the §4 table with today's number rather than smoothed over.
+e. **The three documented known reds are unchanged and are not Phase 8's**: `verify-read-cache`
+   **0 pass / 1 fail**; `verify-routine-config` **30 pass / 2 fail / 1 skip** (the closed-gate calendar
+   form; a day its section 7 runs prints 32 pass / 3 fail) — the class-wide-read defect the seed's
+   section-scoped routines cause; `qa-certificates` **40 passed / 1 failed** (the credential-gated
+   orphan sweep the emulator-only rule forbids fixing). None is caused by any of these commits, and
+   ca-6 claims none as green.
+
+### 6.6 Where the next phase begins
+
+The next work on this line is **Phase 9a/9b/9c** (college dashboard, reports, import) — renumbered
+from 8a/8b/8c when attendance took Phase 8 (D-CA-6, §10's dated correction) — and it is **not
+started**. It becomes materially more useful now that attendance exists to report on, and its open
+design question (§24.10) — whether a BOTH tenant's stats/dashboard payloads need a mode dimension for
+the fee money — is **still an owner decision**, because Phase 8's reads do not reach `/api/stats`.
+The v1 attendance marking ship is complete at ca-6 and its register is staff-facing only; everything
+else around attendance is recorded above as an owner decision, not a Phase 8 gap.

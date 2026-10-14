@@ -49,8 +49,12 @@ Read this before the tables, or the phase names will mislead you.
   APPROVED roster and the new-absence rule, §27); **ca-2**, the `courseAttendance` data layer (§28), and
   **ca-3**, the register's API — the roster read, the session save and the per-student history (§29) —
   and **ca-4**, the register screen and its ONE college nav entry (§30) are built beside them too.
-  ca-5 (isolation + regression, baselines first) and ca-6 (the finished record) have **not started**,
-  and the family-facing read stays a post-v1 owner decision — v1 is staff-only (D-CA-4, Q8).
+  and **ca-5** (isolation + regression + the browser proof, §3's ca-5 note) and **ca-6** (the finished
+  record, `proof/8/REPORT.md` §6) are **BUILT AND VERIFIED too (2026-10-14)** — Phase 8 is complete
+  ca-0 through ca-6. The family-facing read stays a post-v1 owner decision — v1 is staff-only
+  (D-CA-4, Q8) — and still unbuilt are the course-teacher admin picker (D-8P-5 places it with the
+  course screens; D-CA-7's ca-4 line does not schedule it) and the dashboard/reports/import trio
+  (9a/9b/9c).
   The per-programme scale override (D-6-19) is parked **with the owner**.
 
 The numbered college phases in this document are the implementation phases (0, M, 1–5, 6-pre, 6), which
@@ -334,12 +338,20 @@ verifier runs. Steps graded from the code alone are marked where a live run is n
 - **College fees** — **built end to end (7a → 7f), committed 2026-10-14.** A college admin can now define heads and
   a programme-term structure, preview and commit charge generation, take a payment and propose/approve an
   award, and print a statement or a receipt — all behind the D-7-18 allow-list, with the money landing in
-  the ONE shared ledger tagged so the two modes can never be confused. What is *not* built is what 8/9 own:
-  a college dashboard, college reports, college import (9a/9b/9c) and per-course attendance. The school's
-  own fee screens are unchanged and show no college row.
-- **Per-course attendance** — **not built**. School attendance is one row per pupil per day keyed
-  `studentId_date`; a per-course version cannot be retro-fitted onto it
-  (`docs/COLLEGE-DECISIONS.md` §10, D-3-6). **NOT PROVEN** which model college attendance will use.
+  the ONE shared ledger tagged so the two modes can never be confused. What is *not* built is what 9
+  owns: a college dashboard, college reports and college import (9a/9b/9c) — per-course attendance
+  was built instead, as Phase 8 (8-pre, ca-0…ca-6; [proof/8/REPORT.md](../proof/8/REPORT.md)). The
+  school's own fee screens are unchanged and show no college row.
+- **Per-course attendance** — **BUILT end to end (Phase 8: `8-pre`, ca-0…ca-6, 2026-10-14)**. School
+  attendance is one row per pupil per day keyed `studentId_date`, and a per-course version was
+  deliberately **not** retro-fitted onto it (D-3-6): the model was DECIDED (owner Q1/Q8, D-CA-1) as a
+  NEW `courseAttendance` collection keyed `ca_<courseId>_<dateKey>_<slot>_<studentId>`, and it shipped
+  — the derived id, the APPROVED-registration roster, the four statuses, the new-absence-only
+  notification, the API, the staff-only register screen and its ONE nav entry, with the isolation,
+  regression and browser proofs in [proof/8/REPORT.md](../proof/8/REPORT.md). What is NOT built is
+  the course-teacher admin picker (D-8P-5 places it with the course screens; D-CA-7's ca-4 line does
+  not schedule it), a teacher-facing read (v1 is staff-only, D-CA-4) and the family-facing read
+  (post-v1, owner to decide).
 - **College-specific guardian content** — **NOT PROVEN** whether the Parents app shows anything
   college-specific, and a per-child guardian transcript view is deliberately out of v1 (owner to
   decide).
@@ -359,7 +371,7 @@ verifier runs. Steps graded from the code alone are marked where a live run is n
 |---|------|-------|------|---------------|----------------|
 | 1 | ~~**Phase 7 remainder**~~ — **DONE AND COMMITTED (built 2026-10-13, committed 2026-10-14)**: the fee **screens / print pages** (7d), the fee rows' isolation + Q3 regression proof (7e) and the finished record with the production-build role probe (7f). The logic (7a), the data layer (7b) and the API (7c) were already done | `COLLEGE-DECISIONS.md` §24.7; [proof/7e/REPORT.md](../proof/7e/REPORT.md), [proof/7f/REPORT.md](../proof/7f/REPORT.md) | — | — | No — **committed and pushed (`f542405`, `efb97c0`, `946e4e3`); nothing is left on this row** |
 | 2 | Phase **9a/9b/9c** (renumbered from 8a/8b/8c — attendance took Phase 8): college dashboard / reports / import — **comes after Phase 8** by decision (D-CA-6) | §10 | Large | College admin | Partly |
-| 3 | ~~Per-course college attendance model undecided~~ — **DECIDED 2026-10-11 (owner, Q1/Q8): it is Phase 8**, and its model is D-CA-1…D-CA-7 — a NEW `courseAttendance` collection keyed `ca_<courseId>_<dateKey>_<slot>_<studentId>`, never retrofitted onto the school's `attendance` key, with `8-pre` (the course↔teacher link) built first and v1 marking staff-only. **`8-pre` IS BUILT AND VERIFIED (2026-10-14)** — the `courseTeacher` row with its derived id, its API and `verify-course-teachers` (54 checks) — so a teacher-facing college surface is possible now, and **ca-0 — the attendance allow-list module (`src/lib/college-attendance-access.ts`) — is BUILT AND VERIFIED (2026-10-14; `verify-college-attendance-access`, 17 checks after ca-2)**, **ca-1 — the pure attendance logic (`src/lib/college-attendance.ts`) — is BUILT AND VERIFIED too (2026-10-14; `verify-college-attendance-logic`, 31 checks after ca-2)**, **ca-2 — the `courseAttendance` data layer — is BUILT AND VERIFIED (2026-10-14, §28: the `COLS`/`RELS`/shim model with no pre-existing body touched, the date-key assertion now executed, and the `course-attendance` API segment deferred to ca-3, which creates its directory)**, and **ca-3 — the register's API (roster read, session save, per-student history; §29) — is BUILT AND VERIFIED (2026-10-14; `verify-course-attendance`, 46 checks: the segment entry landed with its directory and the save notifies only a NEW absence through the school's own guardian path)**, and **ca-4 — the register screen + its ONE college nav entry (§30) — is BUILT AND VERIFIED (2026-10-14; `verify-college-attendance-page`, 36 checks offline, with the nav proof's new check 10 and the frozen nav snapshot byte-identical; the screen is staff-only, the REGISTRAR reads it read-only, and D-8P-5's teacher-facing clause is recorded as placement, not scheduling — v1 adds no teacher read)**; the register's isolation/regression pass and finished record (ca-5/ca-6) and the post-v1 family read are NOT built | `COLLEGE-DECISIONS.md` §24.6/§24.8/§25, §10's dated correction | Medium | College teachers | **Yes**, for a college running attendance |
+| 3 | ~~Per-course college attendance model undecided~~ — **DECIDED 2026-10-11 (owner, Q1/Q8): it is Phase 8**, and its model is D-CA-1…D-CA-7 — a NEW `courseAttendance` collection keyed `ca_<courseId>_<dateKey>_<slot>_<studentId>`, never retrofitted onto the school's `attendance` key, with `8-pre` (the course↔teacher link) built first and v1 marking staff-only. **`8-pre` IS BUILT AND VERIFIED (2026-10-14)** — the `courseTeacher` row with its derived id, its API and `verify-course-teachers` (54 checks) — so a teacher-facing college surface is possible now, and **ca-0 — the attendance allow-list module (`src/lib/college-attendance-access.ts`) — is BUILT AND VERIFIED (2026-10-14; `verify-college-attendance-access`, 17 checks after ca-2)**, **ca-1 — the pure attendance logic (`src/lib/college-attendance.ts`) — is BUILT AND VERIFIED too (2026-10-14; `verify-college-attendance-logic`, 31 checks after ca-2)**, **ca-2 — the `courseAttendance` data layer — is BUILT AND VERIFIED (2026-10-14, §28: the `COLS`/`RELS`/shim model with no pre-existing body touched, the date-key assertion now executed, and the `course-attendance` API segment deferred to ca-3, which creates its directory)**, and **ca-3 — the register's API (roster read, session save, per-student history; §29) — is BUILT AND VERIFIED (2026-10-14; `verify-course-attendance`, 46 checks: the segment entry landed with its directory and the save notifies only a NEW absence through the school's own guardian path)**, and **ca-4 — the register screen + its ONE college nav entry (§30) — is BUILT AND VERIFIED (2026-10-14; `verify-college-attendance-page`, 36 checks offline, with the nav proof's new check 10 and the frozen nav snapshot byte-identical; the screen is staff-only, the REGISTRAR reads it read-only, and D-8P-5's teacher-facing clause is recorded as placement, not scheduling — v1 adds no teacher read)**; **ca-5 — the register's isolation + regression pass and the screen's browser proof — is BUILT AND VERIFIED too (2026-10-14): `verify-tenant-isolation` **116 checks** (+10), `verify-branch-isolation` **79** (+7), both from recorded baselines, the school attendance lines re-run to their counts, and the register screen driven in a real Chrome, **22/22** (`proof/8/browser-proof.mjs`); and **ca-6 finished the record (`proof/8/REPORT.md` §6)**. What is NOT built on this row is the **course-teacher admin picker** (D-8P-5 places it with the course screens; D-CA-7's ca-4 line does not schedule it) and any **teacher- or family-facing read** (v1 marking is staff-only, D-CA-4; the family read is post-v1, owner to decide) | `COLLEGE-DECISIONS.md` §24.6/§24.8/§25, §10's dated correction | Medium | College teachers | **Yes**, for a college running attendance |
 | 4 | ~~College fee heads / structures not modelled~~ — **DONE (7a/7b/7c)**: modelled, stored and served behind `/api/college-fees` | §24 | — | — | No |
 | 5 | Post-v1: per-programme scale override (D-6-19) | §23.6 | Small | Owner to confirm | No |
 | 6 | Post-v1: per-child guardian view, per-course teacher view | §23.6 | Small–medium | Owner to decide | No |

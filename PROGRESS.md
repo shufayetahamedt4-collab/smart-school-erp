@@ -759,3 +759,46 @@ nothing was edited to fix it; §31 records the correction.
 **The boundary, stated so it is not over-read:** ca-5 proves CONFINEMENT and RENDERING, not a new
 surface. No teacher, guardian or student read exists (v1 is staff-only), no course-teacher picker, and
 no family-facing notification link. ca-6 — the finished Phase 8 record — remains.
+
+---
+
+## 🔁 Session — 2026-10-14 (Phase 8 ca-6: the finished record)
+
+**Docs-only, and that is the point.** ca-6 is D-CA-7's last step: no `src/` file, no `scripts/` file,
+no server started, `suite-all.mjs` NOT run, nothing deployed, `integration/main-into-college`
+untouched (still `af65774`). It closes Phase 8 with one record and one agreement pass.
+
+1. **The finished record** — `proof/8/REPORT.md` gained its **§6**, which now carries the whole phase
+   in one place: the stage-by-stage counts table (8-pre **54**; access **17** at ca-2, logic **31** at
+   ca-2, page **36** at ca-4, `verify-course-attendance` **46** at ca-3; the route guard **25 route
+   files / 53 gated handlers** from ca-3; the isolation pair **106 → 116** and **72 → 79** at ca-5,
+   baselines first; the browser proof **22/22**), the `tsc --noEmit` **0 errors** result, what could
+   not be run again at ca-6 (the two once-per-app-start proofs and the suite), and the **open items
+   (a)–(e)**: the course-teacher admin picker, the teacher-facing read (v1 staff-only, D-CA-4),
+   `verify-sweep-routes`' `LEAVE` gap (school-side checker, one-line fix, its own change), the four
+   unattributed count drifts, and the three documented known reds.
+2. **The offline surface re-run fresh at ca-6** (no servers, no suite): `verify-college-attendance-access`
+   exit 0 **17**, `verify-college-attendance-logic` exit 0 **31**, `verify-college-attendance-page`
+   exit 0 **36**, `verify-college-routes` exit 0 **25/53**, `verify-nav-scope` exit 0 **10 checks**
+   (11 ✅ markers — its own closing line is the extra; the frozen snapshot byte-identical).
+   `npx tsc --noEmit` exit **0** with **0 lines** of output. **Every count equals its baseline.**
+3. **The four documents now agree on the phase's status, after a stale-text pass** (whether it was
+   asked for exactly this way in ca-6's condition or not): `COLLEGE-STATUS` §0 ("ca-5 and ca-6 have
+   **not started**"), §4 ("**Per-course attendance** — **not built** … **NOT PROVEN** which model"; the
+   fees bullet's "what 8/9 own"), §5 row 3 ("ca-5/ca-6 … NOT built"); `COLLEGE-DECISIONS` §30 ("ca-5
+   and ca-6 **remain**", "no browser run of the screen") and §24.10 ("Phase 8's counts **still owe
+   theirs**"); `TESTING.md`'s ca-4 entry ("**no browser pass of the screen has been recorded yet**").
+   Each was corrected by **appending its dated supersession**, not by rewriting history; the state of
+   record everywhere is now: **Phase 8 complete (8-pre and ca-0…ca-5 built and verified, ca-6 this
+   record), 9a/9b/9c NOT started.**
+4. **One record left as authored, and noted rather than edited:** `proof/8pre/REPORT.md` names
+   `integration/main-into-college` (working tree from `af65774`) where the link's commit and the whole
+   phase actually sit on `phase8/college-attendance` — the leaf branch cut from that HEAD so
+   `integration/main-into-college` could stay at `af65774`. The §6 record points at it instead of
+   touching a historical proof.
+
+**The boundary, stated so it is not over-read:** ca-6 proves the phase's *records*, not fresh store
+behaviour — the two once-per-app-start proofs (`verify-course-attendance`'s live half, the browser
+proof) were NOT re-run here and are re-verified by the next emulator-backed run, exactly as §6.4 says.
+The next line is **9a/9b/9c** (dashboard / reports / import), not started, with the BOTH-tenant
+stats-mode question (§24.10) still an owner decision.

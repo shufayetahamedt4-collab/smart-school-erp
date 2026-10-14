@@ -321,9 +321,10 @@ more **unguarded, offline** verifier:
   status literal and NO role list of its own, and returns before any read until the gate resolves. It
   also cross-pins ca-3's contract (the route serves `rows`/`summary`/`course`/`dateKey`/`slot`) and the
   nav entry's carrier set. **36 checks.** It states in its own header that it does NOT prove the page
-  renders — no DOM, no React, no browser — and no browser pass of the screen has been recorded yet (the
-  register's HTTP half is `verify-course-attendance`). It is wired into `suite-all.mjs`'s pure list
-  beside the ca-1 verifier.
+  renders — no DOM, no React, no browser — and, as written at ca-4, **no browser pass of the screen had
+  yet been recorded**: ca-5 recorded one, `proof/8/browser-proof.mjs`, **22/22** in real Chrome (see
+  the ca-5 entry below), so read that clause as ca-4's own state, superseded by it. It is wired into
+  `suite-all.mjs`'s pure list beside the ca-1 verifier.
 
 Phase 8 ca-5 (isolation + regression + the browser proof) extends two existing verifiers and adds one
 **unguarded, emulator-only proof script**:
