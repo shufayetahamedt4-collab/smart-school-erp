@@ -232,6 +232,21 @@ verifier:
   `verify-college-fees-api` (which resets its own tenant LAST); its record is
   [proof/8pre/REPORT.md](../proof/8pre/REPORT.md).
 
+Phase 8 ca-0 (the college attendance allow-list, docs/COLLEGE-DECISIONS.md §26) adds one more
+**unguarded, offline** verifier:
+
+- `scripts/verify-college-attendance-access.mjs` — deliberately unguarded and offline, in the shape of
+  `verify-college-results-page.mjs`'s access section. It IMPORTS `src/lib/college-attendance-access.ts`
+  (`registerHooks`) and exercises the rule for real: the exact allow-lists (WRITE = SUPER_ADMIN /
+  SCHOOL_ADMIN / BRANCH_ADMIN; READ = the writers + REGISTRAR; no ACCOUNTANT), the full role × direction
+  truth table (raw junk refused), the measured proof that the rule is narrower than the school's
+  `attendanceMarks` module (`can()` admits TEACHER `entry`, GUARDIAN `view` and STUDENT `viewOwn`; the
+  rule refuses all three), the REGISTRAR read-only, and both refusal sentences. It then pins ca-0's
+  boundary as text: no file under `src/` consumes the module yet (ca-3/ca-4 own the consumers), the
+  school's `/api/attendance` route is untouched, and `src/lib/db.ts` carries no `courseAttendance` — a
+  pin ca-2 removes with the collection. **18 checks.** It is wired into `suite-all.mjs`'s pure list
+  beside `verify-college-permissions`.
+
 - `scripts/suite-all.mjs` — the suite runner, now IN the repository. The earlier runs were driven by a
   wrapper in a temp directory, which is exactly why `BASE`/`BASE_URL` never reached
   `verify-exams-invalidation`, `qa-phase23` and `qa-certificates`: each dialled its own dead port instead

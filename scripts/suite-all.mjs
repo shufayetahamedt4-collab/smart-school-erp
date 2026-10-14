@@ -76,6 +76,9 @@ const PURE = [
   "verify-nav-scope",
   "verify-registration-status",
   "verify-college-permissions",
+  // ca-0 — the college attendance allow-list: it imports the pure module and
+  // pins ca-0's boundary (no consumer, no collection, no school path).
+  "verify-college-attendance-access",
 ];
 
 /**

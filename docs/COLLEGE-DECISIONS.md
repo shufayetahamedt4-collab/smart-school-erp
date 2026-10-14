@@ -2356,3 +2356,47 @@ It is built in this change, before the markable register rather than after it.
   `verify-course-registrations` 50, `verify-college-permissions` 8, `verify-college-fees-api` 112).
   The suite order gains it in the college group, before `verify-college-fees-api` (which resets its own
   tenant LAST). The record is [proof/8pre/REPORT.md](../proof/8pre/REPORT.md).
+
+---
+
+## 26. Phase 8 ca-0 — the college attendance allow-list (BUILT 2026-10-14)
+
+**What ca-0 is, and why it is first.** D-CA-7 puts ca-0 — the attendance allow-list module — ahead of
+the pure logic, the data layer, the API and the screens, because every later step has to consult ONE rule,
+and it is the step that decides whether the school's own `attendanceMarks` module may be reused. It may
+not: read from `src/lib/permissions.ts`, that module grants TEACHER `entry` (which implies view), GUARDIAN
+`view` and STUDENT `viewOwn` — reusing it would let a teacher mark a college register (post-v1, D-8P-5)
+and would expose every course register to every family. That is the hole
+`college-results-access.ts` was created to close for results (6d-fix), and D-CA-4 already recorded the
+ruling: **v1 marking is staff-only**.
+
+- **The rule, stated once in `src/lib/college-attendance-access.ts`** (the results pattern; the two
+  directions are shaped like `college-fees-access.ts`):
+  - **WRITE** (mark a session): the admin-level roles — `SUPER_ADMIN`, `SCHOOL_ADMIN`, `BRANCH_ADMIN`.
+  - **READ**: the writers, plus the `REGISTRAR` **read-only** — the results precedent.
+  - **REFUSED both directions**: `TEACHER`, `GUARDIAN`, `STUDENT`, `ACCOUNTANT`, `LIBRARIAN`,
+    `FRONT_DESK`. No `ACCOUNTANT` — attendance is not money, so D-7-18's fee list deliberately does not
+    transfer. A `TEACHER` stays out in v1 even though 8-pre links them to the course: **D-8P-5** — the
+    link makes a teacher-facing surface POSSIBLE, it does not add one.
+- **The rule is pure.** No imports at all (the `college-results-access.ts` design), so the ca-3 API
+  handlers (server) and the ca-4 register screen (a client component) can share it without dragging
+  `next/server` or prisma into a bundle; each caller wraps it the way `college-results-server.ts` /
+  `college-fees-server.ts` wrap theirs. It is NOT a new `MATRIX` module — the matrix is untouched, and
+  `can()` stays the module-level gate.
+- **The proof is `scripts/verify-college-attendance-access.mjs` (18 checks, offline, wired into
+  `suite-all.mjs`'s pure list).** It IMPORTS the module (`registerHooks`, the `verify-college-gate.mjs`
+  trick): purity; the exact allow-lists (write = the three admin-level roles in order; read = the writers
+  + REGISTRAR; no ACCOUNTANT); the full role × direction truth table (3/4 allowed, 7/6 roles and 10 raw
+  junk values refused); the measured "narrower than `attendanceMarks`" proof (`can()` admits TEACHER
+  `entry`, GUARDIAN `view` and STUDENT `viewOwn`; the rule refuses all three); the REGISTRAR read-only;
+  the two refusal sentences; and ca-0's boundary — no file under `src/` consumes the module yet, the
+  school's `/api/attendance` route is untouched, and `src/lib/db.ts` carries no `courseAttendance` (that
+  pin is ca-2's to remove with the collection).
+- **Unchanged beside it (2026-10-14):** `verify-college-permissions` **8** markers (no new module, so no
+  count change), `verify-nav-scope` exit 0 (the snapshot stays byte-identical — ca-0 adds no nav entry),
+  `verify-college-routes` **23 route files / 50 gated handlers** (no route added), `tsc --noEmit` 0
+  errors.
+- **What ca-0 is not.** No route, no page, no nav entry, no `COLS`/`RELS` entry, no consumer. The
+  register itself — the derived `ca_<courseId>_<dateKey>_<slot>_<studentId>` id, the APPROVED-registration
+  roster, the four statuses, the new-absence notification, the data layer, the API and the screens — is
+  ca-1…ca-6 (D-CA-1…D-CA-7) and remains unbuilt.

@@ -5,7 +5,7 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** GitHub — `github.com/shufayetahamedt4-collab/smart-school-erp` (any clone works — see "Working from a different PC/device" below)
-**Last updated:** 2026-10-14 — **college Phase 7 is FINISHED AND COMMITTED** (fee basis: logic 7a, data 7b, API 7c, screens + print pages 7d, isolation/Q3 7e, finished record + production-build role probe 7f) on `integration/main-into-college` (`f542405` code + verifiers, `efb97c0` docs, the evidence records in `946e4e3`), where the school and college lines are merged; production still runs on `smart-school-db` (asia-southeast1), and its **live branch is `main`** (`f4ed2a5`). Nothing is left uncommitted but ignored artifacts. The newest session record is the **2026-10-14** block at the bottom of this file.
+**Last updated:** 2026-10-14 — **college Phase 7 is FINISHED AND COMMITTED** (fee basis: logic 7a, data 7b, API 7c, screens + print pages 7d, isolation/Q3 7e, finished record + production-build role probe 7f) on `integration/main-into-college` (`f542405` code + verifiers, `efb97c0` docs, the evidence records in `946e4e3`), where the school and college lines are merged; production still runs on `smart-school-db` (asia-southeast1), and its **live branch is `main`** (`f4ed2a5`). Nothing is left uncommitted but ignored artifacts. **Phase 8 has started on `phase8/college-attendance`**: `8-pre` (the course↔teacher link) and **ca-0** (the college attendance allow-list module) are built and verified there; the markable register (ca-1…ca-6) is next. The newest session record is the **2026-10-14 ca-0** block at the bottom of this file.
 
 ---
 
@@ -508,3 +508,31 @@ unchanged). `npm run typecheck` 0 errors.
 **The boundary, stated so it is not over-read:** 8-pre adds the LINK, not a screen and not a
 teacher-facing read. v1 attendance marking is still staff-only and the register (ca-0…ca-6) is the next
 step. The record is `proof/8pre/REPORT.md`.
+
+---
+
+## 🔁 Session — 2026-10-14 (Phase 8 ca-0: the college attendance allow-list)
+
+**Code + verifier + records.** ca-0 is D-CA-7's first register step (docs/COLLEGE-DECISIONS.md §24.8):
+the ONE allow-list module every later attendance route, screen and print page must consult. It exists
+because the school's `attendanceMarks` module cannot be the gate — it grants TEACHER `entry`, GUARDIAN
+`view` and STUDENT `viewOwn`, so reusing it would let a teacher mark a college register (post-v1,
+D-8P-5) and would expose every course register to every family. D-CA-4's ruling is **v1 marking is
+staff-only**.
+
+1. **The module** — `src/lib/college-attendance-access.ts` (the results/fees pattern, no imports at all):
+   WRITE = SUPER_ADMIN, SCHOOL_ADMIN, BRANCH_ADMIN; READ = the writers + a read-only REGISTRAR; REFUSED
+   both directions = TEACHER, GUARDIAN, STUDENT, ACCOUNTANT, LIBRARIAN, FRONT_DESK. No ACCOUNTANT —
+   attendance is not money, so the fee rule does not transfer. TEACHER stays out in v1 (D-8P-5).
+2. **The proof** — `scripts/verify-college-attendance-access.mjs` (**18 checks**, offline, wired into
+   `suite-all.mjs`'s pure list). It IMPORTS the module (`registerHooks`) and pins: purity; the exact
+   allow-lists; the full role × direction truth table (raw junk refused); the measured "narrower than
+   `attendanceMarks`" proof (the matrix admits TEACHER/GUARDIAN/STUDENT, the rule refuses all three); the
+   REGISTRAR read-only; the two refusals; and ca-0's boundary — no file under `src/` consumes the module
+   yet, the school's `/api/attendance` route is untouched, and no `courseAttendance` exists in `db.ts`
+   (ca-2 owns that pin's removal).
+3. **The boundary** — no route, no page, no nav entry, no `COLS`/`RELS` entry, no consumer. The register
+   (ca-1…ca-6) is next.
+4. **Unchanged beside it (2026-10-14):** `verify-college-permissions` **8** (no new `MATRIX` module — so
+   no count change), `verify-nav-scope` exit 0 (snapshot byte-identical), `verify-college-routes`
+   **23/50** (no route added), `npx tsc --noEmit` 0 errors.
