@@ -5,7 +5,7 @@
 
 **Project:** Smart School ERP & Parent Communication System (Multi-Tenant SaaS)
 **Location:** GitHub — `github.com/shufayetahamedt4-collab/smart-school-erp` (any clone works — see "Working from a different PC/device" below)
-**Last updated:** 2026-10-14 — **college Phase 7 is FINISHED AND COMMITTED** (fee basis: logic 7a, data 7b, API 7c, screens + print pages 7d, isolation/Q3 7e, finished record + production-build role probe 7f) on `integration/main-into-college` (`f542405` code + verifiers, `efb97c0` docs, the evidence records in `946e4e3`), where the school and college lines are merged; production still runs on `smart-school-db` (asia-southeast1), and its **live branch is `main`** (`f4ed2a5`). Nothing is left uncommitted but ignored artifacts. **Phase 8 has started on `phase8/college-attendance`**: `8-pre` (the course↔teacher link) and **ca-0** (the college attendance allow-list module) are built and verified there; the markable register (ca-1…ca-6) is next. The newest session record is the **2026-10-14 ca-0** block at the bottom of this file.
+**Last updated:** 2026-10-14 — **college Phase 7 is FINISHED AND COMMITTED** (fee basis: logic 7a, data 7b, API 7c, screens + print pages 7d, isolation/Q3 7e, finished record + production-build role probe 7f) on `integration/main-into-college` (`f542405` code + verifiers, `efb97c0` docs, the evidence records in `946e4e3`), where the school and college lines are merged; production still runs on `smart-school-db` (asia-southeast1), and its **live branch is `main`** (`f4ed2a5`). Nothing is left uncommitted but ignored artifacts. **Phase 8 has started on `phase8/college-attendance`**: `8-pre` (the course↔teacher link), **ca-0** (the college attendance allow-list) and **ca-1** (the pure attendance logic) are built and verified there; the data layer (ca-2…ca-6) is next. The newest session record is the **2026-10-14 ca-1** block at the bottom of this file.
 
 ---
 
@@ -536,3 +536,32 @@ staff-only**.
 4. **Unchanged beside it (2026-10-14):** `verify-college-permissions` **8** (no new `MATRIX` module — so
    no count change), `verify-nav-scope` exit 0 (snapshot byte-identical), `verify-college-routes`
    **23/50** (no route added), `npx tsc --noEmit` 0 errors.
+
+---
+
+## 🔁 Session — 2026-10-14 (Phase 8 ca-1: the pure college attendance logic)
+
+**Code + verifier + records.** ca-1 states the rules every later attendance step must agree on
+(D-CA-1…D-CA-3; Q7/Q8), with no db access, no routes, no screens and no nav.
+
+1. **The module** — `src/lib/college-attendance.ts` (dependency-free, the `course-teachers.ts` /
+   `registration-status.ts` design): the derived row id `ca_<courseId>_<dateKey>_<slot>_<studentId>`
+   (trimmed parts, an empty part THROWS, an invalid slot THROWS); the date-key mirror of `db.ts`'s local
+   `dateKey` (ca-2 owns the export-or-mirror decision and the assertion against the original); the slot
+   rule (absent = 1, whole numbers 1..n, junk reads as null); the four statuses verbatim
+   (PRESENT/ABSENT/LATE/LEAVE, with UNMARKED as the read-only placeholder, never stored); the
+   APPROVED-registration roster (duplicates collapsed, blanks dropped, read by the SAME reader college
+   fees bills by); and the notify decision (`shouldNotifyAbsence`: only a NEW absence today, so a
+   corrected register never re-mails a family).
+2. **The proof** — `scripts/verify-college-attendance-logic.mjs` (**30 checks**, offline, wired into
+   `suite-all.mjs`'s pure list). It IMPORTS the module (`registerHooks`) and pins purity; the date-key
+   probe table plus the original helper's shape in `db.ts`; the id's composition/trimming/idempotence
+   and every throwing case; the slot reader's table; the statuses and refusals; the roster (approved
+   only, duplicates, blanks, order, the fees-reader agreement on one probe table); the full notify
+   transition table; and ca-1's scope — no route, page or component consumes it yet, and the school's
+   own `/api/attendance` never reaches for it.
+3. **The boundary** — no `COLS`/`RELS` entry (ca-2), no roster/session API (ca-3), no register screen or
+   nav entry (ca-4), no notification sent.
+4. **Unchanged beside it (2026-10-14):** `verify-college-attendance-access` **18** (its pins still hold),
+   `verify-nav-scope` exit 0 (snapshot byte-identical), `verify-college-routes` **23/50** (no route
+   added), `npx tsc --noEmit` 0 errors.

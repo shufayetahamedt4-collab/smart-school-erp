@@ -79,6 +79,9 @@ const PURE = [
   // ca-0 — the college attendance allow-list: it imports the pure module and
   // pins ca-0's boundary (no consumer, no collection, no school path).
   "verify-college-attendance-access",
+  // ca-1 — the pure attendance logic: the id, the slot, the statuses, the
+  // roster and the notify rule, all offline.
+  "verify-college-attendance-logic",
 ];
 
 /**

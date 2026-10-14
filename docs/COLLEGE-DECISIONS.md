@@ -2400,3 +2400,49 @@ ruling: **v1 marking is staff-only**.
   register itself — the derived `ca_<courseId>_<dateKey>_<slot>_<studentId>` id, the APPROVED-registration
   roster, the four statuses, the new-absence notification, the data layer, the API and the screens — is
   ca-1…ca-6 (D-CA-1…D-CA-7) and remains unbuilt.
+
+---
+
+## 27. Phase 8 ca-1 — the pure attendance logic (BUILT 2026-10-14)
+
+**What ca-1 decides.** One module, `src/lib/college-attendance.ts`, states the rules every later step
+must agree on (D-CA-1…D-CA-3; the owner's answers Q7/Q8), and nothing else — no db access, no routes, no
+screens, no nav:
+
+- **The row id, `ca_<courseId>_<dateKey>_<slot>_<studentId>`** (D-CA-1). Deterministic and trimmed, so
+  a re-saved register upserts ONE row per (course, day, slot, student) instead of appending; an empty or
+  whitespace part THROWS rather than deriving an id every caller would share. The school's own
+  `a_<studentId>_<dateKey>` key is not reused (D-3-6): it has no course in it and no slot.
+- **The date-key mirror.** `courseAttendanceDateKey` reproduces `db.ts`'s module-local `dateKey` (local
+  `YYYY-MM-DD`). D-CA-1 gives **ca-2** the export-or-mirror decision and the assertion against the
+  original; the ca-1 verifier already pins today's mirror against `db.ts` read as text.
+- **The slot (Q7).** 1..n, absent/null/blank = 1 — the slot is IN the key, so a second session of the
+  same course on the same day is a different row. A present-but-invalid slot reads as `null` and the
+  caller refuses it; the id builder throws.
+- **The four statuses (D-CA-3).** PRESENT / ABSENT / LATE / LEAVE, strict, reused verbatim from the
+  school's register; `UNMARKED` is the read-only "no row" placeholder and is never storable.
+- **The roster (D-CA-2).** `approvedRosterStudentIds` / `isOnApprovedRoster` read the course's APPROVED
+  registrations with the SAME reader college fees bills by — the verifier pins the two readers against
+  one probe table ("the same machine decides who may be marked and who may be billed") — with duplicate
+  rows collapsed and blank ids dropped.
+- **The notify decision (D-CA-3).** `shouldNotifyAbsence(previous, next)` is true only when the incoming
+  status is ABSENT and the stored row was not already ABSENT — the school's own "notify only a child who
+  was not already marked absent today" rule, so a re-saved or corrected register never re-mails a
+  family. The course-and-slot copy of the message belongs to ca-3.
+
+**The proof.** `scripts/verify-college-attendance-logic.mjs` (**30 checks**, offline, wired into
+`suite-all.mjs`'s pure list). It IMPORTS the module (`registerHooks`) and pins purity; the date-key probe
+table plus the original helper's shape in `db.ts`; the id's exact composition, trimming, idempotence and
+every throwing case; the slot reader's full table; the four statuses and the refusal sentences; the
+roster (approved only, duplicates, blanks, order, the fees-reader agreement); the full notify transition
+table; and ca-1's scope — no route, page or component consumes it yet (ca-3/ca-4 own the consumers) and
+the school's own `/api/attendance` never reaches for it.
+
+**Unchanged beside it (2026-10-14):** `verify-college-attendance-access` **18** (its pins still hold),
+`verify-nav-scope` exit 0 (snapshot byte-identical — no nav entry), `verify-college-routes` **23 route
+files / 50 gated handlers** (no route added), `tsc --noEmit` 0 errors.
+
+**What ca-1 is not.** No `COLS`/`RELS` entry (ca-2), no roster/session API (ca-3), no register screen or
+nav entry (ca-4), and no notification is sent. The `courseAttendance` collection, its segment, its
+route and its screen remain unbuilt; ca-0's verifier still pins that `db.ts` carries no
+`courseAttendance` until ca-2 adds it (and removes that pin with the change).
