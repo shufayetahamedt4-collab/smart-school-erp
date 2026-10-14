@@ -623,6 +623,90 @@ console.log("\n### college fees — branch admin confinement (7c)");
   }
 }
 
+/* --------------------------------- college course attendance — branch confinement (ca-5) */
+// Phase 8 ca-5. The same three ca-3 routes as the tenant section, now measured on
+// ONE tenant's two branches: a BRANCH_ADMIN reaches its own branch's course
+// register and history, and another branch's course/student is the SAME 404 a
+// ghost id gets — never a 403 that would confirm the row, and never the row. The
+// rows are this section's own `zziso-ca5-…` documents (written raw, deleted on the
+// way out); the fixture's rows are never mutated. The SCHOOL-scoped admin still
+// reaches BOTH branches — the confinement is scope, not a tenant-wide hiding.
+console.log("\n### college course attendance — branch admin confinement (ca-5)");
+{
+  const TRACK = new URL(".qa-fixtures.json", import.meta.url);
+  if (!existsSync(TRACK)) {
+    check("the isolation fixture is present (scripts/.qa-fixtures.json)", false, "run: node scripts/isolation-fixture.mjs create");
+  } else {
+    const creds = (JSON.parse(readFileSync(TRACK, "utf8")).creds) || {};
+    const collegeAdmin = await login(HOSTS.school, "zz-iso-college-admin@test.local", creds.collegeAdmin);
+    const collegeBranchAdmin = await login(HOSTS.school, "zz-iso-college-br-admin@test.local", creds.collegeBranchAdmin);
+
+    const C1 = `${P}college`;
+    const brA = `${P}col-br-a`;
+    const brB = `${P}col-br-b`;
+    const courseA = `${P}col-course-a`;
+    const courseB = `${P}col-course-b`;
+    const stuA = `${P}col-stu-a`;
+    const stuB = `${P}col-stu-b`;
+    const SESSION = "2026-10-14";
+    const rowA = `${P}ca5-br-row-a`;
+    const rowB = `${P}ca5-br-row-b`;
+    const rowDoc = (id, branchId, courseId, studentId, programId, status) => ({
+      id, schoolId: C1, branchId, courseId, studentId, programId, termNumber: 1,
+      sessionDate: `${SESSION}T00:00:00.000Z`, slot: 1, status, remark: "ZZ iso ca5 branch",
+      markedById: null, registrationId: null, createdAt: new Date().toISOString(),
+    });
+    await db.collection("courseAttendances").doc(rowA).set(rowDoc(rowA, brA, courseA, stuA, `${P}col-prog-a`, "PRESENT"));
+    await db.collection("courseAttendances").doc(rowB).set(rowDoc(rowB, brB, courseB, stuB, `${P}col-prog-b`, "ABSENT"));
+
+    const att = (courseId) => `/api/course-attendance?courseId=${encodeURIComponent(courseId)}&date=${SESSION}`;
+    const hist = (courseId, studentId) => `/api/course-attendance/history?courseId=${encodeURIComponent(courseId)}&studentId=${encodeURIComponent(studentId)}`;
+
+    // 1. Own branch's register resolves; another branch's course is NOT FOUND on
+    //    every route, so the branch really is confined.
+    const ownGet = await req(HOSTS.school, att(courseA), { cookie: collegeBranchAdmin });
+    const foreignGet = await req(HOSTS.school, att(courseB), { cookie: collegeBranchAdmin });
+    check("a branch admin CAN read its own branch's course register", ownGet.status === 200, `HTTP ${ownGet.status}`);
+    check("another branch's course register is NOT FOUND (404)", foreignGet.status === 404, `HTTP ${foreignGet.status}`);
+    const foreignSave = await post(HOSTS.school, "/api/course-attendance", { courseId: courseB, date: SESSION, rows: [{ studentId: stuB, status: "PRESENT" }] }, collegeBranchAdmin);
+    check("its session SAVE for another branch's course is NOT FOUND (404)", foreignSave.status === 404, `HTTP ${foreignSave.status}`);
+    const rowBAfter = (await db.collection("courseAttendances").doc(rowB).get()).data();
+    check("…and that other branch's row is UNCHANGED (still ABSENT)", rowBAfter?.status === "ABSENT", `status=${rowBAfter?.status}`);
+
+    // 2. The history read confines the branch too: the branch's OWN student serves
+    //    its row; another branch's course/student is NOT FOUND and never serves it.
+    const ownHist = await req(HOSTS.school, hist(courseA, stuA), { cookie: collegeBranchAdmin });
+    const foreignHist = await req(HOSTS.school, hist(courseB, stuB), { cookie: collegeBranchAdmin });
+    const ownHistIds = (ownHist.data?.rows || []).map((r) => r.id);
+    check(
+      "a branch admin's history read serves its OWN branch's stored row",
+      ownHist.status === 200 && ownHistIds.includes(rowA),
+      `HTTP ${ownHist.status} ids=${JSON.stringify(ownHistIds)}`
+    );
+    check(
+      "another branch's student history is NOT FOUND and never serves its row",
+      foreignHist.status === 404 && !String(foreignHist.text || "").includes(rowB),
+      `HTTP ${foreignHist.status}`
+    );
+
+    // 3. The SCHOOL-scoped admin still reaches BOTH branches (the confinement is
+    //    scope, not a tenant-wide hiding of rows).
+    const aHistA = await req(HOSTS.school, hist(courseA, stuA), { cookie: collegeAdmin });
+    const aHistB = await req(HOSTS.school, hist(courseB, stuB), { cookie: collegeAdmin });
+    const aIdsA = (aHistA.data?.rows || []).map((r) => r.id);
+    const aIdsB = (aHistB.data?.rows || []).map((r) => r.id);
+    check(
+      "a SCHOOL-scoped admin reaches BOTH branches' register history",
+      aHistA.status === 200 && aHistB.status === 200 && aIdsA.includes(rowA) && aIdsB.includes(rowB),
+      `${JSON.stringify(aIdsA)} / ${JSON.stringify(aIdsB)}`
+    );
+
+    for (const id of [rowA, rowB]) {
+      await db.collection("courseAttendances").doc(id).delete().catch(() => null);
+    }
+  }
+}
+
 console.log("\n### cleanup");
 const wantedAdm = new Set(createdAdmissionNos);
 const studentDocs = (await db.collection("students").get()).docs.filter((d) => wantedAdm.has(d.data().admissionNo));

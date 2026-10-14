@@ -1,0 +1,35 @@
+[guard] emulator-only mode OK — FIRESTORE_EMULATOR_HOST=127.0.0.1
+
+### 1. an admin loads the register, marks and saves
+  PASS  the page renders (the navbar offers the new entry) — http://127.0.0.1:3000
+  PASS  the course picker lists the college's courses and ZZCA-101 is selectable — zziso-col-course-a
+  PASS  the grid lists exactly the course's two APPROVED students — ["ZZ Iso Ca5b Student One","ZZ Iso Ca5b Student Two"]
+  PASS  the four mark controls are present and two marks are set — [true,true]
+  PASS  the save reports what it wrote — Saved 2 marks · 1 family notified
+  PASS  the STORE holds exactly the two marks the screen sent — PRESENT/ABSENT for 2026-10-14
+  PASS  the saved rows carry the course, the slot and the session date (D-CA-1) — zziso-col-course-a slot=1
+
+### 2. a REGISTRAR sees the register with no save control
+  PASS  the registrar's grid shows the same roster — 2 row(s)
+  PASS  …there is NO save control — no 'Save register' button
+  PASS  …and NO mark controls — 0
+  PASS  …and the read-only note is shown
+  PASS  …and the stored statuses are visible (Present / Absent)
+
+### 3. a course with no APPROVED registrations says so
+  PASS  the empty-roster message is shown — No APPROVED registrations for ZZCB-101 — ZZ Iso College Course B yet — a register lists a course's approved students only.
+  PASS  …and it names the rule (APPROVED registrations only) — No APPROVED registrations for ZZCB-101 — ZZ Iso College Course B yet — a register lists a course's approved students only.
+
+### 4. a refused role is told so and issues NO register request
+  PASS  the ACCOUNTANT is refused on the screen, before any read
+  PASS  …with the screen's own refusal sentence
+  PASS  …and the page issued NO /api/course-attendance request — 7 api request(s), none a register read
+  PASS  …and the API really refuses it 403 READ (with ca-0's sentence) — 403 "College attendance is available to the school administration and the registrar."
+  PASS  …and 403 WRITE — 403 "College attendance is marked by the school administration."
+
+### 5. a SCHOOL tenant is told the screen is college-only
+  PASS  a school admin who reaches the URL gets the college-only note
+  PASS  …and the page issued NO /api/course-attendance request — 6 api request(s), none a register read
+  PASS  …and the API gates the school tenant 403 with zero data — 403
+
+✅ BROWSER PROOF PASSED — the register page loads, marks, saves, refuses read-only and school tenants, and the store matches what the screen sent.

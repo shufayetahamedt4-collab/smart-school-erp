@@ -705,3 +705,57 @@ scheduling** — a post-v1 teacher read would live in the register's step, but v
    `verify-college-attendance-logic` **31**, `verify-college-fees-data` **11**,
    `verify-college-results-data` **8**, `verify-college-routes` **25/53**, `verify-college-permissions`
    **8**, `npx tsc --noEmit` 0 errors. `suite-all.mjs` was NOT run (the stage's rule).
+
+---
+
+## 🔁 Session — 2026-10-14 (Phase 8 ca-5: isolation, regression and the browser proof)
+
+**No product code.** ca-5 is D-CA-7's "isolation + regression, baselines first, and the school's own
+attendance paths re-run to identical counts" step, and it adds no `src/` file: the diff is two
+extended verifiers plus the `proof/8/` record. The stage's read-first status check also **corrected
+ca-4's prose, not its code**: ca-4's first report had said the register's fifth status was `EXCUSED`,
+but `src/` contains no such literal — ca-1's `COURSE_ATTENDANCE_STATUSES` is
+`PRESENT/ABSENT/LATE/LEAVE` plus the read-only `UNMARKED` placeholder, and every `EXCUSED` in the tree
+is a **negative probe** (a value the checks require to be refused). Nothing was stopped for and
+nothing was edited to fix it; §31 records the correction.
+
+1. **Baselines recorded before the change** (each verifier after its own wipe + seed + fixture + app
+   restart, `SUITE_PURE=0 SUITE_ONLY=… suite-all.mjs`): `verify-tenant-isolation` **106 check lines**
+   (107 ✅, its closing line being a ✅), `verify-branch-isolation` **72**.
+2. **`verify-tenant-isolation` +10** — a `course attendance` section over all three ca-3 routes
+   (roster read, session save, history) and the register rows: the COLLEGE tenant reads its own
+   register and its own stored row; a foreign course is the SAME 404 a ghost id gets on all three
+   routes (never a 403 oracle); a refused cross-tenant save writes nothing; the reverse direction is
+   404 too; a SCHOOL tenant is 403 with zero data; the other college-capable tenant's reads carry no
+   foreign row id or name; a ghost student id is 404. **116 checks, exit 0.**
+3. **`verify-branch-isolation` +7** — the same three routes on ONE tenant's two branches: the branch
+   admin reaches its own branch's register and history (200), another branch's course/student is 404
+   and that branch's stored row is unchanged, and the SCHOOL-scoped admin still reaches both branches.
+   **79 checks, exit 0.** No check weakened; no fixture change needed (ca-2 already owns
+   `courseAttendances` in both sweeps).
+4. **The browser proof** — `proof/8/browser-proof.mjs` (`seed`/`run`/`clean`, `scripts/lib/headless.mjs`,
+   no new dependency), the gap ca-4's record itself named: **22/22, exit 0** in real Chrome. An admin
+   loads the roster (exactly the course's two APPROVED students), marks Present/Absent, saves ("Saved
+   2 marks · 1 family notified") and the **stored rows** match; a REGISTRAR sees the same roster with
+   no save and no mark control plus the read-only note; an unregistered course shows the empty message;
+   the ACCOUNTANT is refused before any read (and the API 403s both ways); a SCHOOL tenant gets the
+   college-only note (and a 403). Its fixture students and APPROVED registrations are written BEFORE
+   the app starts (the pull memo rule), and `clean` removes the rows **and the notification** the one
+   ABSENT sent. **One expectation inside the proof was corrected, not the code:** the screen shows the
+   view module's own refusal sentence while the API shows ca-0's — both are now asserted.
+5. **The full suite, once, from a clean state** — 60 verifiers, 56 exit 0, ≈46 min. Every attendance
+   and school-side count reproduced (class-sessions **56**, course-attendance **46**, course-teachers
+   **54**, ca-0/1/4 **17/31/36**, fees-totals 24 = 15 school + 9 college, phase7-e2e **160**,
+   promotion-api **100**, fees-api **112/112**), and the ca-5 counts are 116 / 79 / 22-inside it.
+   Three known reds unchanged: read-cache 0/1, routine-config **30 pass / 2 fail / 1 skip**,
+   qa-certificates 40/1.
+6. **One suite failure, run alone before it counted** — `verify-sweep-routes` failed in the full run on
+   its `attendance rows well-formed` line (2 checks) and **passed alone from a clean state** (45
+   checks). Its cause predates ca-5 and is in the tree: the checker's status list omits `LEAVE`,
+   which the school's own `AttendanceStatus` type (`db.ts:68`) contains and `seed.mjs` writes with 5 %
+   probability. **Not fixed here** (ca-5 touches no school-side checker); the one-line correction —
+   add `LEAVE` to that list — is its own change, recorded in §31 and `proof/8/REPORT.md` §4.
+
+**The boundary, stated so it is not over-read:** ca-5 proves CONFINEMENT and RENDERING, not a new
+surface. No teacher, guardian or student read exists (v1 is staff-only), no course-teacher picker, and
+no family-facing notification link. ca-6 — the finished Phase 8 record — remains.

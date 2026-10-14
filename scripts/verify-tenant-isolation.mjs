@@ -953,5 +953,144 @@ console.log("\n### college fees — a COLLEGE tenant's fee rows are invisible an
   }
 }
 
+/* ---------- course attendance: a COLLEGE tenant's rows and its three routes ---------- */
+// Phase 8 ca-5. The register is ca-3's API (`/api/course-attendance` — the session
+// roster read and the session save — plus `/history`, one student's sessions in
+// one course). Every assertion is about CONFINEMENT: a foreign tenant's course or
+// student answers the SAME 404 a ghost id gets (never a 403 oracle that would
+// confirm the row exists), a SCHOOL tenant meets the COLLEGE gate with zero data,
+// and a cross-tenant save is refused and changes nothing.
+//
+// The section writes its OWN `zziso-ca5-…` rows RAW: `courseAttendances` is the one
+// collection this app process has not pulled before this section (nothing above or
+// beside it reads a register), so the reads below see them without the app's 30 s
+// pull memo getting in the way; a write THROUGH the app would need an APPROVED
+// registration, and the fixture's own pair is deliberately PENDING (asserted in the
+// registrations section above, whose rows may not be mutated). Exactly those two
+// rows are deleted on the way out, and `isolation-fixture.mjs`'s schoolId backstop
+// sweeps the collection as well.
+console.log("\n### course attendance — a COLLEGE tenant's rows and its three routes");
+{
+  const C1 = `${P}college`;
+  const BOTH = `${P}both`;
+  const colCourseA = `${P}col-course-a`;
+  const colStuA = `${P}col-stu-a`;
+  const bothCourse = `${P}both-course`;
+  const bothStu = `${P}both-stu`;
+  const ghostCourse = `${P}ca5-no-such-course`;
+  const ghostStu = `${P}ca5-no-such-student`;
+  const SESSION = "2026-10-13";
+  // My own rows: one in the COLLEGE tenant, one in the BOTH tenant (both
+  // college-capable). Deterministic `zziso-ca5-…` ids, deleted at the end.
+  const mineRow = `${P}ca5-row-a`;
+  const bothRow = `${P}ca5-row-both`;
+  const rowDoc = (id, schoolId, branchId, courseId, studentId, programId, status) => ({
+    id, schoolId, branchId, courseId, studentId, programId, termNumber: 1,
+    sessionDate: `${SESSION}T00:00:00.000Z`, slot: 1, status, remark: "ZZ iso ca5",
+    markedById: null, registrationId: null, createdAt: new Date().toISOString(),
+  });
+  await db.collection("courseAttendances").doc(mineRow).set(
+    rowDoc(mineRow, C1, `${P}col-br-a`, colCourseA, colStuA, `${P}col-prog-a`, "PRESENT")
+  );
+  await db.collection("courseAttendances").doc(bothRow).set(
+    rowDoc(bothRow, BOTH, null, bothCourse, bothStu, `${P}both-prog`, "LATE")
+  );
+
+  const collegeCookie = await login("zz-iso-college-admin@test.local", CRED.collegeAdmin);
+  const bothCookie = await login("zz-iso-both-admin@test.local", CRED.bothAdmin);
+  const sCookie = await login("zz-iso-admin@test.local", CRED.admin);
+  const att = (courseId) =>
+    `/api/course-attendance?courseId=${encodeURIComponent(courseId)}&date=${SESSION}`;
+  const hist = (courseId, studentId) =>
+    `/api/course-attendance/history?courseId=${encodeURIComponent(courseId)}&studentId=${encodeURIComponent(studentId)}`;
+
+  // (1) C1's OWN register read works (the positive control): the course resolves
+  //     and its roster is exactly the course's APPROVED registrations — the
+  //     fixture's pair is PENDING, so [] — i.e. no student of any other tenant is
+  //     listed, and the summary counts nothing.
+  const ownReg = await getJSON(collegeCookie, att(colCourseA));
+  const ownRegRows = ownReg.body?.data?.rows;
+  check(
+    ownReg.status === 200 && ownReg.body?.data?.course?.code === "ZZCA-101" &&
+      Array.isArray(ownRegRows) && ownRegRows.length === 0 &&
+      ownReg.body?.data?.summary?.total === 0,
+    `a COLLEGE tenant reads its own course register (${ownReg.status}, rows=${Array.isArray(ownRegRows) ? ownRegRows.length : "n/a"})`
+  );
+  // (2) …and reads ITS OWN stored row back, with its status, through the history
+  //     read (which does not depend on the roster).
+  const ownHist = await getJSON(collegeCookie, hist(colCourseA, colStuA));
+  const ownServedIds = (ownHist.body?.data?.rows || []).map((r) => r.id);
+  const ownServedRow = (ownHist.body?.data?.rows || []).find((r) => r.id === mineRow);
+  check(
+    ownHist.status === 200 && ownServedIds.includes(mineRow) && ownServedRow?.status === "PRESENT",
+    `…and its own stored register row, served with its status (${ownHist.status}, ids=${JSON.stringify(ownServedIds)})`
+  );
+
+  // (3) Another tenant is refused C1's course on ALL THREE routes, and a foreign id
+  //     answers exactly as a ghost id does — no 403 that would confirm it exists.
+  const bGet = await getJSON(bothCookie, att(colCourseA));
+  const bGhost = await getJSON(bothCookie, att(ghostCourse));
+  const bPost = await postJSON(bothCookie, "/api/course-attendance", {
+    courseId: colCourseA, date: SESSION, rows: [{ studentId: colStuA, status: "ABSENT" }],
+  });
+  const bHist = await getJSON(bothCookie, hist(colCourseA, colStuA));
+  check(
+    bGet.status === 404 && bGet.body?.data === undefined &&
+      JSON.stringify(bGet.body) === JSON.stringify(bGhost.body),
+    `the BOTH tenant's register read of a C1 course is NOT FOUND, the same as a ghost (${bGet.status}/${bGhost.status})`
+  );
+  check(bPost.status === 404, `…and its session SAVE for that course is NOT FOUND (${bPost.status})`);
+  check(bHist.status === 404, `…and its history read for that course is NOT FOUND (${bHist.status})`);
+  // …and NOTHING was written: C1's row still says PRESENT and no row appeared.
+  const mineAfter = (await db.collection("courseAttendances").doc(mineRow).get()).data();
+  const c1Rows = (await db.collection("courseAttendances").where("schoolId", "==", C1).get()).docs.length;
+  check(
+    mineAfter?.status === "PRESENT" && c1Rows === 1,
+    `the refused cross-tenant save wrote NOTHING (C1 row status ${mineAfter?.status}, C1 rows ${c1Rows})`
+  );
+
+  // (4) …and the REVERSE direction: C1 cannot reach the BOTH tenant's course.
+  const cGet = await getJSON(collegeCookie, att(bothCourse));
+  const cPost = await postJSON(collegeCookie, "/api/course-attendance", {
+    courseId: bothCourse, date: SESSION, rows: [],
+  });
+  const cHist = await getJSON(collegeCookie, hist(bothCourse, bothStu));
+  check(
+    cGet.status === 404 && cPost.status === 404 && cHist.status === 404,
+    `C1 is NOT FOUND on the other tenant's course too, read/save/history alike (${cGet.status}/${cPost.status}/${cHist.status})`
+  );
+
+  // (5) A SCHOOL tenant meets the COLLEGE gate on every route: 403 with ZERO data.
+  const sGet = await getJSON(sCookie, att(colCourseA));
+  const sPost = await postJSON(sCookie, "/api/course-attendance", {
+    courseId: colCourseA, date: SESSION, rows: [],
+  });
+  const sHist = await getJSON(sCookie, hist(colCourseA, colStuA));
+  check(
+    sGet.status === 403 && sPost.status === 403 && sHist.status === 403 &&
+      sGet.body?.data === undefined && sHist.body?.data === undefined,
+    `a SCHOOL tenant is gated on all three routes — 403 with zero data (${sGet.status}/${sPost.status}/${sHist.status})`
+  );
+
+  // (6) The BOTH tenant's OWN register and history carry no row, id or name of C1's.
+  const bOwn = await getJSON(bothCookie, att(bothCourse));
+  const bOwnHist = await getJSON(bothCookie, hist(bothCourse, bothStu));
+  const bOwnIds = (bOwnHist.body?.data?.rows || []).map((r) => r.id);
+  const bPayload = JSON.stringify([bOwn.body, bOwnHist.body]);
+  check(
+    bOwn.status === 200 && bOwnHist.status === 200 && bOwnIds.includes(bothRow) &&
+      !bOwnIds.includes(mineRow) && !bPayload.includes(mineRow) && !bPayload.includes("ZZ Iso College"),
+    `the BOTH tenant sees only its OWN attendance row (${JSON.stringify(bOwnIds)})`
+  );
+
+  // (7) A ghost student under C1's own course is the same NOT FOUND, too.
+  const ghostHist = await getJSON(collegeCookie, hist(colCourseA, ghostStu));
+  check(ghostHist.status === 404, `a ghost student id is NOT FOUND on the history read too (${ghostHist.status})`);
+
+  for (const id of [mineRow, bothRow]) {
+    await db.collection("courseAttendances").doc(id).delete().catch(() => null);
+  }
+}
+
 console.log(failures === 0 ? "\n✅ ISOLATION CONFIRMED — no cross-school data in any of the 13 swept routes" : `\n❌ ${failures} isolation failure(s)`);
 process.exit(failures === 0 ? 0 : 1);

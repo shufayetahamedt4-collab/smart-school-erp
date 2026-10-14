@@ -2746,3 +2746,129 @@ per-course teacher read stays with the owner — see the recorded ruling above),
 ca-3 already upserts, no print page, no family-facing notification link (unchanged from ca-3), and no
 browser run of the screen. ca-5 (isolation + regression, baselines first) and ca-6 (the finished record)
 remain.
+
+## 31. Phase 8 ca-5 — isolation + regression + the browser proof (BUILT 2026-10-14)
+
+**Stage: ca-5 of D-CA-7's six attendance steps**, on `phase8/college-attendance` (base `9bcbfb1` = ca-4).
+ca-5 adds **no product code**: `src/` is untouched by its diff, which is two verifier extensions,
+`scripts/verify-tenant-isolation.mjs` and `scripts/verify-branch-isolation.mjs`, plus the
+`proof/8/` record and its browser script. What ca-5 delivers is exactly what D-CA-7's ca-5 line asked
+for: **"isolation + regression, baselines first, and the school's own attendance paths re-run to
+identical counts"** — and the one thing ca-4 (§30) left owed, a **real browser** run of the register
+screen. The proof is `proof/8/REPORT.md`; its counts are summarised here.
+
+**The status check came first, and it fixed a sentence, not a file.** The stage asked, before any
+edit, whether ca-4's page and view module use `PRESENT/ABSENT/LATE/LEAVE` **exactly** as ca-1 does,
+because ca-4's *first report* had said `EXCUSED`. Read, and the code was right: `src/` contains no
+`EXCUSED` at all. Ca-1's `COURSE_ATTENDANCE_STATUSES` is the four stored values plus the read-only
+`UNMARKED` placeholder, ca-4's view module takes its whole mark vocabulary from that module
+(`statusOptions`, `isStorableStatus`, `markTone`, `statusLabel`), and the register page carries no
+status literal of its own. Every one of the five `EXCUSED` occurrences in the tree is inside a
+**negative probe** — a value that must be refused (`verify-college-attendance-logic`'s status
+table, `verify-college-attendance-page`'s storable-value table, and one live `verify-course-attendance` 400).
+**Conclusion: no conflict, nothing to stop for; the wrong word was in the prose, and it is corrected
+here and in PROGRESS.md so it is never quoted again.**
+
+**Isolation, baselines first.** Both verifiers were run once **before** the change and once after,
+each after its own wipe + seed + fixture + app restart (`SUITE_PURE=0 SUITE_ONLY=… suite-all.mjs`):
+
+| Verifier | Check lines before | after | Δ | exit |
+|---|---|---|---|---|
+| `verify-tenant-isolation` | **106** (107 ✅: its closing line is itself a ✅) | **116** (117 ✅) | **+10** | 0 |
+| `verify-branch-isolation` | **72** | **79** | **+7** | 0 |
+
+No check was weakened, renumbered or removed; every new line is additive. The figures also reconcile
+with the recorded history exactly — COLLEGE-STATUS §3 records the tenant verifier at **106** and the
+branch one at **"73 PASS lines (72 checks + its summary)"**, and both reproduce before this change.
+
+**What the tenant section now proves (10 checks, `### course attendance — a COLLEGE tenant's rows and
+its three routes`).** All three ca-3 routes — the session roster read, the session save and the
+per-student history — across the three tenant shapes that can run a college: a COLLEGE tenant reads its
+own register and reads back its own stored row with its status; another tenant's course is **the same
+404 a ghost id gets** on the read, the save and the history (never a 403 that would confirm the row);
+the refused cross-tenant save writes nothing and the stored row is unchanged; the reverse direction is
+404 too; a SCHOOL tenant meets the COLLEGE gate with 403 and zero data on all three; and the second
+college-capable tenant's reads carry neither the first tenant's row id nor any of its names. A ghost
+student id under the first tenant's own course is 404 on the history read too.
+
+**What the branch section now proves (7 checks, `### college course attendance — branch admin
+confinement (ca-5)`).** On the college fixture's two branches: a BRANCH_ADMIN reads its own branch's
+course register (200) and another branch's is 404; its session save for another branch's course is 404
+and that branch's stored row is left unchanged; its history read serves its own branch's row and 404s
+(never serving the row) for another branch's; and the SCHOOL-scoped admin still reaches both branches —
+the confinement is scope, not a tenant-wide hiding of rows.
+
+**One limitation of those two sections, recorded rather than glossed.** They write their
+`courseAttendance` rows raw (`zziso-ca5-…`, deleted on the way out; the fixture's `schoolId` backstop
+sweeps the collection as well), because a save through the app needs an APPROVED registration and the
+fixture's own pair is deliberately PENDING — asserted by the registrations section above, whose rows
+may not be mutated. A raw write is only readable before the app has pulled that collection, which is
+true here and is why the row-visibility check is deterministic; in the suite the app is restarted per
+verifier, so the first pull is always fresh. **The roster grid's own row-visibility half is ca-3's live
+proof** (`verify-course-attendance`, 46 checks, which builds a real roster through the API); these
+sections prove the confinement of all three routes and the absence of any foreign row. **No fixture
+change was needed** — ca-2 already added `courseAttendances` to both the `zziso-` prefix sweep and the
+schoolId backstop.
+
+**The browser proof closes ca-4's stated gap.** ca-4's verifier says in its own header that it does
+not prove the page renders (no DOM, no React, no browser) and ca-4's record says no browser pass had
+been made. ca-5 drives the register screen in real Chrome via the repository's own dependency-free
+driver (`scripts/lib/headless.mjs`) and reports **22 / 22, exit 0**. It is `proof/8/browser-proof.mjs`
+(`seed` / `run` / `clean`), a PROOF registered in no suite — like the D-7-18 role probe — and its
+transcript is `proof/8/browser-proof.txt`. What it proves, in the browser rather than over HTTP alone:
+the page renders with the nav entry; the course picker lists the college's courses; the roster grid is
+exactly the course's APPROVED students; the four mark controls exist; the save reports what it wrote
+(including D-CA-3's family-notified count); the **store** holds exactly the two marks the screen sent,
+with the course, slot and session date; a **REGISTRAR** sees the same roster with **no save control,
+no mark controls** and the read-only note; a course with no APPROVED registrations shows the
+empty-roster message; the **ACCOUNTANT** is refused before any read and issues no register request (and
+the API refuses it 403 in both directions); and a **SCHOOL** tenant is told the screen is college-only,
+issues no register request, and is gated 403. Two rules are recorded with it: the two fixture students
+and their APPROVED registrations are written **before the app starts** (the pull memo would otherwise
+hide them), and `clean` removes the students, the registrations, the register rows **and the
+notification** the one ABSENT mark sent (D-CA-3).
+
+**A correction of the proof's own expectation, recorded because a reader will meet it again.** The
+refused-role check first asserted that the page shows **ca-0's** refusal sentence. It does not: ca-4's
+view module owns the screen's own sentence ("Your role may not read a course register.") while the API
+answers with ca-0's ("College attendance is available to the school administration and the
+registrar."). Both are now asserted, each where it belongs. **The proof's expectation was wrong, not
+the code; no product file was changed for it.**
+
+**Regression — the school's own attendance paths re-run.** ca-5 touches no `src/` file, and ca-0's
+and ca-1's verifiers still pin the school's `/api/attendance` route and `attendance` key as untouched
+text. The evidence is the **full suite run once from a clean state** (`node scripts/suite-all.mjs`):
+60 verifiers, **56 exit 0**, and every school-side suite reproduced its recorded count —
+`verify-class-sessions` **56**, `verify-grading` **38**, `verify-bulk-import` **117**,
+`verify-phase7-e2e` **160**, `qa-phase23` **36**, `verify-fees-totals` **24** (the unchanged 15 school
+checks), `verify-admission-intake` **52**. The three known reds are unchanged with today's numbers:
+`verify-read-cache` **0 pass / 1 fail**, `verify-routine-config` **30 pass / 2 fail / 1 skip** (the
+closed-gate calendar form), `qa-certificates` **40 passed / 1 failed**. Where a count differs from the
+last recorded figure (`onboarding-seed` +9, `onboarding-type` +6, `fee-reconciliation` +3,
+`bulk-import` −1), no `src/` file in this stage's diff can be its cause and none was investigated
+further; each is recorded in the report's §4 table with today's number.
+
+**One suite failure, run alone before it is called one.** `verify-sweep-routes` failed in the full run
+with **2 of its checks, both the same assertion `attendance rows well-formed`**, and **passed when
+re-run alone from a clean state** (45 checks, exit 0). Its cause is in the tree and predates ca-5: the
+checker's status list omits `LEAVE`, which is in the school's own `AttendanceStatus` type
+(`src/lib/db.ts:68`) and which `scripts/seed.mjs` writes with 5 % probability per student-day
+(`Math.random()`, not deterministic). When today's random seed put a `LEAVE` row in the class the
+sweep probes, the checker called a row the product itself defines as valid ill-formed. It is recorded
+here rather than fixed (ca-5 authorises no school-side edits) — the one-line correction, add `LEAVE` to
+that list so the checker agrees with the product's own type, is its own change.
+
+**Recorded counts after ca-5.** `verify-tenant-isolation` **116 checks** (106 + 10, new section),
+`verify-branch-isolation` **79** (72 + 7, new section), both exit 0 from a clean state and again inside
+the suite; the browser proof **22/22**, exit 0, on its own fixture rows; and every earlier attendance
+count reproduced unchanged — `verify-college-attendance-access` **17**, `-logic` **31**, `-page` **36**,
+`verify-course-attendance` **46** (the live API proof, re-run by the suite from a wiped state),
+`verify-course-teachers` **54**, `verify-nav-scope` **10** checks (snapshot byte-identical),
+`verify-college-permissions` **7 checks / 8 ✅**, `verify-college-routes` **25 route files / 53 gated
+handlers**, the two data proofs **11** / **8**. `npx tsc --noEmit` **0 errors** (no `src/` file
+changed).
+
+**What ca-5 is not.** No product code, no new route, no new nav entry, no teacher/guardian/student
+surface (v1 stays staff-only, D-CA-4/Q8), no change to the school's `/api/attendance`, and no patch to
+another phase's checker (the `verify-sweep-routes` vocabulary gap is recorded above, not fixed).
+ca-6 — the finished record for Phase 8 — remains.

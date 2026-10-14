@@ -144,6 +144,28 @@ before 7c's eight routes).
 
 **Added 2026-10-14 (Phase 8 ca-3)** — the register API's own numbers: `verify-course-attendance` **46 checks** (new: the offline tree pins plus the live HTTP proof from a wiped, reseeded, app-restarted state), `verify-course-teachers` **54** unchanged, `verify-college-attendance-access` **17** unchanged (its consumer pin now names the ca-3 wrapper), `verify-college-attendance-logic` **31** unchanged (its consumer pin now names the two route files and the wrapper), `verify-college-fees-data` **11** (check 8 re-scoped to a `laterSegments` list — `college-fees` + `course-attendance` — with every other check intact), `verify-college-results-data` **8** unchanged, `verify-college-routes` **25 route files / 53 gated handlers** (23/50 at ca-2), `verify-nav-scope` exit 0 (snapshot byte-identical — no nav entry), `verify-college-permissions` **8** unchanged, `tsc --noEmit` 0 errors. The record is `docs/COLLEGE-DECISIONS.md` §29.
 
+**Added 2026-10-14 (Phase 8 ca-5)** — isolation, regression and the browser proof (no `src/` file
+changed, so no count inside `src/` could move). The two isolation verifiers were extended **after
+clean-state baselines were recorded** and nothing inside them was weakened: `verify-tenant-isolation`
+**106 → 116 check lines** (+10, a `course attendance` section over the three ca-3 routes and the
+register rows — its own row read back with its status, a foreign course the SAME 404 as a ghost id on
+the read, the save and the history, a refused cross-tenant save that writes nothing, the reverse
+direction, a SCHOOL tenant 403 with zero data, and no foreign id or name in the other college-capable
+tenant's reads) and `verify-branch-isolation` **72 → 79** (+7 — a branch admin reaches its own branch's
+register and history, another branch's course/student is 404 with the other branch's row unchanged,
+and the SCHOOL-scoped admin still reaches both branches). Both exit 0 from a clean state and again
+inside the full-suite run: 60 verifiers, **56 exit 0**, the three known reds unchanged (`read-cache` 0/1,
+`routine-config` **30 pass / 2 fail / 1 skip**, `qa-certificates` 40/1), and `verify-sweep-routes`
+**passed when re-run alone from a clean state** (45 checks) after failing in the full run on its
+`attendance rows well-formed` line — a **pre-existing, seed-random vocabulary gap in that checker**
+(its status list omits `LEAVE`, which the school's own `AttendanceStatus` type at
+`src/lib/db.ts:68` contains and `seed.mjs` writes with 5 % probability), recorded rather than patched
+by this stage. The one thing ca-4 left owed is now closed: the register screen was driven in **real
+Chrome** (`proof/8/browser-proof.mjs` + `proof/8/browser-proof.txt`, **22/22, exit 0**) — the roster,
+the four marks, a save whose stored rows match what the screen sent, a `REGISTRAR` read-only with no
+save or mark control, the empty roster message, a refused role that issues no register request, and a
+SCHOOL tenant gated 403. The record is `docs/COLLEGE-DECISIONS.md` §31 and `proof/8/REPORT.md`.
+
 The 7c-follow-up full-suite run (the same 36-step list as the 7b run, with
 `verify-college-fees-api` last) reproduced **every** count in this section, the known reds included:
 `verify-read-cache` **0 pass / 1 fail**, `verify-routine-config` **32 pass / 3 fail** when its calendar-gated section 7 runs, **30 pass / 2 fail / 1 skip** when it does not (both forms are valid — see the note below), `qa-certificates`

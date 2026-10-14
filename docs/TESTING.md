@@ -325,6 +325,37 @@ more **unguarded, offline** verifier:
   register's HTTP half is `verify-course-attendance`). It is wired into `suite-all.mjs`'s pure list
   beside the ca-1 verifier.
 
+Phase 8 ca-5 (isolation + regression + the browser proof) extends two existing verifiers and adds one
+**unguarded, emulator-only proof script**:
+
+- `scripts/verify-tenant-isolation.mjs` and `scripts/verify-branch-isolation.mjs` — each gains a
+  `course attendance` section (ca-5 in docs/COLLEGE-DECISIONS.md §31), recorded **baseline first**:
+  `106 → 116 check lines` (+10) and `72 → 79` (+7). The section writes its own `zziso-ca5-…`
+  `courseAttendance` rows raw (deleted on the way out; the fixture's `schoolId` backstop already
+  sweeps the collection), because a save needs an APPROVED registration and the fixture's pair is
+  deliberately PENDING — so the row-visibility half it proves is the confinement of the three ca-3
+  routes (a foreign course/student the SAME 404 as a ghost, never a 403 oracle; a refused cross-tenant
+  save that writes nothing; a SCHOOL tenant 403 with zero data) and the absence of any foreign row in
+  the other tenant's reads, while the roster grid's own row-visibility half remains
+  `verify-course-attendance`'s live proof.
+
+- `proof/8/browser-proof.mjs` — the register screen driven once in a **real headless Chrome** via
+  `scripts/lib/headless.mjs` (no new dependency; registered in no suite — like the D-7-18 role probe).
+  It closes the gap ca-4's own verifier states in its header ("does NOT prove the page renders"):
+  **22/22, exit 0** — the roster grid lists exactly the course's APPROVED students, the four mark
+  controls work, the save's stored rows match what the screen sent (course, slot, session date), a
+  REGISTRAR sees the same roster with no save and no mark control, an unregistered course shows the
+  empty message, a refused role issues no register request, and a SCHOOL tenant is gated 403.
+  Usage — the fixture rows must exist **before the app starts**, because the app's in-process pull
+  memo would otherwise hide them:
+
+  ```bash
+  node scripts/isolation-fixture.mjs create # after the usual wipe + seed.mjs
+  node proof/8/browser-proof.mjs seed       # the two students + their APPROVED registrations
+  node scripts/dev-emulator.mjs           # the app
+  node proof/8/browser-proof.mjs run      # 22 checks
+  node proof/8/browser-proof.mjs clean    # students, registrations, rows and the one notification
+  ```
 - `scripts/suite-all.mjs` — the suite runner, now IN the repository. The earlier runs were driven by a
   wrapper in a temp directory, which is exactly why `BASE`/`BASE_URL` never reached
   `verify-exams-invalidation`, `qa-phase23` and `qa-certificates`: each dialled its own dead port instead
