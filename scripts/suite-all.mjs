@@ -95,6 +95,11 @@ const SERVER = [
   // charges present" a measurement), so it runs with the isolation group and
   // before verify-college-fees-api, which resets its own tenant LAST.
   "verify-mode-mixing",
+  // 8-pre — the course↔teacher link. It WRITES (one college teacher row per
+  // assertion, which is what makes "one row per pair" a measurement) and deletes
+  // everything it created, so it runs with the college group and before
+  // verify-college-fees-api, which resets its own tenant LAST.
+  "verify-course-teachers",
   "verify-college-enrollment",
   "verify-course-registrations",
   "verify-enroll-paths",

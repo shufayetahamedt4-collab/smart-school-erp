@@ -88,8 +88,12 @@ const PRE_6B = {
  * added ONE more — `collegeDiscount`, the D-7-13 award row — so it joins them.
  * `courseResult` itself and every other pre-existing entry stay INSIDE the hashed
  * projection: only these NAMES are dropped, so 6b's own coverage is unchanged.
+ *
+ * Phase 8-pre adds ONE more — `courseTeacher`, the course↔teacher link (D-CA-4) —
+ * so it joins them. That phase changed no pre-existing RELS body, which is what
+ * the `relKeys`/`accessors`/`cols` baselines below still prove.
  */
-const LATER_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "collegeFeeConfig", "collegeDiscount"];
+const LATER_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "collegeFeeConfig", "collegeDiscount", "courseTeacher"];
 
 /** Blank out comments and string literals, PRESERVING LENGTH, so a scan sees code only. */
 function maskCommentsAndStrings(text) {

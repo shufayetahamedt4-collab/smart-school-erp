@@ -208,6 +208,30 @@ the repository:
   property at a time — drop class (i), drop the tenant scope, allow GUARDIAN, make it write — shows the
   matching check FAIL, and restores the file byte-identical (sha256). **53 checks** (65 with `--mutations`).
 
+Phase 8-pre (the course↔teacher link, docs/COLLEGE-DECISIONS.md §25) adds one **guarded, HTTP**
+verifier:
+
+- `scripts/verify-course-teachers.mjs` — **guarded** (`requireEmulator()`), and it needs the app running
+  and the college fixture tenant (`node scripts/isolation-fixture.mjs create`). Its OFFLINE half is the
+  first in this repository to **import** a pure module rather than re-read it as text (`registerHooks`,
+  the `verify-college-gate.mjs` trick): `src/lib/course-teachers.ts` is exercised for real — the derived
+  id `ct_<courseId>_<teacherId>`, the strict `["TEACHER"]` assignee allow-list, the list normaliser —
+  and the tree is then pinned AS TEXT: `COLS.courseTeacher` with NO `idFor`/`idForCreate` entry, the new
+  `RELS.courseTeacher` key, the `prisma` accessor, **that no pre-existing RELS body was touched** (6b's
+  and 7b's additive proofs hash them), the route's guard order, the course DELETE's new block, the
+  `COLLEGE_MODEL_RE` / `LATER_MODELS` wiring, and that no non-college API file reaches the model. Its
+  LIVE half drives `GET`/`POST`/`DELETE /api/courses/[id]/teachers` against the fixture: assign (the
+  stored row carries the derived id, the course's branch and the actor), a re-assign that is a `200
+  already: true` no-op with the collection count unchanged, the list resolving the teacher's name, the
+  foreign-teacher / non-TEACHER-account / ghost-id / missing-id refusals (400, no row), the foreign-course
+  and ghost-course 404s, the role matrix (admin-level + REGISTRAR read, REGISTRAR 403 on both writes,
+  ACCOUNTANT/TEACHER/GUARDIAN/STUDENT 403 on both), a SCHOOL tenant 403 with no data, branch confinement
+  in both directions, unassign (and a 404 on repeating it), and the course DELETE blocked while a teacher
+  is assigned and succeeding after — every assertion bracketed by document counts, everything it created
+  deleted on the way out. **54 checks.** It is inserted in the suite's college group, BEFORE
+  `verify-college-fees-api` (which resets its own tenant LAST); its record is
+  [proof/8pre/REPORT.md](../proof/8pre/REPORT.md).
+
 - `scripts/suite-all.mjs` — the suite runner, now IN the repository. The earlier runs were driven by a
   wrapper in a temp directory, which is exactly why `BASE`/`BASE_URL` never reached
   `verify-exams-invalidation`, `qa-phase23` and `qa-certificates`: each dialled its own dead port instead

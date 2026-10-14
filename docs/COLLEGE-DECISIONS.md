@@ -2279,3 +2279,80 @@ proofs are in §24.7's **7c-follow-up** note.
   depend on the answer — **8a (the college dashboard) does.**
 - ~~Q1–Q8 are open~~ — **all eight were answered on 2026-10-11 (§24.9) and are decisions now.** What
   stays unproven is only the code they imply, which 7-pre/7-pre-2, 7a–7f and Phase 8 have to earn.
+
+---
+
+## 25. Phase 8-pre — the course↔teacher link (BUILT 2026-10-14)
+
+**The gap, re-verified before building.** At `6a7a31f` the college could not answer "who teaches this
+course?" at all: no `teacherId` existed anywhere under `src/app/api/courses`,
+`src/app/api/course-registrations` or `src/lib/college-*.ts`, and `programCourse` is `{schoolId,
+programId, courseId, termNumber, requirement}` and nothing more. §24.8 (D-CA-4) recorded the two
+consequences — v1 marking is staff-only, and BOTH teacher-facing surfaces are blocked on the same
+missing link — and the owner's answer (Q8, 2026-10-11) made the link `8-pre`, the FIRST step of Phase 8.
+It is built in this change, before the markable register rather than after it.
+
+- **D-8P-1 — the link is its OWN collection, `courseTeacher`, not a field on `programCourse`.** §24.8
+  allowed either shape; the row is chosen because the assignment belongs to the (course, teacher) PAIR,
+  not to a programme-term mapping: one course may sit in several programmes' term lists (that is what
+  `programCourse` is), while its teacher is a property of the course. A `programCourse.teacherId` would
+  have to be repeated per mapping and could disagree between them, and it would put a teacher field on a
+  row whose own additive data proof (3c/6b) reads it as a mapping.
+
+- **D-8P-2 — the identity is DERIVED: `ct_<courseId>_<teacherId>`.** The caller supplies the id
+  (`src/lib/course-teachers.ts`), so `COLS.courseTeacher` deliberately has NO `idFor`/`idForCreate`
+  entry — the same shape as `promotionRun`. The consequence is the invariant: assigning the same teacher
+  to the same course twice addresses the same row and is an idempotent no-op (the route answers `200` with
+  `already: true` and writes nothing), so no read on the link can ever see a duplicate pair. Both halves
+  are required and trimmed; an empty half THROWS rather than deriving an id shared by every caller.
+  Fields: `schoolId`, `branchId` (inherited from the COURSE, like a registration inherits its
+  programme's), `courseId`, `teacherId`, `teacherUserId` (so a display name needs no second read),
+  `assignedById`, `assignedAt`.
+
+- **D-8P-3 — the assignee must be a TEACHER account of the SAME tenant.** A `courseTeacher` row naming an
+  admin, a registrar or a guardian is a row no teacher-facing surface could ever resolve, so
+  `isAssignableTeacherRole` is a strict allow-list (`["TEACHER"]`) and the route refuses anything else
+  with one sentence (`COURSE_TEACHER_ASSIGNEE_REFUSAL`) and a counted 400. A missing or foreign teacher id
+  is the SAME 400 — never a 404 that would confirm another tenant's row exists.
+
+- **D-8P-4 — the API reuses the `courses` module; it is not a new access class.** 8-pre adds NO allow-list
+  module: `GET /api/courses/[id]/teachers` runs `can(role, "courses", "view")` and the writes run
+  `"full"`, exactly like the sibling course routes. That is what makes the staff-only ruling true by
+  construction: REGISTRAR reads (200) and is refused both writes (403); ACCOUNTANT, TEACHER, GUARDIAN and
+  STUDENT are 403 on both. Every handler runs the college guard order — session → target tenant →
+  `requireCollege` → `can` → id → `writeGuard` → course-in-tenant (404) → `canAccessBranch` — and the
+  calls are audited (`COURSE_TEACHER_ASSIGN` / `COURSE_TEACHER_UNASSIGN`).
+
+- **D-8P-5 — the boundary: no screen, no nav entry, no widened payload.** The admin picker belongs with
+  the course screens and the teacher-facing read is the register's own step (D-CA-7's ca-4), so
+  `scripts/nav-scope-snapshot.json` stays byte-identical and `/api/courses` keeps its shape. **v1
+  attendance marking is still staff-only**; the link makes a teacher-facing surface POSSIBLE, it does not
+  add one. `/api/courses/[id]`'s DELETE gains one guard: a course with a teacher assigned is refused
+  (400) until the assignment is removed, so no link row can be orphaned.
+
+- **D-8P-6 — the guards that must know about the model know about it, in the same change.** `prisma`
+  accessor + COLS + a NEW RELS key (`school`/`branch`/`course`/`teacher`, every fk a stored field); NO
+  pre-existing RELS body touched (6b's and 7b's additive proofs hash those bodies — adding a relation
+  inside `course` or `teacher` would break them, which is exactly what
+  `verify-course-teachers` now pins); `courseTeacher` added to `COLLEGE_MODEL_RE` in
+  `verify-college-routes.mjs` (a STRENGTHENING: `\b` keeps `course` from matching it, so without the
+  entry a school route could reach a college link unnoticed) and to `LATER_MODELS` in both additive data
+  proofs, so their recorded baselines still reproduce (COLS 79 entries, RELS 75 models, prisma 79
+  accessors, every pre-existing RELS body included).
+
+- **D-8P-7 — the proof is `scripts/verify-course-teachers.mjs` (54 checks), guarded and HTTP.** Offline:
+  the pure module is IMPORTED and exercised (the id, the assignee rule, the list normaliser) and the tree
+  is pinned as text (the store entry, the guard order, the DELETE block, the guard wiring, no non-college
+  API file reaching the model, no widened payload). Live, against the COLLEGE fixture: assign → the stored
+  row carries the derived id, the course's branch and the actor; re-assign → one row; the list resolves
+  the name; another tenant's teacher / a non-TEACHER account / a ghost id / a missing id → 400 with no
+  row; another tenant's course and a ghost course → the SAME 404; the REGISTRAR read-only; ACCOUNTANT,
+  TEACHER, GUARDIAN, STUDENT all 403; a SCHOOL tenant's admin 403 with no data; a BRANCH_ADMIN refused
+  another branch's course AND another branch's teacher while reaching its own; unassign → the row and
+  the collection are exactly where they started (bracketed document counts); the course DELETE blocked
+  while assigned and succeeding after. **Verified 2026-10-14 from a clean state** (wipe → setup → seed →
+  seed-kit-demo → isolation-fixture → app started after the wipe): exit 0, 54 checks, 37 s; the college
+  cluster re-run unchanged (`verify-mode-mixing` 33, `verify-college-enrollment` 40,
+  `verify-course-registrations` 50, `verify-college-permissions` 8, `verify-college-fees-api` 112).
+  The suite order gains it in the college group, before `verify-college-fees-api` (which resets its own
+  tenant LAST). The record is [proof/8pre/REPORT.md](../proof/8pre/REPORT.md).

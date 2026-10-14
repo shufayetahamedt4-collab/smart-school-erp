@@ -130,12 +130,16 @@ const NEW_MODELS = ["collegeFeeHead", "collegeFeeStructure", "collegeFee", "coll
 
 /**
  * The models registered by a phase AFTER 7b: 7c's `collegeDiscount` (the D-7-13
- * award row). It is dropped alongside 7b's own four before the pre-7b baseline
+ * award row) and Phase 8-pre's `courseTeacher` (the course↔teacher link,
+ * D-CA-4). They are dropped alongside 7b's own four before the pre-7b baseline
  * comparison — the same deliberate re-scope 7b applied to 6b's verifier — and
- * ONLY its name is dropped, so `courseResult` and every other pre-existing entry
- * remain inside the hashed projections.
+ * ONLY their names are dropped, so `courseResult` and every other pre-existing
+ * entry remain inside the hashed projections. 8-pre touched NO pre-existing RELS
+ * body, so the `relBodies` baseline below still has to reproduce exactly: it is
+ * the check that would catch a link added inside `course` or `teacher` instead
+ * of as its own key.
  */
-const LATER_MODELS = ["collegeDiscount"];
+const LATER_MODELS = ["collegeDiscount", "courseTeacher"];
 
 /** Any college fee model reached through the shim — check 6's needle. */
 const COLLEGE_REF_RE = /\bprisma\.college(?:Fee(?:Head|Structure|Config)?|Discount)\b/g;

@@ -42,7 +42,9 @@ Read this before the tables, or the phase names will mislead you.
   the finished record with the D-7-18 production-build role probe (7f). Its last three parts were written
   on `e5ee07d` and are now **committed and pushed** (`f542405`, `efb97c0`, `946e4e3`). **Phase 9a/9b/9c** (college dashboard / reports / import; renumbered
   from 8a/8b/8c on 2026-10-11, when attendance took Phase 8) and
-  Phase 8's attendance work (`8-pre` first) have **not started**. The per-programme scale override
+  Phase 8 has **STARTED**: its first step `8-pre` — the course↔teacher link (D-CA-4, owner's answer
+  Q8) — is **built, verified and recorded** (2026-10-14, below); the markable register (ca-0…ca-6) has
+  **not started**. The per-programme scale override
   (D-6-19) is parked **with the owner**.
 
 The numbered college phases in this document are the implementation phases (0, M, 1–5, 6-pre, 6), which
@@ -202,6 +204,12 @@ Build and types:
 **6** college API segments (`departments`, `programs`, `courses`, `course-registrations`,
 `college-promotion`, `course-results`) covering **30** gated handlers.
 
+**Updated 2026-10-14 (Phase 8-pre — the course↔teacher link):** **58** `verify-*.mjs` scripts (57 recorded
+at the Phase 7 close-out; 8-pre adds `verify-course-teachers`), still **7** college API segments — the
+link lives INSIDE the existing `courses` segment, because a link is not a new surface class and D-A's
+rule is about which directories are college-only — and that segment now covers **50** gated handlers
+across **23** college route files (was 47 across 22; `verify-college-routes` prints the new pair).
+
 **Updated 2026-10-11 (Phase 7c-follow-up):** 50 `verify-*.mjs` scripts, and **7** college API segments
 (`college-fees` added) covering **47** gated handlers across **22** college route files.
 
@@ -311,7 +319,7 @@ verifier runs. Steps graded from the code alone are marked where a live run is n
 |---|------|-------|------|---------------|----------------|
 | 1 | ~~**Phase 7 remainder**~~ — **DONE AND COMMITTED (built 2026-10-13, committed 2026-10-14)**: the fee **screens / print pages** (7d), the fee rows' isolation + Q3 regression proof (7e) and the finished record with the production-build role probe (7f). The logic (7a), the data layer (7b) and the API (7c) were already done | `COLLEGE-DECISIONS.md` §24.7; [proof/7e/REPORT.md](../proof/7e/REPORT.md), [proof/7f/REPORT.md](../proof/7f/REPORT.md) | — | — | No — **committed and pushed (`f542405`, `efb97c0`, `946e4e3`); nothing is left on this row** |
 | 2 | Phase **9a/9b/9c** (renumbered from 8a/8b/8c — attendance took Phase 8): college dashboard / reports / import — **comes after Phase 8** by decision (D-CA-6) | §10 | Large | College admin | Partly |
-| 3 | ~~Per-course college attendance model undecided~~ — **DECIDED 2026-10-11 (owner, Q1/Q8): it is Phase 8**, and its model is D-CA-1…D-CA-7 — a NEW `courseAttendance` collection keyed `ca_<courseId>_<dateKey>_<slot>_<studentId>`, never retrofitted onto the school's `attendance` key, with `8-pre` (the course↔teacher link) built first and v1 marking staff-only. **Not built** | `COLLEGE-DECISIONS.md` §24.6/§24.8, §10's dated correction | Medium | College teachers | **Yes**, for a college running attendance |
+| 3 | ~~Per-course college attendance model undecided~~ — **DECIDED 2026-10-11 (owner, Q1/Q8): it is Phase 8**, and its model is D-CA-1…D-CA-7 — a NEW `courseAttendance` collection keyed `ca_<courseId>_<dateKey>_<slot>_<studentId>`, never retrofitted onto the school's `attendance` key, with `8-pre` (the course↔teacher link) built first and v1 marking staff-only. **`8-pre` IS BUILT AND VERIFIED (2026-10-14)** — the `courseTeacher` row with its derived id, its API and `verify-course-teachers` (54 checks) — so a teacher-facing college surface is possible now; **the register itself (ca-0…ca-6) is NOT built** | `COLLEGE-DECISIONS.md` §24.6/§24.8/§25, §10's dated correction | Medium | College teachers | **Yes**, for a college running attendance |
 | 4 | ~~College fee heads / structures not modelled~~ — **DONE (7a/7b/7c)**: modelled, stored and served behind `/api/college-fees` | §24 | — | — | No |
 | 5 | Post-v1: per-programme scale override (D-6-19) | §23.6 | Small | Owner to confirm | No |
 | 6 | Post-v1: per-child guardian view, per-course teacher view | §23.6 | Small–medium | Owner to decide | No |
@@ -354,10 +362,12 @@ remaining product work on the fee line, and the dashboard/reports/import trio is
   tagged so the two modes can never be confused; and both halves of that claim are now measured, not
   assumed — `verify-mode-mixing` (33) + `verify-fees-totals` (24) prove a BOTH tenant's two modes never
   mix in a read, and the D-7-18 role probe proves the role matrix on a production build. What is missing
-  is the next phase's work: the dashboard/reports/import trio (9a/9b/9c) and per-course attendance (8).
+  is the next phase's work: the dashboard/reports/import trio (9a/9b/9c) and per-course attendance (8) —
+  whose first step, the `8-pre` course↔teacher link, now exists (2026-10-14, D-CA-4).
   What is missing *right now* is a commit.
-- **Testing is strong and offline-first.** **57** `verify-*.mjs` scripts (two of them new in this phase —
-  `verify-mode-mixing` for the Q3 proof and `verify-role-probe` for D-7-18), 7 college API segments
+- **Testing is strong and offline-first.** **57** `verify-*.mjs` scripts at the Phase 7 close-out (two of
+  them new in that phase — `verify-mode-mixing` for the Q3 proof and `verify-role-probe` for D-7-18) and
+  **58** after `8-pre` added `verify-course-teachers` (54 checks), 7 college API segments
   guarded, the emulator required by design — no script reaches a live database without
   `ALLOW_LIVE_FIRESTORE=1`. A handful of checks are known-failing and documented rather than fixed, and
   the fee phases' offline proofs pin their own invariants as text where they can (the ledger's readers,

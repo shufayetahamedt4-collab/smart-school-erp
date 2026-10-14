@@ -4,6 +4,7 @@ import { getSession, requireCollege, audit } from "@/lib/auth";
 import { can, canAccessBranch } from "@/lib/permissions";
 import { writeGuard } from "@/lib/subscription";
 import { isBlockingRegistration } from "@/lib/registration-status";
+import { COURSE_TEACHER_DELETE_BLOCK } from "@/lib/course-teachers";
 
 /**
  * College support (Phase 3b) — update/delete one course.
@@ -21,6 +22,10 @@ import { isBlockingRegistration } from "@/lib/registration-status";
  *   8. canAccessBranch(row.branchId) → 403
  *   9. DELETE only: blocked with 400 while the course is mapped to any program
  *      (a `programCourse` row) — Phase 3c.
+ *  10. DELETE only: blocked with 400 while a teacher is still assigned (a
+ *      `courseTeacher` row) — Phase 8-pre. The assignment is removed through
+ *      `DELETE /api/courses/[id]/teachers?teacherId=`, so deleting the course
+ *      underneath it cannot leave a link row pointing at nothing.
  */
 
 const COURSE_TYPES = ["THEORY", "PRACTICAL"] as const;
@@ -202,6 +207,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       { error: "Cannot delete a course that has student registrations." },
       { status: 400 }
     );
+  }
+
+  // Phase 8-pre — also blocked while a TEACHER is assigned to this course. A
+  // `courseTeacher` row means nothing without its course and nothing else would
+  // clean it up, so the assignment is removed first through the teachers route
+  // (the same shape as the two guards above).
+  const assigned = await prisma.courseTeacher.count({ where: { courseId: id } });
+  if (assigned > 0) {
+    return NextResponse.json({ error: COURSE_TEACHER_DELETE_BLOCK }, { status: 400 });
   }
 
   await prisma.course.delete({ where: { id } });

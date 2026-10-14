@@ -150,8 +150,14 @@ const AFTER_GATE_TOKENS = [
  * (the Q3 condition). The list is a STRENGTHENING — no allowlist, no relaxation:
  * `collegeFee` is listed shortest-last so a longer name is matched in its own
  * right and `\b` keeps the shorter one from matching a longer one.
+ *
+ * Phase 8-pre adds `courseTeacher` — the course↔teacher link (D-CA-4) — in the
+ * same change that registers the model in `db.ts`, so the link is covered by
+ * check 3 from the moment it exists. It has to be listed in its own right: `\b`
+ * keeps `course` from matching `courseTeacher`, so without this entry a school
+ * route, page or lib could reach a college's course↔teacher link unnoticed.
  */
-const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course|courseResult|collegeFeeHead|collegeFeeStructure|collegeFeeConfig|collegeFee|collegeDiscount)\b/;
+const COLLEGE_MODEL_RE = /\bprisma\.(department|program|programCourse|course|courseResult|courseTeacher|collegeFeeHead|collegeFeeStructure|collegeFeeConfig|collegeFee|collegeDiscount)\b/;
 
 let failures = 0;
 const ok = (msg) => console.log(`  ✅ ${msg}`);

@@ -166,6 +166,18 @@ const COLS: Record<string, string> = {
   // register any mapped course). Uniqueness of (studentId, courseId,
   // termNumber) among the non-REJECTED rows is enforced in-code by the route.
   courseRegistration: "courseRegistrations",
+  // ---- College support (Phase 8-pre) ----
+  // The course↔teacher link (docs/COLLEGE-DECISIONS.md §24.8, D-CA-4): ONE row
+  // per (course, teacher) pair, with a CALLER-SUPPLIED derived id
+  // (`ct_<courseId>_<teacherId>`, `src/lib/course-teachers.ts`) — exactly like
+  // `promotionRun`, and for the same reason: the id IS the uniqueness rule, so
+  // assigning the same teacher twice addresses the same row instead of writing a
+  // second one. There is therefore NO `idFor`/`idForCreate` entry: the route
+  // derives the id and passes it in, and `create`'s `rand()` fallback is never
+  // reached. It is a college-only row (its collection name is in the college
+  // model list), because it exists to answer "who teaches this course" for a
+  // college's teacher-facing surfaces — which had no link at all before 8-pre.
+  courseTeacher: "courseTeachers",
   // ---- College support (Phase 6b) ----
   // The college RESULT row: ONE attempt (1-based `attempt`) at ONE `course` in
   // ONE `termNumber` of the student's programme (docs/COLLEGE-DECISIONS.md
@@ -885,6 +897,22 @@ const RELS: Record<string, Record<string, Rel>> = {
     student: { to: "student", fk: "studentId", kind: "one" },
     course: { to: "course", fk: "courseId", kind: "one" },
     program: { to: "program", fk: "programId", kind: "one" },
+  },
+  // ---- College support (Phase 8-pre) ----
+  // The course↔teacher link's row. `branchId` is STORED (inherited from the
+  // COURSE, exactly as a course inherits its department's branch and a
+  // registration inherits its programme's) so `scopeWhere`/`canAccessBranch`
+  // filter the row directly — the store cannot join. `teacherUserId` repeats the
+  // teacher account's own user id so the row resolves a display name without a
+  // second read, and `assignedById` records the actor, never looked up.
+  // No pre-existing RELS body is touched by 8-pre: `course` and `teacher` keep
+  // byte-identical bodies (the additive data proofs hash them), and the link is
+  // reached through this model's own key.
+  courseTeacher: {
+    school: { to: "school", fk: "schoolId", kind: "one" },
+    branch: { to: "branch", fk: "branchId", kind: "one" },
+    course: { to: "course", fk: "courseId", kind: "one" },
+    teacher: { to: "teacher", fk: "teacherId", kind: "one" },
   },
   twoFactor: { user: { to: "user", fk: "userId", kind: "one" } },
   setting: {},
@@ -2537,6 +2565,13 @@ export const prisma = {
   // it — and `scripts/verify-college-routes.mjs` now forbids that name outside a
   // listed college segment.
   courseResult: model("courseResult"),
+  // ---- College support (Phase 8-pre) ----
+  // The course↔teacher link (D-CA-4), addressed through the shim like every
+  // other model. `scripts/verify-college-routes.mjs`'s `COLLEGE_MODEL_RE` now
+  // lists it too, so a NON-college route or lib that reached for
+  // `prisma.courseTeacher` fails the route guard instead of letting a school
+  // surface answer a college roster question.
+  courseTeacher: model("courseTeacher"),
   // ---- College support (Phase 6-pre 2) ----
   // The ladder's lease row, addressed through the shim like every other model
   // (read/update/delete). `$claim` is the one write that must be atomic.

@@ -461,3 +461,50 @@ untracked are fixed here, in `docs/COLLEGE-STATUS.md` and in `docs/ENVIRONMENTS-
 
 **One known-red class remains untouched:** the four known-failing browser checks, `verify-read-cache` (1)
 and `verify-routine-config` (2/3) are unchanged and are still red; nothing about them is claimed green.
+
+---
+
+## 🔗 Session — 2026-10-14 (Phase 8-pre: the course↔teacher link)
+
+**Code + verifier + records.** `8-pre` is the first step of Phase 8 by the owner's answer Q8
+(2026-10-11, docs/COLLEGE-DECISIONS.md §24.8/D-CA-4): the college could not answer "who teaches this
+course?" at all — no `teacherId` under `src/app/api/courses`, `src/app/api/course-registrations` or
+`src/lib/college-*.ts`. Both teacher-facing college surfaces were blocked on it.
+
+1. **The pure module** — `src/lib/course-teachers.ts`: the derived id
+   `ct_<courseId>_<teacherId>` (both halves required and trimmed; an empty half THROWS), the strict
+   assignee allow-list (`["TEACHER"]`), a list normaliser, and the two refusal sentences. No imports at
+   all, so an offline verifier, a route and (later) a teacher-facing component share one rule.
+2. **The store** — `COLS.courseTeacher` → `courseTeachers` (a CALLER-SUPPLIED derived id, so NO
+   `idFor`/`idForCreate` entry, like `promotionRun`), a NEW `RELS.courseTeacher` key
+   (`school`/`branch`/`course`/`teacher`, every fk a stored field) and the `prisma` accessor. **No
+   pre-existing RELS body was touched** — 6b's and 7b's additive proofs hash them, and they still
+   reproduce (COLS 79, RELS 75, prisma 79). `branchId` is inherited from the COURSE.
+3. **The API** — `GET`/`POST`/`DELETE /api/courses/[id]/teachers` in the college guard order (session →
+   target tenant → `requireCollege` → `can(courses, view|full)` → id → `writeGuard` → course-in-tenant
+   (404) → `canAccessBranch` → the teacher/role rule), audited, invalidating. Re-assigning is an
+   idempotent `200 already: true` that writes nothing; unassigning an unassigned teacher is a 404. No
+   new allow-list module: the link is a catalogue write, so it reuses `courses` — which is what makes the
+   staff-only ruling structural (REGISTRAR read-only; ACCOUNTANT/TEACHER/GUARDIAN/STUDENT 403).
+   `/api/courses/[id]`'s DELETE now refuses a course that still has a teacher (400), so no link row can
+   be orphaned.
+4. **The guarded lists** — `courseTeacher` joined `COLLEGE_MODEL_RE` (a strengthening) and both additive
+   data verifiers' `LATER_MODELS`. `verify-college-routes` now prints **23 route files, 50 gated
+   handlers** (was 22/47).
+5. **The proof** — `scripts/verify-course-teachers.mjs` (**54 checks**), guarded and HTTP, wired into
+   `suite-all.mjs` in the college group before `verify-college-fees-api` (which resets its tenant LAST).
+   Offline it IMPORTS the module and pins the tree; live it proves assign/idempotence/list, the
+   foreign-teacher + non-teacher + ghost refusals, the foreign-course 404, the role matrix, branch and
+   tenant confinement, unassign, and the course-delete block — with bracketed document counts and
+   teardown of everything it created.
+
+**Numbers (fresh state: wipe → setup → seed → seed-kit-demo → isolation-fixture → app restarted after
+it).** `verify-course-teachers` exit 0, **54 checks**, 37 s. Re-run unchanged beside it:
+`verify-mode-mixing` 33, `verify-college-enrollment` 40, `verify-course-registrations` 50,
+`verify-college-permissions` 8, `verify-college-fees-api` 112/112, `verify-college-routes` (23/50),
+the two data proofs (11 / 8 checks, their recorded baselines intact), `verify-nav-scope` (nav snapshot
+unchanged). `npm run typecheck` 0 errors.
+
+**The boundary, stated so it is not over-read:** 8-pre adds the LINK, not a screen and not a
+teacher-facing read. v1 attendance marking is still staff-only and the register (ca-0…ca-6) is the next
+step. The record is `proof/8pre/REPORT.md`.
